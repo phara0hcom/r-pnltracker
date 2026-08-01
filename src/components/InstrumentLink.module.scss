@@ -1,0 +1,50 @@
+@use '../styles/mixins' as m;
+
+.root {
+  display: block;
+  min-width: 0;
+}
+
+.symbol {
+  display: flex;
+  align-items: center;
+  font-weight: var(--weight-medium);
+}
+
+.name {
+  display: block;
+  max-width: 24ch;
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+
+  @include m.truncate;
+}
+
+.compact .symbol {
+  font-size: var(--text-sm);
+}
+
+/* The icon carries the "leaves the app" signal, so the symbol is not underlined
+   at rest — a whole column of underlined text reads as noise. */
+.link {
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+
+  @include m.focus-ring;
+
+  &:hover .symbol {
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
+
+  &:hover .icon {
+    opacity: 1;
+  }
+}
+
+.icon {
+  flex-shrink: 0;
+  margin-left: 0.3em;
+  opacity: 0.45;
+}

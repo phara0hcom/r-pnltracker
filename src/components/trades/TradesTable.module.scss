@@ -1,0 +1,402 @@
+@use '../../styles/mixins' as m;
+
+.wrap {
+  /* Wide table scrolls in its own container, never the page body. */
+  @include m.scroll-x;
+  @include m.card;
+}
+
+.table {
+  /* Fixed layout is what makes the colgroup widths authoritative — with `auto`,
+     content would stretch a column past whatever the user dragged it to. */
+  width: 100%;
+  font-size: var(--text-sm);
+  table-layout: fixed;
+
+  th,
+  td {
+    padding: var(--space-2) var(--space-3);
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
+    background-color: var(--color-surface-raised);
+  }
+
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  tbody tr:hover {
+    background-color: var(--color-surface-hover);
+  }
+}
+
+.numeric {
+  text-align: right !important;
+
+  @include m.tabular-nums;
+}
+
+.sortButton {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+
+  @include m.focus-ring-inset;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.sortActive {
+  color: var(--color-text);
+}
+
+.sortArrow {
+  width: 0.7em;
+  font-size: var(--text-xs);
+}
+
+.date {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.symbol {
+  display: block;
+  font-weight: var(--weight-medium);
+
+  @include m.truncate;
+}
+
+.name {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+
+  @include m.truncate;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px var(--space-2);
+  font-size: var(--text-xs);
+  border: 1px solid currentcolor;
+  border-radius: var(--radius-full);
+}
+
+/* Account colours match the rest of the app so the mapping is learned once. */
+.acct_SPECIFIC {
+  color: var(--color-specific);
+}
+
+.acct_NISA_GROWTH {
+  color: var(--color-nisa-growth);
+}
+
+.acct_NISA_TSUMITATE {
+  color: var(--color-nisa-tsumitate);
+}
+
+.acct_NISA_OLD {
+  color: var(--color-nisa-old);
+}
+
+.side {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.03em;
+}
+
+.sideBuy {
+  color: var(--color-accent);
+}
+
+.sideSell {
+  color: var(--color-warn);
+}
+
+.unit {
+  margin-left: 1px;
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.action {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.primary {
+  color: var(--color-bg);
+  background-color: var(--color-profit);
+  border-color: var(--color-profit);
+
+  &:hover {
+    color: var(--color-bg);
+    background-color: var(--color-profit);
+    filter: brightness(1.1);
+  }
+}
+
+.danger:hover {
+  color: var(--color-loss);
+  background-color: var(--color-loss-dim);
+  border-color: var(--color-loss);
+}
+
+.tag {
+  padding: 1px var(--space-1);
+  font-size: 0.6875rem;
+  color: var(--color-text-subtle);
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+}
+
+/* ── Edit mode ──────────────────────────────────────────────────────────── */
+
+.editing {
+  background-color: var(--color-accent-dim);
+
+  /* A left rule marks the row being edited without relying on colour alone. */
+  box-shadow: inset 3px 0 0 var(--color-accent);
+
+  td {
+    border-bottom-color: transparent;
+  }
+
+  &:hover {
+    background-color: var(--color-accent-dim);
+  }
+}
+
+.editingAux {
+  background-color: var(--color-accent-dim);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.auxRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  padding: 0 var(--space-1) var(--space-1);
+}
+
+.cellInput {
+  width: 8rem;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.focus-ring;
+}
+
+.num {
+  width: 7rem;
+  text-align: right;
+
+  @include m.tabular-nums;
+}
+
+.wide {
+  width: 12rem;
+}
+
+.inputError {
+  border-color: var(--color-loss);
+}
+
+.readonlyCell {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.recalcHint {
+  font-size: 0.6875rem;
+  font-style: italic;
+  color: var(--color-text-subtle);
+}
+
+.memoField {
+  display: flex;
+  flex: 1;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 16rem;
+}
+
+.memoLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.memoInput {
+  flex: 1;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.focus-ring;
+}
+
+.note {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.errorList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-loss);
+}
+
+/* ── Undo ───────────────────────────────────────────────────────────────── */
+
+.undoBar {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.undoButton {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+}
+
+/* ── Resizable headers ───────────────────────────────────────────────────── */
+
+.thInner {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  justify-content: inherit;
+  min-width: 0;
+}
+
+.numeric .thInner {
+  justify-content: flex-end;
+}
+
+.thLabel {
+  min-width: 0;
+
+  @include m.truncate;
+}
+
+/**
+ * Sits in the cell's right padding so it straddles the visual column edge.
+ * Widened hit area without a wide visible mark.
+ */
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 9px;
+  cursor: col-resize;
+  border-right: 1px solid transparent;
+  transition: border-color var(--duration-fast) var(--ease);
+
+  &:hover,
+  &:focus-visible {
+    border-right-color: var(--color-accent);
+    outline: none;
+  }
+
+  &:focus-visible {
+    border-right-width: 2px;
+  }
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+}
+
+.table th {
+  position: relative;
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: var(--space-2);
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.resetButton {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+}

@@ -1,0 +1,119 @@
+@use '../../styles/mixins' as m;
+
+.nav {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.navButton {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+}
+
+.monthLabel {
+  min-width: 6rem;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-align: center;
+
+  @include m.tabular-nums;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--space-2);
+}
+
+.weekday {
+  padding-bottom: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.blank {
+  aspect-ratio: 1;
+}
+
+.day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: var(--space-2);
+  overflow: hidden;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  aspect-ratio: 1;
+  transition: border-color var(--duration-fast) var(--ease);
+
+  @include m.focus-ring;
+
+  &:hover {
+    border-color: var(--color-border-strong);
+  }
+
+  @include m.mobile {
+    aspect-ratio: auto;
+    min-height: 64px;
+  }
+}
+
+/* A dashed accent border marks a journalled day without competing with the
+   P&L tint that fills the cell background. */
+.hasNote {
+  border-color: var(--color-accent);
+  border-style: dashed;
+}
+
+.dayNum {
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+
+  @include m.tabular-nums;
+}
+
+.mood {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: 1;
+}
+
+.dayPnl {
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.dayCount {
+  color: var(--color-text-subtle);
+}
+
+.legend {
+  margin-top: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}

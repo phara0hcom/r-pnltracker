@@ -1,0 +1,306 @@
+@use '../../styles/mixins' as m;
+
+.wrap {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.axis {
+  position: relative;
+  flex: 0 0 auto;
+  width: 3.5rem;
+  height: 240px;
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+  text-align: right;
+
+  @include m.tabular-nums;
+}
+
+.axisTick {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+}
+
+.axisZero {
+  position: absolute;
+  right: 0;
+  color: var(--color-text-muted);
+  transform: translateY(-50%);
+}
+
+.plot {
+  position: relative;
+  flex: 1;
+  height: 240px;
+  min-width: 0;
+}
+
+/* The zero line is the reference the whole chart is read against, so it stays
+   visible but recessive. */
+/* Recessive: present enough to read a value off, never competing with the marks. */
+.gridline {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 0;
+  border-top: 1px dashed var(--color-border);
+}
+
+/* The zero line is the reference the whole chart is read against, so it is
+   solid and stronger than the gridlines. */
+.baseline {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  border-top: 1px solid var(--color-border-strong);
+}
+
+.bars {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  gap: 16px; /* the 16px surface gap between adjacent marks */
+  align-items: stretch;
+  height: 100%;
+}
+
+.slot {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 3px;
+  padding: 0;
+  cursor: default;
+  background: none;
+  border: none;
+
+  /* Keyboard reachable, so it needs a visible ring. */
+  @include m.focus-ring;
+}
+
+.column {
+  display: flex;
+  align-items: flex-end;
+}
+
+.columnDown {
+  display: flex;
+  align-items: flex-start;
+}
+
+.bar {
+  width: 100%;
+  min-height: 2px;
+  transition: filter var(--duration-fast) var(--ease);
+}
+
+/* Rounded data-ends only — the baseline end stays square so the bar reads as
+   anchored to zero rather than floating. */
+.barUp {
+  background-color: var(--chart-profit);
+  border-radius: 4px 4px 0 0;
+}
+
+.barDown {
+  background-color: var(--chart-loss);
+  border-radius: 0 0 4px 4px;
+}
+
+.barHover {
+  filter: brightness(1.25);
+}
+
+.tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  transform: translateX(-50%);
+
+  @include m.tabular-nums;
+}
+
+.tooltipMeta {
+  color: var(--color-text-subtle);
+}
+
+.tick {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  padding-top: var(--space-1);
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+  transform: translateX(-50%);
+
+  @include m.tabular-nums;
+}
+
+.tickYear {
+  display: block;
+  color: var(--color-text-muted);
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+.empty {
+  padding: var(--space-6);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.tableToggle {
+  margin-top: var(--space-6);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+
+  summary {
+    cursor: pointer;
+
+    @include m.focus-ring;
+  }
+}
+
+.table {
+  width: 100%;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+
+  th,
+  td {
+    padding: var(--space-1) var(--space-2);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  td:nth-child(2),
+  td:nth-child(3) {
+    text-align: right;
+
+    @include m.tabular-nums;
+  }
+}
+
+/* ── Card + window navigation ─────────────────────────────────────────────── */
+
+.card {
+  padding: var(--space-4);
+
+  @include m.card;
+}
+
+.nav {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.navLabel {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.navButtons {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.navButton {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.35;
+
+    &:hover {
+      background-color: transparent;
+    }
+  }
+}
+
+/* ── Value row ───────────────────────────────────────────────────────────── */
+
+.valueRow {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+/* Matches the y-axis gutter so the cells line up with the bars below. */
+.valueSpacer {
+  flex: 0 0 auto;
+  width: 3.5rem;
+}
+
+.valueCells {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.valueCell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.6875rem;
+  text-align: center;
+  white-space: nowrap;
+
+  @include m.tabular-nums;
+}
+
+.valueAmount {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dimmer than the yen figure: the percentage is supporting context, and equal
+   weight would make the row read as two competing series. */
+.valuePct {
+  min-height: 0.85em;
+  overflow: hidden;
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+  text-overflow: ellipsis;
+}
+
+.valueMuted {
+  color: var(--color-text-subtle);
+}

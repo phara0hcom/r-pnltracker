@@ -1,0 +1,151 @@
+@use '../styles/mixins' as m;
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  min-height: 100dvh;
+
+  @include m.tablet {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding: var(--space-4) var(--space-3);
+  background-color: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+
+  @include m.tablet {
+    position: static;
+    height: auto;
+  }
+}
+
+.brand {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3) var(--space-5);
+}
+
+.brandMark {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-bg);
+  background-color: var(--color-profit);
+  border-radius: var(--radius-sm);
+}
+
+.brandText {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+.navList {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+
+  @include m.tablet {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+.navLink {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-base);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  border-radius: var(--radius-md);
+  transition: background-color var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+
+  @include m.focus-ring;
+
+  &:hover {
+    color: var(--color-text);
+    text-decoration: none;
+    background-color: var(--color-surface-hover);
+  }
+}
+
+.navLinkActive {
+  color: var(--color-text);
+  background-color: var(--color-surface-raised);
+
+  /* A left rule reads as "current" without relying on colour alone. */
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.navGlyph {
+  width: 1.1em;
+  font-size: var(--text-md);
+  line-height: 1;
+  text-align: center;
+  opacity: 0.75;
+}
+
+.footer {
+  padding-top: var(--space-4);
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.user {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.userName {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.truncate;
+}
+
+.userEmail {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+
+  @include m.truncate;
+}
+
+.signOut {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: left;
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.content {
+  min-width: 0; /* lets wide tables scroll instead of stretching the grid */
+  padding: var(--space-6);
+
+  @include m.mobile {
+    padding: var(--space-4);
+  }
+}

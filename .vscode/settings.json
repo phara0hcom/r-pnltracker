@@ -1,0 +1,16 @@
+{
+  // Current setting names — VS Code renamed these from `typescript.tsdk` and
+  // `typescript.enablePromptUseWorkspaceTsdk`.
+  "js/ts.tsdk.path": "node_modules/typescript/lib",
+  "js/ts.tsdk.promptToUseWorkspaceVersion": true,
+
+  // Type-aware ESLint rules need the same project service the CLI uses,
+  // otherwise the editor and terminal can disagree about what is an error.
+  "eslint.workingDirectories": [{ "mode": "auto" }],
+
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "[typescript]": { "editor.defaultFormatter": "dbaeumer.vscode-eslint" },
+  "[typescriptreact]": { "editor.defaultFormatter": "dbaeumer.vscode-eslint" }
+}

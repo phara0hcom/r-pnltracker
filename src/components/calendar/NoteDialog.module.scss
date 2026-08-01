@@ -1,0 +1,234 @@
+@use '../../styles/mixins' as m;
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgb(0 0 0 / 65%);
+  backdrop-filter: blur(2px);
+}
+
+.content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - var(--space-6)));
+  max-height: calc(100dvh - var(--space-6));
+  overflow: hidden;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  transform: translate(-50%, -50%);
+
+  @include m.focus-ring;
+}
+
+.head {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.title {
+  font-size: var(--text-lg);
+
+  @include m.tabular-nums;
+}
+
+.subtitle {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.close {
+  width: 28px;
+  height: 28px;
+  font-size: var(--text-lg);
+  line-height: 1;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+.fieldset {
+  padding: 0;
+  border: none;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.label {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.scoreLabel {
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.scores {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.score {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  transition: all var(--duration-fast) var(--ease);
+
+  &:hover {
+    color: var(--color-text);
+    border-color: var(--color-accent);
+  }
+
+  /* Radio is visually hidden, so the ring must render on the label. */
+  &:focus-within {
+    box-shadow: var(--focus-ring);
+  }
+}
+
+.scoreActive {
+  color: var(--color-bg);
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.input,
+.textarea {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.focus-ring;
+}
+
+.textarea {
+  font-family: inherit;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.footer {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.footerActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.button {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+}
+
+.primary {
+  color: var(--color-bg);
+  background-color: var(--color-profit);
+  border-color: var(--color-profit);
+
+  &:hover {
+    color: var(--color-bg);
+    background-color: var(--color-profit);
+    filter: brightness(1.1);
+  }
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+/* ── Trades in the day dialog ────────────────────────────────────────────── */
+
+.tradesSection {
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tradesHead {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.sectionTitle {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tradesHint {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.tradeList {
+  overflow: hidden;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}

@@ -1,0 +1,184 @@
+@use '../../styles/mixins' as m;
+
+.primary {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-bg);
+  background-color: var(--color-profit);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+
+  &:hover {
+    background-color: var(--color-profit);
+    filter: brightness(1.1);
+  }
+}
+
+.status {
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-md);
+
+  @include m.tabular-nums;
+}
+
+.checkBar {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.checks {
+  margin-bottom: var(--space-4);
+  overflow: hidden;
+
+  @include m.card;
+}
+
+.checkRow {
+  display: grid;
+  grid-template-columns: auto 7rem 8rem 1fr;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  border-bottom: 1px solid var(--color-border);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  @include m.mobile {
+    grid-template-columns: auto 1fr;
+    row-gap: var(--space-1);
+  }
+}
+
+/* State is carried by the label text as well as the dot — colour alone would
+   leave the status unreadable for anyone who cannot separate red from green. */
+.dot {
+  width: 8px;
+  height: 8px;
+  background-color: var(--color-text-subtle);
+  border-radius: 50%;
+}
+
+.dotOK {
+  background-color: var(--color-profit);
+}
+
+.dotNO_KEY,
+.dotRATE_LIMITED {
+  background-color: var(--color-warn);
+}
+
+.dotBAD_KEY,
+.dotUNREACHABLE {
+  background-color: var(--color-loss);
+}
+
+.checkName {
+  font-weight: var(--weight-medium);
+}
+
+.checkState {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.checkDetail {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.tag {
+  padding: 1px var(--space-2);
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+}
+
+.tagManual {
+  color: var(--color-accent);
+}
+
+.tagMissing {
+  font-size: 0.6875rem;
+  color: var(--color-warn);
+}
+
+.overrideCell {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.input {
+  width: 7rem;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  text-align: right;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.tabular-nums;
+  @include m.focus-ring;
+}
+
+.small {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+}
+
+.dim {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.note {
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+  border: 1px solid var(--color-warn);
+  border-radius: var(--radius-md);
+}
+
+.info {
+  padding: var(--space-4);
+
+  @include m.card;
+
+  dl {
+    display: grid;
+    grid-template-columns: 10rem 1fr;
+    gap: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
+  }
+
+  dt {
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
+  }
+
+  dd {
+    margin: 0;
+    color: var(--color-text);
+  }
+}
