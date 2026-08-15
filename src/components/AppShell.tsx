@@ -20,6 +20,7 @@ const NAV: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', glyph: '◎' },
   { to: '/trades', label: 'Trades', glyph: '≡' },
   { to: '/positions', label: 'Positions', glyph: '▤' },
+  { to: '/dividends', label: 'Dividends', glyph: '◇' },
   { to: '/calendar', label: 'Calendar', glyph: '▦' },
   { to: '/stats', label: 'Stats', glyph: '◈' },
   { to: '/nisa', label: 'NISA', glyph: '◱' },

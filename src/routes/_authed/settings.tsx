@@ -73,6 +73,12 @@ function Settings() {
         <p className={styles.status}>
           Tried {refresh.data.attempted} · updated {refresh.data.updated} · failed{' '}
           {refresh.data.failed}
+          {refresh.data.noSource > 0 ? (
+            <span title="Funds are named, not coded, in every Rakuten export, and no free source publishes 基準価額 by name. These are skipped rather than attempted — not a failure.">
+              {' · '}
+              {refresh.data.noSource} with no source
+            </span>
+          ) : null}
           {refresh.data.fxUpdated ? ' · USD/JPY updated' : ''}
         </p>
       ) : null}

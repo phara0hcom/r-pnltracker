@@ -10,9 +10,8 @@ import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import styles from './NewTradeDialog.module.scss'
 import { cx } from '~/lib/cx'
+import { todayLocal } from '~/lib/localDate'
 import { addTrade } from '~/server/trades'
-
-const today = () => new Date().toISOString().slice(0, 10)
 
 interface Form {
   symbol: string
@@ -30,13 +29,18 @@ interface Form {
   memo: string
 }
 
-const blank: Form = {
+/**
+ * A function, not a constant: the default trade date has to be read at the
+ * moment the form opens or resets. A module-level object freezes it at import
+ * time, so a tab left open overnight keeps pre-filling yesterday.
+ */
+const blank = (): Form => ({
   symbol: '',
   name: '',
   assetClass: 'JP_EQUITY',
   accountType: 'SPECIFIC',
   side: 'BUY',
-  tradeDate: today(),
+  tradeDate: todayLocal(),
   settleDate: '',
   quantity: '',
   unitPrice: '',
@@ -44,7 +48,7 @@ const blank: Form = {
   feeTax: '',
   fxRate: '',
   memo: '',
-}
+})
 
 export function NewTradeDialog({
   open,
@@ -57,6 +61,22 @@ export function NewTradeDialog({
 }) {
   const [form, setForm] = useState<Form>(blank)
   const [errors, setErrors] = useState<Record<string, string>>({})
+
+  // The dialog stays mounted while closed, so anything computed on the first
+  // render would live as long as the route. Re-blanking on open is what makes
+  // `todayLocal()` read the day the user is on rather than the day the page was
+  // loaded; it also drops errors left over from a previous attempt.
+  //
+  // Adjusted during render rather than in an effect — React's documented
+  // reset-on-prop-change pattern, and it avoids a frame of stale form.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) {
+      setForm(blank())
+      setErrors({})
+    }
+  }
 
   const create = useMutation({
     mutationFn: () =>
@@ -79,7 +99,7 @@ export function NewTradeDialog({
       }),
     onSuccess: (r) => {
       if (r.ok) {
-        setForm(blank)
+        setForm(blank())
         setErrors({})
         onCreated()
         onOpenChange(false)

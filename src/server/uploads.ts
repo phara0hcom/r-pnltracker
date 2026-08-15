@@ -8,6 +8,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { authed } from './middleware'
 import { commitImport, previewImport } from '~/db/import.service'
+import { orderFilesForImport } from '~/lib/import/plan'
 
 export interface UploadPayload {
   filename: string
@@ -26,6 +27,34 @@ export interface UploadPayload {
  */
 function decode(base64: string): Uint8Array {
   return Uint8Array.from(Buffer.from(base64, 'base64'))
+}
+
+/**
+ * Ceiling on a single decoded file, and on one request's worth of them.
+ *
+ * The upload screen already refuses anything larger, but that check runs in the
+ * browser and is therefore a convenience, not a limit — these handlers decode
+ * whatever arrives straight into memory. A real Rakuten export is a few hundred
+ * KB; anything near this is a mistake, and should come back as a message rather
+ * than as an out-of-memory crash.
+ */
+const MAX_FILE_BYTES = 5 * 1024 * 1024
+const MAX_FILES = 40
+
+/** Decode an upload payload, refusing anything implausible for a CSV export. */
+function decodeChecked(files: UploadPayload[]): { filename: string; bytes: Uint8Array }[] {
+  if (files.length > MAX_FILES) {
+    throw new Error(`Too many files at once (${String(files.length)}; limit is ${String(MAX_FILES)}).`)
+  }
+  return files.map((f) => {
+    const bytes = decode(f.base64)
+    if (bytes.byteLength > MAX_FILE_BYTES) {
+      throw new Error(
+        `${f.filename} is ${String(Math.round(bytes.byteLength / 1024))} KB, over the ${String(MAX_FILE_BYTES / 1024 / 1024)} MB limit — that is not a Rakuten export.`,
+      )
+    }
+    return { filename: f.filename, bytes }
+  })
 }
 
 export interface PreviewSummary {
@@ -51,8 +80,10 @@ export const previewFiles = createServerFn({ method: 'POST' })
         data.files.map((f) => `${f.filename} (${String(f.base64.length)} b64 chars)`).join(', '),
     )
     const out: PreviewSummary[] = []
-    for (const f of data.files) {
-      const p = await previewImport(context.userId, f.filename, decode(f.base64))
+    // Previewed in the order they will actually be committed, so the summary
+    // describes the run the user is about to approve.
+    for (const f of orderFilesForImport(decodeChecked(data.files))) {
+      const p = await previewImport(context.userId, f.filename, f.bytes)
       out.push({
         filename: p.filename,
         format: p.format,
@@ -84,9 +115,10 @@ export const commitFiles = createServerFn({ method: 'POST' })
     const out: CommitSummary[] = []
     // Sequential, not parallel: dividend attribution reads the trade history,
     // so a trade file must be committed before a statement that references it.
+    // `orderFilesForImport` guarantees that order rather than assuming it.
     console.warn(`[import] commit ${String(data.files.length)} file(s)`)
-    for (const f of data.files) {
-      const r = await commitImport(context.userId, f.filename, decode(f.base64))
+    for (const f of orderFilesForImport(decodeChecked(data.files))) {
+      const r = await commitImport(context.userId, f.filename, f.bytes)
       out.push({
         filename: f.filename,
         tradesInserted: r.tradesInserted,

@@ -4,6 +4,7 @@
  * These simulate what actually happens in use: exporting fresh CSVs from
  * Rakuten every few weeks, where each new export overlaps everything before it.
  */
+import { readFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { emptyParseResult, type ParseResult } from '../domain/types'
@@ -14,7 +15,7 @@ import {
   torizanFiles,
   tradeHistoryFiles,
 } from './loadFixtures'
-import { planImport } from './plan'
+import { orderFilesForImport, planImport } from './plan'
 import { parseTorizan } from './torizan'
 import { parseTradeHistory } from './tradeHistory'
 
@@ -137,6 +138,32 @@ describe('dividends', () => {
     const plan = planImport(last, new Set(), stored)
     // The June 2026 statement carries the ¥14,500 みずほ dividend.
     expect(plan.newDividends.length).toBeGreaterThan(0)
+  })
+})
+
+describe('commit ordering', () => {
+  /** Raw bytes, as an upload delivers them — the parser reads them undecoded. */
+  const load = (path: string) => ({ filename: basename(path), bytes: readFileSync(path) })
+
+  it('puts trade histories ahead of statements however they were dropped in', () => {
+    const statement = load(torizanFiles()[0]!)
+    const history = load(tradeHistoryFiles()[0]!)
+
+    // Worst case: the user drags the statement in first.
+    const ordered = orderFilesForImport([statement, history])
+    expect(ordered.map((f) => f.filename)).toEqual([history.filename, statement.filename])
+  })
+
+  it('leaves files of the same kind in the order they were given', () => {
+    const histories = tradeHistoryFiles().map(load)
+    expect(orderFilesForImport(histories).map((f) => f.filename)).toEqual(
+      histories.map((f) => f.filename),
+    )
+
+    const statements = torizanFiles().map(load)
+    expect(orderFilesForImport(statements).map((f) => f.filename)).toEqual(
+      statements.map((f) => f.filename),
+    )
   })
 })
 

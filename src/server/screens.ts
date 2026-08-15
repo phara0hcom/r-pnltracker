@@ -6,14 +6,21 @@
  * formatted for display, never recomputed.
  */
 import { createServerFn } from '@tanstack/react-start'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { authed } from './middleware'
 import { db } from '~/db'
-import { fromDividendRow } from '~/db/mappers'
+import { fromDividendRow, instrumentId } from '~/db/mappers'
 import { listNotes } from '~/db/notes.service'
-import { dividends as dividendsTable, instruments, priceCache } from '~/db/schema'
+import {
+  dividends as dividendsTable,
+  fxRates,
+  instruments,
+  priceCache,
+  priceOverrides,
+} from '~/db/schema'
 import { listTrades } from '~/db/trades.service'
 import { OPENING_SIDES, ZERO, type AssetClass, type TradeSide } from '~/lib/domain/types'
+import { todayLocal } from '~/lib/localDate'
 import {
   ANNUAL_GROWTH_LIMIT,
   ANNUAL_TSUMITATE_LIMIT,
@@ -22,6 +29,7 @@ import {
 } from '~/lib/nisa/quota'
 import { runEngine } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
+import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
 import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
 import { buildYearOverYear, type TaxYearBasis } from '~/lib/tax/report'
 
@@ -30,6 +38,28 @@ async function engineFor(userId: string) {
   const records = await listTrades(userId)
   const list = records.map((r) => r.trade)
   return { trades: list, engine: runEngine(list) }
+}
+
+/** This user's hand-entered prices, keyed by instrument id. */
+async function overridesFor(userId: string) {
+  const rows = await db
+    .select({ instrumentId: priceOverrides.instrumentId, price: priceOverrides.price })
+    .from(priceOverrides)
+    .where(eq(priceOverrides.userId, userId))
+  return new Map(rows.map((r) => [r.instrumentId, r.price]))
+}
+
+/**
+ * Last fetched USD/JPY, or null when none has ever been stored.
+ *
+ * Unscoped by user on purpose: an exchange rate is market data, not user data.
+ */
+async function usdJpyRate() {
+  const [row] = await db
+    .select({ rate: fxRates.rate })
+    .from(fxRates)
+    .where(and(eq(fxRates.base, 'USD'), eq(fxRates.quote, 'JPY')))
+  return row ? ZERO.add(row.rate) : null
 }
 
 /** Attributed dividends, read back from storage rather than re-derived. */
@@ -68,27 +98,35 @@ export const getPositions = createServerFn({ method: 'GET' })
   .handler(async ({ context }): Promise<PositionRow[]> => {
     const { engine } = await engineFor(context.userId)
 
-    const priced = await db
-      .select({ price: priceCache, instrument: instruments })
-      .from(priceCache)
-      .innerJoin(instruments, eq(priceCache.instrumentId, instruments.id))
+    const [priced, overrides, liveFx] = await Promise.all([
+      db
+        .select({ price: priceCache, instrument: instruments })
+        .from(priceCache)
+        .innerJoin(instruments, eq(priceCache.instrumentId, instruments.id)),
+      overridesFor(context.userId),
+      usdJpyRate(),
+    ])
     const priceBySymbol = new Map(priced.map((p) => [p.instrument.symbol, p.price]))
 
     return engine.positions
       .map((p) => {
         const avgCost = p.costBasisJpy.div(p.quantity)
         const cached = priceBySymbol.get(p.symbol)
+        const override = overrides.get(instrumentId(p.symbol)) ?? null
         // A manual override always wins over a fetched quote.
-        const raw = cached?.manualOverride ?? cached?.price ?? null
+        const raw = override ?? cached?.price ?? null
 
         let marketValueJpy: string | null = null
         let unrealizedJpy: string | null = null
         let unrealizedPct: number | null = null
 
         if (raw) {
-          // A USD quote is converted at the position's own entry rate only as a
-          // placeholder; the live FX rate replaces it once fetched.
-          const fx = p.assetClass === 'US_EQUITY' ? p.avgFxRate : ZERO.add(1)
+          // USD quotes convert at the live rate, so unrealized P&L includes the
+          // currency move — for a JPY-based holder that is a real part of the
+          // position's value, not a rounding detail. The entry rate is used only
+          // until a rate has ever been fetched; it makes the currency component
+          // read as zero, which is wrong but at least not invented.
+          const fx = p.assetClass === 'US_EQUITY' ? (liveFx ?? p.avgFxRate) : ZERO.add(1)
           const value = ZERO.add(raw).mul(p.quantity).mul(fx)
           marketValueJpy = value.toFixed(0)
           const gain = value.sub(p.costBasisJpy)
@@ -109,7 +147,7 @@ export const getPositions = createServerFn({ method: 'GET' })
           currency: p.assetClass === 'US_EQUITY' ? ('USD' as const) : ('JPY' as const),
           currentPrice: raw,
           priceAsOf: cached?.asOf.toISOString() ?? null,
-          priceSource: cached?.manualOverride ? 'MANUAL' : (cached?.source ?? null),
+          priceSource: override ? 'MANUAL' : (cached?.source ?? null),
           marketValueJpy,
           unrealizedJpy,
           unrealizedPct,
@@ -273,6 +311,203 @@ export const getTax = createServerFn({ method: 'GET' })
         isTaxable: d.isTaxable,
         confident: d.attributionConfident,
       })),
+    }
+  })
+
+// ── Dividends ───────────────────────────────────────────────────────────────
+
+export interface DividendRow {
+  payDate: string
+  symbol: string
+  name: string
+  assetClass: AssetClass
+  accountType: string
+  /** DIVIDEND = equity 配当金; DISTRIBUTION = fund 分配金. */
+  kind: string
+  grossAmount: string
+  incomeTax: string
+  localTax: string
+  netAmount: string
+  isTaxable: boolean
+  /**
+   * False when the paying account had to be inferred — the statement's cash
+   * ledger has no account column, so a payment arriving after the position
+   * closed cannot be tied back with certainty.
+   */
+  confident: boolean
+  /**
+   * The 再投資 trade this distribution was rolled into, when one matches.
+   * A fund distribution is income *and* a cost-basis-bearing buy; showing only
+   * the income half is what makes fund P&L look overstated.
+   */
+  reinvestedJpy: string | null
+  reinvestedUnits: string | null
+}
+
+export interface DividendScreenData {
+  rows: DividendRow[]
+  totals: {
+    gross: string
+    tax: string
+    net: string
+    /** Received into NISA — no withholding, and none is ever owed. */
+    taxFreeGross: string
+    taxableGross: string
+    count: number
+  }
+  byYear: { year: number; gross: string; tax: string; net: string; count: number }[]
+  bySymbol: {
+    symbol: string
+    name: string
+    assetClass: AssetClass
+    gross: string
+    net: string
+    count: number
+    lastPaid: string
+  }[]
+  /** True when any row's account was inferred rather than matched. */
+  hasInferred: boolean
+  /**
+   * US trading shape, for the "no US income recorded" note.
+   *
+   * Whether US dividends are actually missing or were simply never earned is not
+   * answerable from the exports, so the note reports holding periods and lets
+   * the reader judge — a position closed inside a month rarely crosses a
+   * quarterly record date.
+   */
+  usHoldings: {
+    tickerCount: number
+    longestHoldDays: number
+    /** Tickers whose longest continuous hold stayed under a month. */
+    shortHoldCount: number
+    /** Tickers held long enough to plausibly span a quarterly record date. */
+    quarterSpanning: { symbol: string; days: number }[]
+  }
+}
+
+export const getDividends = createServerFn({ method: 'GET' })
+  .middleware([authed])
+  .handler(async ({ context }): Promise<DividendScreenData> => {
+    const [rows, { trades: allTrades }] = await Promise.all([
+      db
+        .select({ d: dividendsTable, instrument: instruments })
+        .from(dividendsTable)
+        .leftJoin(instruments, eq(dividendsTable.instrumentId, instruments.id))
+        .where(eq(dividendsTable.userId, context.userId)),
+      engineFor(context.userId),
+    ])
+
+    // Rakuten books the 再投資 a few days before the payment date and does not
+    // always file it under the account the payment was attributed to, so the
+    // match is on instrument + exact amount within a short window rather than
+    // on an id — there is no id linking the two in any export.
+    const reinvestments = allTrades.filter((t) => t.side === 'REINVEST')
+    const findReinvestment = (symbol: string, payDate: string, net: string) =>
+      reinvestments.find(
+        (t) =>
+          t.symbol === symbol &&
+          t.netAmountJpy.toFixed(0) === net &&
+          Math.abs(Date.parse(t.tradeDate) - Date.parse(payDate)) <= 7 * 86_400_000,
+      ) ?? null
+
+    const out: DividendRow[] = rows.map(({ d, instrument }) => {
+      const net = ZERO.add(d.netAmount).toFixed(0)
+      const symbol = instrument?.symbol ?? ''
+      const reinvested = d.kind === 'DISTRIBUTION' ? findReinvestment(symbol, d.payDate, net) : null
+
+      return {
+        payDate: d.payDate,
+        symbol,
+        name: instrument?.name ?? symbol,
+        assetClass: instrument?.assetClass ?? 'JP_EQUITY',
+        accountType: d.accountType,
+        kind: d.kind,
+        grossAmount: ZERO.add(d.grossAmount).toFixed(0),
+        incomeTax: ZERO.add(d.incomeTax).toFixed(0),
+        localTax: ZERO.add(d.localTax).toFixed(0),
+        netAmount: net,
+        isTaxable: d.isTaxable,
+        confident: d.attributionConfident,
+        reinvestedJpy: reinvested ? reinvested.netAmountJpy.toFixed(0) : null,
+        reinvestedUnits: reinvested ? reinvested.quantity.toFixed() : null,
+      }
+    })
+
+    out.sort((a, b) => (a.payDate === b.payDate ? 0 : a.payDate < b.payDate ? 1 : -1))
+
+    const sum = (pick: (r: DividendRow) => string) =>
+      out.reduce((acc, r) => acc.add(pick(r)), ZERO)
+
+    const byYear = new Map<number, DividendRow[]>()
+    for (const r of out) {
+      const y = Number(r.payDate.slice(0, 4))
+      byYear.set(y, [...(byYear.get(y) ?? []), r])
+    }
+
+    const bySym = new Map<string, DividendRow[]>()
+    for (const r of out) {
+      bySym.set(r.symbol, [...(bySym.get(r.symbol) ?? []), r])
+    }
+
+    return {
+      rows: out,
+      totals: {
+        gross: sum((r) => r.grossAmount).toFixed(0),
+        tax: sum((r) => r.incomeTax).add(sum((r) => r.localTax)).toFixed(0),
+        net: sum((r) => r.netAmount).toFixed(0),
+        taxFreeGross: out
+          .filter((r) => !r.isTaxable)
+          .reduce((a, r) => a.add(r.grossAmount), ZERO)
+          .toFixed(0),
+        taxableGross: out
+          .filter((r) => r.isTaxable)
+          .reduce((a, r) => a.add(r.grossAmount), ZERO)
+          .toFixed(0),
+        count: out.length,
+      },
+      byYear: [...byYear.entries()]
+        .sort((a, b) => b[0] - a[0])
+        .map(([year, list]) => ({
+          year,
+          gross: list.reduce((a, r) => a.add(r.grossAmount), ZERO).toFixed(0),
+          tax: list.reduce((a, r) => a.add(r.incomeTax).add(r.localTax), ZERO).toFixed(0),
+          net: list.reduce((a, r) => a.add(r.netAmount), ZERO).toFixed(0),
+          count: list.length,
+        })),
+      bySymbol: [...bySym.values()]
+        .map((list) => {
+          const first = list[0]!
+          return {
+            symbol: first.symbol,
+            name: first.name,
+            assetClass: first.assetClass,
+            gross: list.reduce((a, r) => a.add(r.grossAmount), ZERO).toFixed(0),
+            net: list.reduce((a, r) => a.add(r.netAmount), ZERO).toFixed(0),
+            count: list.length,
+            // Rows are already newest-first, so the first is the latest payment.
+            lastPaid: first.payDate,
+          }
+        })
+        .sort((a, b) => Number(b.gross) - Number(a.gross)),
+      hasInferred: out.some((r) => !r.confident),
+      usHoldings: (() => {
+        const longest = longestHoldBySymbol(
+          holdingWindows(
+            allTrades.filter((t) => t.assetClass === 'US_EQUITY'),
+            todayLocal(),
+          ),
+        )
+        const entries = [...longest.entries()]
+        return {
+          tickerCount: entries.length,
+          longestHoldDays: Math.max(0, ...entries.map(([, d]) => d)),
+          shortHoldCount: entries.filter(([, d]) => d < 31).length,
+          quarterSpanning: entries
+            .filter(([, d]) => d >= 90)
+            .map(([symbol, days]) => ({ symbol, days }))
+            .sort((a, b) => b.days - a.days),
+        }
+      })(),
     }
   })
 

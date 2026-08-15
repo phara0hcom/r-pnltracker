@@ -5,7 +5,6 @@
  * disappears from P&L, tax and NISA figures without being erased — which is
  * what keeps a later CSV import from resurrecting it.
  */
-import type Decimal from 'decimal.js'
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import type { NormalizedTrade } from '../lib/domain/types'
 import {
@@ -13,7 +12,7 @@ import {
   buildManualTrade,
   type ManualTradeParsed,
 } from '../lib/trades/manual'
-import { fromTradeRow, idFor, instrumentId, toInstrumentRow, toTradeRow } from './mappers'
+import { fromTradeRow, instrumentId, toInstrumentRow, toTradeRow } from './mappers'
 import { instruments, trades } from './schema'
 import { db } from './index'
 
@@ -50,15 +49,6 @@ export async function listTrades(userId: string): Promise<TradeRecord[]> {
   }))
 }
 
-/** Hashes already stored, including tombstones — the import dedupe set. */
-export async function storedTradeHashes(userId: string): Promise<Set<string>> {
-  const rows = await db
-    .select({ hash: trades.sourceRowHash })
-    .from(trades)
-    .where(eq(trades.userId, userId))
-  return new Set(rows.map((r) => r.hash))
-}
-
 /** Ensure the instrument exists before a trade references it. */
 async function upsertInstrument(trade: NormalizedTrade): Promise<void> {
   await db
@@ -66,8 +56,11 @@ async function upsertInstrument(trade: NormalizedTrade): Promise<void> {
     .values(toInstrumentRow(trade))
     .onConflictDoUpdate({
       target: instruments.symbol,
-      // Keep the most recent display name; the symbol is the stable identity.
-      set: { name: trade.name },
+      // Keep the most recent name, class and currency; the symbol is the stable
+      // identity. Class and currency are refreshed rather than left alone so a
+      // hand-entered trade can correct a row an import classified wrongly —
+      // every trade the engine sees reads its asset class back from here.
+      set: { name: trade.name, assetClass: trade.assetClass, currency: trade.currency },
     })
 }
 
@@ -234,45 +227,6 @@ export async function restoreTrade(userId: string, tradeId: string): Promise<voi
     .set({ deletedAt: null, updatedAt: new Date() })
     .where(and(eq(trades.userId, userId), eq(trades.id, tradeId)))
 }
-
-/**
- * Permanently remove a hand-entered trade.
- *
- * Only ever safe for `origin = 'MANUAL'`: there is no CSV that could recreate
- * it, so no tombstone is needed. Imported rows must use the soft delete.
- */
-export async function purgeManualTrade(userId: string, tradeId: string): Promise<void> {
-  await db
-    .delete(trades)
-    .where(
-      and(eq(trades.userId, userId), eq(trades.id, tradeId), eq(trades.origin, 'MANUAL')),
-    )
-}
-
-export async function listDeletedTrades(userId: string): Promise<TradeRecord[]> {
-  const rows = await db
-    .select({ trade: trades, instrument: instruments })
-    .from(trades)
-    .innerJoin(instruments, eq(trades.instrumentId, instruments.id))
-    .where(and(eq(trades.userId, userId), sql`${trades.deletedAt} is not null`))
-    .orderBy(asc(trades.tradeDate))
-
-  return rows.map((r) => ({
-    id: r.trade.id,
-    trade: fromTradeRow(r.trade, {
-      symbol: r.instrument.symbol,
-      name: r.instrument.name,
-      assetClass: r.instrument.assetClass,
-    }),
-    origin: r.trade.origin,
-    isEdited: r.trade.isEdited,
-    memo: r.trade.memo,
-    motivation: r.trade.motivation,
-  }))
-}
-
-export const tradeIdFor = (userId: string, hash: string): string => idFor('trade', userId, hash)
-export type { Decimal }
 
 /**
  * Per-trade journal: a memo and how motivated the trade felt.

@@ -157,6 +157,67 @@ describe('loss handling', () => {
   })
 })
 
+describe('carryforward expiry', () => {
+  /** One 特定 close, so a year's net can be stated directly. */
+  const close = (settleDate: string, amount: number) => ({
+    realizedJpy: new Decimal(amount),
+    accountType: 'SPECIFIC',
+    settleDate,
+  })
+
+  it('applies a loss to a gain inside the 3-year window', () => {
+    const events = [close('2022-03-01', -1_000_000), close('2025-03-01', 600_000)] as never
+    const yoy = buildYearOverYear(events, [], 'CALENDAR', true)
+
+    // 2025 is the third year after the loss, so the relief still stands.
+    const y2025 = yoy.years.find((y) => y.year === 2025)!
+    expect(y2025.netTaxable.toFixed()).toBe('-400000')
+    expect(y2025.estimatedCapitalGainsTax.toFixed()).toBe('0')
+  })
+
+  it('lets the loss lapse in the fourth year', () => {
+    const events = [close('2022-03-01', -1_000_000), close('2026-03-01', 600_000)] as never
+    const yoy = buildYearOverYear(events, [], 'CALENDAR', true)
+
+    // 2026 is one year too late: the 2022 loss has expired, so the gain is
+    // taxed in full rather than being sheltered indefinitely.
+    const y2026 = yoy.years.find((y) => y.year === 2026)!
+    expect(y2026.netTaxable.toFixed()).toBe('600000')
+    expect(y2026.estimatedCapitalGainsTax.toFixed()).toBe('121890') // 600,000 × 20.315%
+  })
+
+  it('expires by calendar year, not by years that happen to have trades', () => {
+    // Nothing at all happens between the loss and the gain; the allowance is
+    // still spent by the passage of time.
+    const events = [close('2021-06-01', -500_000), close('2026-06-01', 500_000)] as never
+    const yoy = buildYearOverYear(events, [], 'CALENDAR', true)
+    expect(yoy.years.find((y) => y.year === 2026)!.netTaxable.toFixed()).toBe('500000')
+  })
+
+  it('spends the oldest loss first, since it expires soonest', () => {
+    const events = [
+      close('2023-03-01', -300_000),
+      close('2024-03-01', -300_000),
+      close('2025-03-01', 300_000),
+      close('2027-03-01', 300_000),
+    ] as never
+    const yoy = buildYearOverYear(events, [], 'CALENDAR', true)
+
+    // 2025's gain is covered either way; the year that tells the two apart is
+    // 2027. Spending 2023 first leaves 2024's loss alive (2027 − 2024 = 3, just
+    // inside the window) and the gain is sheltered. Spending 2024 first would
+    // leave 2023's, which has lapsed by 2027 — and ¥60,945 would fall due.
+    expect(yoy.years.find((y) => y.year === 2025)!.estimatedCapitalGainsTax.toFixed()).toBe('0')
+    expect(yoy.years.find((y) => y.year === 2027)!.estimatedCapitalGainsTax.toFixed()).toBe('0')
+  })
+
+  it('leaves every year untouched when carryforward is not applied', () => {
+    const events = [close('2022-03-01', -1_000_000), close('2025-03-01', 600_000)] as never
+    const yoy = buildYearOverYear(events, [], 'CALENDAR')
+    expect(yoy.years.find((y) => y.year === 2025)!.netTaxable.toFixed()).toBe('600000')
+  })
+})
+
 describe('year-over-year', () => {
   const yoy = buildYearOverYear(engine.realized, dividends, 'CALENDAR')
 

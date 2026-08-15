@@ -14,6 +14,7 @@ import {
   emptyParseResult,
   FUND_UNIT_DIVISOR,
   ONE,
+  OPENING_SIDES,
   ZERO,
   type NormalizedTrade,
   type ParseResult,
@@ -298,8 +299,14 @@ export function parseFundTradeHistory(text: string, sourceFile: string): ParseRe
 
     // 受渡金額[円] is the cash actually moved; for 再投資 it equals the
     // distribution being rolled in, which is exactly the acquisition cost.
+    //
+    // The fallback keys off OPENING_SIDES, not `side === 'BUY'`: 再投資 also
+    // acquires units, so its fee is part of acquisition cost and adds. Testing
+    // BUY alone silently pushed REINVEST into the disposal branch.
     const reported = parseNum(c[12])
-    const netAmount = toYen(reported ?? (side === 'BUY' ? gross.add(fee) : gross.sub(fee)))
+    const netAmount = toYen(
+      reported ?? (OPENING_SIDES.includes(side) ? gross.add(fee) : gross.sub(fee)),
+    )
 
     result.trades.push({
       tradeDate,

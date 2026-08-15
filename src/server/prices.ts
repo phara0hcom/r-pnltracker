@@ -6,11 +6,13 @@
  * only when the stored quote is older than the TTL.
  */
 import { createServerFn } from '@tanstack/react-start'
-import { eq, inArray } from 'drizzle-orm'
+import Decimal from 'decimal.js'
+import { and, eq, inArray } from 'drizzle-orm'
+import { z } from 'zod'
 import { authed } from './middleware'
 import { db } from '~/db'
 import { instrumentId } from '~/db/mappers'
-import { fxRates as schemaFx, instruments, priceCache } from '~/db/schema'
+import { fxRates as schemaFx, instruments, priceCache, priceOverrides } from '~/db/schema'
 import { listTrades } from '~/db/trades.service'
 import type { AssetClass } from '~/lib/domain/types'
 import { runEngine } from '~/lib/pnl/engine'
@@ -20,6 +22,7 @@ import {
   checkJpScrape,
   fetchQuote,
   fetchUsdJpy,
+  hasQuotableTicker,
   type ProviderCheck,
 } from '~/lib/prices/providers'
 
@@ -27,11 +30,21 @@ import {
 const TTL_MS = 15 * 60_000
 
 export interface RefreshResult {
+  /** Positions a provider was actually asked about — excludes `noSource`. */
   attempted: number
   updated: number
+  /** A provider was asked and could not answer. Worth surfacing; may be transient. */
   failed: number
+  /**
+   * Positions with no quotable ticker, so no provider was contacted at all.
+   *
+   * Kept apart from `failed` because it is not an error: funds are named, not
+   * coded, in every Rakuten export and no free source publishes 基準価額 by name.
+   * Counting them as failures made a working refresh look broken.
+   */
+  noSource: number
   fxUpdated: boolean
-  /** Symbols with no usable source — these need a manual price. */
+  /** Symbols with no usable price — these need a manual entry in Settings. */
   needsManual: string[]
 }
 
@@ -41,23 +54,43 @@ export const refreshPrices = createServerFn({ method: 'POST' })
     const records = await listTrades(context.userId)
     const { positions } = runEngine(records.map((r) => r.trade))
 
-    const cached = await db.select().from(priceCache)
+    const [cached, overridden] = await Promise.all([
+      db.select().from(priceCache),
+      db
+        .select({ instrumentId: priceOverrides.instrumentId })
+        .from(priceOverrides)
+        .where(eq(priceOverrides.userId, context.userId)),
+    ])
     const byId = new Map(cached.map((c) => [c.instrumentId, c]))
+    const overriddenIds = new Set(overridden.map((o) => o.instrumentId))
     const now = Date.now()
 
     let updated = 0
     let failed = 0
+    let attempted = 0
+    let noSource = 0
     const needsManual: string[] = []
 
     for (const p of positions) {
       const id = instrumentId(p.symbol)
       const existing = byId.get(id)
 
-      // A manual override is authoritative; never overwrite it with a fetch.
-      if (existing?.manualOverride) continue
+      // A manual override is authoritative; never spend quota refreshing a
+      // price this user has already decided for themselves.
+      if (overriddenIds.has(id)) continue
+
+      // Nothing to ask: no provider quotes an instrument that has no ticker.
+      // Checked before the TTL so the count is stable regardless of cache age.
+      if (!hasQuotableTicker(p.symbol, p.assetClass)) {
+        noSource++
+        if (!existing) needsManual.push(p.symbol)
+        continue
+      }
+
       // Still fresh — skip to protect the quota.
       if (existing && now - existing.fetchedAt.getTime() < TTL_MS) continue
 
+      attempted++
       const quote = await fetchQuote({ symbol: p.symbol, assetClass: p.assetClass })
       if (!quote) {
         failed++
@@ -99,9 +132,10 @@ export const refreshPrices = createServerFn({ method: 'POST' })
     }
 
     return {
-      attempted: positions.length,
+      attempted,
       updated,
       failed,
+      noSource,
       fxUpdated: fx != null,
       needsManual,
     }
@@ -143,57 +177,94 @@ export const listPrices = createServerFn({ method: 'GET' })
     const ids = positions.map((p) => instrumentId(p.symbol))
     if (ids.length === 0) return []
 
-    const cached = await db.select().from(priceCache).where(inArray(priceCache.instrumentId, ids))
+    const [cached, overrides] = await Promise.all([
+      db.select().from(priceCache).where(inArray(priceCache.instrumentId, ids)),
+      db
+        .select()
+        .from(priceOverrides)
+        .where(
+          and(eq(priceOverrides.userId, context.userId), inArray(priceOverrides.instrumentId, ids)),
+        ),
+    ])
     const byId = new Map(cached.map((c) => [c.instrumentId, c]))
+    const overrideById = new Map(overrides.map((o) => [o.instrumentId, o]))
 
     return positions
       .map((p) => {
-        const c = byId.get(instrumentId(p.symbol))
+        const id = instrumentId(p.symbol)
+        const c = byId.get(id)
+        const o = overrideById.get(id)
         return {
           symbol: p.symbol,
           name: p.name,
           assetClass: p.assetClass,
-          price: c?.price ?? null,
-          currency: c?.currency ?? null,
-          source: c?.manualOverride ? 'MANUAL' : (c?.source ?? null),
-          asOf: c?.asOf.toISOString() ?? null,
-          manualOverride: c?.manualOverride ?? null,
-          // Funds have no free source; JP equities only a fragile one.
-          needsManual: p.assetClass !== 'US_EQUITY',
+          // An override wins, exactly as it does in `getPositions` — reading the
+          // cache alone showed "—" for every hand-priced fund, because a fund
+          // has no cache row at all. That is the one case the override exists
+          // for, so the screen denied having saved the value the user just typed.
+          price: o?.price ?? c?.price ?? null,
+          currency: o?.currency ?? c?.currency ?? null,
+          source: o ? 'MANUAL' : (c?.source ?? null),
+          asOf: (o?.setAt ?? c?.asOf)?.toISOString() ?? null,
+          manualOverride: o?.price ?? null,
+          // Only instruments no provider can quote at all — funds. JP equities
+          // scrape reliably, so flagging them here sent the user to type prices
+          // the app was already fetching.
+          needsManual: !hasQuotableTicker(p.symbol, p.assetClass),
         }
       })
       .sort((a, b) => a.symbol.localeCompare(b.symbol))
   })
 
+/**
+ * A price typed into Settings.
+ *
+ * Validated rather than passed straight through: this string lands in a
+ * `numeric` column, so anything non-numeric would surface as a database error
+ * and a 500 rather than a message the user can act on.
+ */
+const manualPriceSchema = z.object({
+  symbol: z.string().trim().min(1).max(128),
+  /** Null clears the override and hands the instrument back to the providers. */
+  price: z
+    .string()
+    .trim()
+    .refine((v) => {
+      try {
+        const d = new Decimal(v)
+        return d.isFinite() && d.gt(0)
+      } catch {
+        return false
+      }
+    }, 'must be a positive number')
+    .nullable(),
+})
+
 export const setManualPrice = createServerFn({ method: 'POST' })
   .middleware([authed])
-  .validator((data: { symbol: string; price: string | null }) => data)
-  .handler(async ({ data }) => {
+  .validator((data: unknown) => manualPriceSchema.parse(data))
+  .handler(async ({ data, context }) => {
     const id = instrumentId(data.symbol)
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, id))
     if (!inst) throw new Error(`unknown instrument ${data.symbol}`)
 
+    if (data.price === null) {
+      // Clearing removes the row entirely, so the provider chain takes over
+      // again and whatever the shared cache last held is served.
+      await db
+        .delete(priceOverrides)
+        .where(and(eq(priceOverrides.userId, context.userId), eq(priceOverrides.instrumentId, id)))
+      return { ok: true as const }
+    }
+
     const currency = inst.assetClass === 'US_EQUITY' ? ('USD' as const) : ('JPY' as const)
 
     await db
-      .insert(priceCache)
-      .values({
-        instrumentId: id,
-        price: data.price ?? '0',
-        currency,
-        asOf: new Date(),
-        source: 'MANUAL',
-        manualOverride: data.price,
-        manualOverrideAt: data.price ? new Date() : null,
-      })
+      .insert(priceOverrides)
+      .values({ userId: context.userId, instrumentId: id, price: data.price, currency })
       .onConflictDoUpdate({
-        target: priceCache.instrumentId,
-        set: {
-          manualOverride: data.price,
-          manualOverrideAt: data.price ? new Date() : null,
-          // Clearing an override falls back to whatever a provider last returned.
-          ...(data.price ? { price: data.price, asOf: new Date(), source: 'MANUAL' as const } : {}),
-        },
+        target: [priceOverrides.userId, priceOverrides.instrumentId],
+        set: { price: data.price, currency, setAt: new Date() },
       })
 
     return { ok: true as const }

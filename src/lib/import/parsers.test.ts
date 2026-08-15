@@ -252,6 +252,23 @@ describe('monthly statements', () => {
     }
   })
 
+  /**
+   * The statement is the row that creates an instrument when it is imported
+   * before the trade history, so the class it reports has to be the real one —
+   * defaulting everything to FUND used to mislabel equities permanently.
+   */
+  it('carries each holding’s real asset class, not a single default', () => {
+    const classes = new Set(result.snapshots.map((s) => s.assetClass))
+    expect(classes.size).toBeGreaterThan(1)
+    expect(classes.has('JP_EQUITY')).toBe(true)
+
+    // A 4-digit symbol is a JP listing and must never be recorded as a fund.
+    const misfiled = result.snapshots
+      .filter((s) => /^\d{4}$/.test(s.symbol) && s.assetClass !== 'JP_EQUITY')
+      .map((s) => `${s.symbol}: ${s.assetClass}`)
+    expect(misfiled).toEqual([])
+  })
+
   it('reads the cash ledger', () => {
     expect(result.cashMovements.length).toBeGreaterThan(50)
   })

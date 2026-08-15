@@ -13,8 +13,22 @@
  * always add up to the headline figure — there is never an unexplained
  * remainder to reconcile in the UI.
  *
- * Fees and yen rounding are reported separately as `costEffect`, so the three
- * parts reconstruct the net realized P&L rather than approximating it.
+ * `costEffect` carries whatever those two terms do not: it is a residual, not a
+ * fee tally. It reconciles the split to the engine's figure exactly, and the
+ * three parts always reconstruct net realized P&L.
+ *
+ * The identity on line 9 holds for a single acquisition. `P₀` and `R₀` are each
+ * quantity-weighted averages over the pool, and the weighted mean of a product
+ * is not the product of the weighted means, so a position built from lots at
+ * different price/rate combinations leaves `P₀R₀q ≠ costJpy`. That gap lands in
+ * `costEffect` alongside the fees. It nets to zero across a full round trip and
+ * never touches `totalJpy`, but it does mean the stock/currency split is an
+ * approximation whenever a position was accumulated at moving rates.
+ *
+ * Making it exact is possible — deriving the entry rate as `costJpy / (P₀ × q)`
+ * reproduces the real cost basis by construction — at the cost of an entry rate
+ * that no longer matches the `avgEntryFx` shown beside it. Left as-is
+ * deliberately; the two figures agreeing is worth more than the residual.
  */
 import type Decimal from 'decimal.js'
 import { ZERO, type AccountType } from '../domain/types'
@@ -34,7 +48,10 @@ export interface FxAttribution {
   stockEffectJpy: Decimal
   /** Attributable to USD/JPY moving. */
   fxEffectJpy: Decimal
-  /** Commissions, SEC fees and whole-yen rounding. */
+  /**
+   * Residual: commissions, SEC fees, whole-yen rounding, and the weighted-average
+   * cross-term described in the module header. Not a pure fee figure.
+   */
   costEffectJpy: Decimal
   /** stock + fx + cost — equals the engine's realized figure. */
   totalJpy: Decimal
@@ -66,8 +83,8 @@ export function attributeOne(e: RealizedEvent): FxAttribution {
   const stockEffectJpy = p1.sub(p0).mul(r1).mul(q)
   const fxEffectJpy = p0.mul(r1.sub(r0)).mul(q)
   const grossJpy = stockEffectJpy.add(fxEffectJpy)
-  // Whatever the engine's net figure does not attribute to price or currency is
-  // transaction cost plus rounding.
+  // Residual — mostly transaction cost and rounding, plus the averaging
+  // cross-term when the pool was built at more than one price/rate.
   const costEffectJpy = e.realizedJpy.sub(grossJpy)
 
   return {

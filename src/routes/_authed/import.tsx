@@ -17,7 +17,12 @@ export const Route = createFileRoute('/_authed/import')({
   component: Import,
 })
 
-/** Anything larger is not a Rakuten export and would bloat the request body. */
+/**
+ * Anything larger is not a Rakuten export and would bloat the request body.
+ *
+ * Kept in step with the same ceiling in `server/uploads.ts`, which is the one
+ * that actually enforces it — this check only saves the round trip.
+ */
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 
 /** Files are read as base64 so Shift-JIS bytes survive JSON transport unaltered. */

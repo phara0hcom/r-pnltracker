@@ -7,18 +7,21 @@ import { NoteDialog } from '~/components/calendar/NoteDialog'
 import { tone, yenSigned } from '~/components/format'
 import { PageHeader } from '~/components/Screen'
 import { cx } from '~/lib/cx'
+import { thisMonthLocal } from '~/lib/localDate'
 import { removeNote, saveNote } from '~/server/notes'
 import { getCalendar, type CalendarDay } from '~/server/screens'
-
-const thisMonth = () => new Date().toISOString().slice(0, 7)
 
 export const Route = createFileRoute('/_authed/calendar')({
   validateSearch: z.object({
     // YYYY-MM; anything malformed falls back to the current month.
+    //
+    // Passed as a thunk: `.catch(value)` would evaluate the month once, when
+    // this module is first imported, so a tab left open across a month boundary
+    // lands on the old month whenever the sidebar link omits the param.
     month: z
       .string()
       .regex(/^\d{4}-\d{2}$/)
-      .catch(thisMonth()),
+      .catch(() => thisMonthLocal()),
   }),
   component: Calendar,
 })
@@ -95,7 +98,7 @@ function Calendar() {
           <button
             type="button"
             className={styles.navButton}
-            onClick={() => { void navigate({ search: { month: thisMonth() } }) }}
+            onClick={() => { void navigate({ search: { month: thisMonthLocal() } }) }}
           >
             Today
           </button>

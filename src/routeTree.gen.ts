@@ -14,6 +14,7 @@ import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as SigninRouteImport } from './routes/signin'
 import { Route as AuthedCalendarRouteImport } from './routes/_authed/calendar'
 import { Route as AuthedDashboardRouteImport } from './routes/_authed/dashboard'
+import { Route as AuthedDividendsRouteImport } from './routes/_authed/dividends'
 import { Route as AuthedImportRouteImport } from './routes/_authed/import'
 import { Route as AuthedNisaRouteImport } from './routes/_authed/nisa'
 import { Route as AuthedPositionsRouteImport } from './routes/_authed/positions'
@@ -45,6 +46,11 @@ const AuthedCalendarRoute = AuthedCalendarRouteImport.update({
 const AuthedDashboardRoute = AuthedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedDividendsRoute = AuthedDividendsRouteImport.update({
+  id: '/dividends',
+  path: '/dividends',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedImportRoute = AuthedImportRouteImport.update({
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/signin': typeof SigninRoute
   '/calendar': typeof AuthedCalendarRoute
   '/dashboard': typeof AuthedDashboardRoute
+  '/dividends': typeof AuthedDividendsRoute
   '/import': typeof AuthedImportRoute
   '/nisa': typeof AuthedNisaRoute
   '/positions': typeof AuthedPositionsRoute
@@ -107,6 +114,7 @@ export interface FileRoutesByTo {
   '/signin': typeof SigninRoute
   '/calendar': typeof AuthedCalendarRoute
   '/dashboard': typeof AuthedDashboardRoute
+  '/dividends': typeof AuthedDividendsRoute
   '/import': typeof AuthedImportRoute
   '/nisa': typeof AuthedNisaRoute
   '/positions': typeof AuthedPositionsRoute
@@ -123,6 +131,7 @@ export interface FileRoutesById {
   '/signin': typeof SigninRoute
   '/_authed/calendar': typeof AuthedCalendarRoute
   '/_authed/dashboard': typeof AuthedDashboardRoute
+  '/_authed/dividends': typeof AuthedDividendsRoute
   '/_authed/import': typeof AuthedImportRoute
   '/_authed/nisa': typeof AuthedNisaRoute
   '/_authed/positions': typeof AuthedPositionsRoute
@@ -139,6 +148,7 @@ export interface FileRouteTypes {
     | '/signin'
     | '/calendar'
     | '/dashboard'
+    | '/dividends'
     | '/import'
     | '/nisa'
     | '/positions'
@@ -153,6 +163,7 @@ export interface FileRouteTypes {
     | '/signin'
     | '/calendar'
     | '/dashboard'
+    | '/dividends'
     | '/import'
     | '/nisa'
     | '/positions'
@@ -168,6 +179,7 @@ export interface FileRouteTypes {
     | '/signin'
     | '/_authed/calendar'
     | '/_authed/dashboard'
+    | '/_authed/dividends'
     | '/_authed/import'
     | '/_authed/nisa'
     | '/_authed/positions'
@@ -220,6 +232,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof AuthedDashboardRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/dividends': {
+      id: '/_authed/dividends'
+      path: '/dividends'
+      fullPath: '/dividends'
+      preLoaderRoute: typeof AuthedDividendsRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/import': {
@@ -284,6 +303,7 @@ declare module '@tanstack/react-router' {
 interface AuthedRouteChildren {
   AuthedCalendarRoute: typeof AuthedCalendarRoute
   AuthedDashboardRoute: typeof AuthedDashboardRoute
+  AuthedDividendsRoute: typeof AuthedDividendsRoute
   AuthedImportRoute: typeof AuthedImportRoute
   AuthedNisaRoute: typeof AuthedNisaRoute
   AuthedPositionsRoute: typeof AuthedPositionsRoute
@@ -296,6 +316,7 @@ interface AuthedRouteChildren {
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedCalendarRoute: AuthedCalendarRoute,
   AuthedDashboardRoute: AuthedDashboardRoute,
+  AuthedDividendsRoute: AuthedDividendsRoute,
   AuthedImportRoute: AuthedImportRoute,
   AuthedNisaRoute: AuthedNisaRoute,
   AuthedPositionsRoute: AuthedPositionsRoute,

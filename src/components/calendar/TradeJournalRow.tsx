@@ -8,7 +8,7 @@
  * Saving here never touches the trade's figures — it goes through a journal-only
  * server function, so a note can't accidentally mark a row as hand-corrected.
  */
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import styles from './TradeJournalRow.module.scss'
 import { ACCOUNT_LABEL, qty, tone, yen, yenSigned } from '~/components/format'
@@ -45,6 +45,8 @@ function CloseIcon() {
 }
 
 export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
+  const queryClient = useQueryClient()
+
   /** Last persisted values — what Cancel reverts to and what "dirty" compares against. */
   const [savedMemo, setSavedMemo] = useState(trade.memo ?? '')
   const [savedMotivation, setSavedMotivation] = useState<number | null>(trade.motivation)
@@ -67,6 +69,10 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
       setTimeout(() => {
         setJustSaved(false)
       }, 1600)
+      // Local state alone is not enough: the day dialog is re-rendered from the
+      // cached calendar query, which has a 5-minute staleTime. Reopening the day
+      // would remount this row with the pre-save memo and look like a lost edit.
+      void queryClient.invalidateQueries({ queryKey: ['calendar'] })
     },
   })
 
@@ -231,6 +237,10 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault()
+                  // The day dialog binds the same chord on its content element.
+                  // Without this the event bubbles on, saving a blank day-level
+                  // note and closing the dialog out from under this trade.
+                  e.stopPropagation()
                   commit()
                 }
               }}

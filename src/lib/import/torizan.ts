@@ -161,6 +161,7 @@ function parseHoldingRow(
     asOf,
     symbol,
     name: jtrim(name),
+    assetClass,
     accountType,
     quantity,
     valuationJpy: valuation,

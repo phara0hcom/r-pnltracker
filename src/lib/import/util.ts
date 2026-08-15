@@ -113,6 +113,13 @@ export function parseDate(s: string | undefined | null): string | null {
   const yy = Number(y)
   const mm = Number(mo)
   const dd = Number(d)
+  // TODO(nit): the day is range-checked without reference to the month, so
+  // 2026-02-30 and 2026-04-31 parse as valid and are returned well-formed. The
+  // row then fails at INSERT, where Postgres rejects the date — a 500 on the
+  // import instead of a row-level error the user can see and correct.
+  // Fix: round-trip the constructed date and reject if it moved, e.g.
+  //   const dt = new Date(Date.UTC(yy, mm - 1, dd))
+  //   if (dt.getUTCMonth() !== mm - 1 || dt.getUTCDate() !== dd) return null
   if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null
   return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
 }
@@ -133,6 +140,15 @@ export function parseAccountType(raw: string | undefined | null): AccountType | 
   if (t.includes('成長') || t === 'N成長') return 'NISA_GROWTH'
   if (t.includes('非課税')) return 'NISA_OLD' // legacy label in the balance report
   if (t.includes('特定')) return 'SPECIFIC'
+  // TODO(nit): 一般口座 is folded into 特定口座. Both are taxable, so every total
+  // stays right, but they differ in who files: 特定 (源泉徴収あり) is withheld at
+  // source by Rakuten, whereas 一般 is self-reported and nothing is withheld.
+  // The tax screen presents an estimate on the 特定 assumption, so a 一般 trade
+  // is shown as already-settled tax that in fact is still owed.
+  // Fix: add a `GENERAL` member to `AccountType`, treat it as taxable
+  // everywhere `SPECIFIC` is, and exclude it from the withheld-at-source figure
+  // in `lib/tax/report.ts`. Left folded for now because the current exports
+  // contain no 一般 rows.
   if (t.includes('一般')) return 'SPECIFIC'
   return null
 }
@@ -255,6 +271,13 @@ export function toHalfWidth(s: string): string {
       // Rakuten mixes several dash codepoints for the same character across
       // files — U+FF0D in the balance report vs U+2212 elsewhere — so instrument
       // names fail to join unless they are all folded to ASCII hyphen.
+      //
+      // TODO(nit): `ー` (U+30FC, katakana prolonged sound mark) is matched only
+      // to be mapped back to itself. It is a letter in fund names (ファンド),
+      // never a dash, so folding it would corrupt them — but including it in the
+      // class and then special-casing it reads as a bug every time.
+      // Fix: drop `ー` from the character class and delete the callback:
+      //   .replace(/[－−–—―]/g, '-')
       .replace(/[－−–—―ー]/g, (c) => (c === 'ー' ? 'ー' : '-'))
       .replace(/　/g, ' ')
       .replace(/\s+/g, ' ')

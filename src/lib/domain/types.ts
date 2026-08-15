@@ -113,6 +113,14 @@ export interface PositionSnapshot {
   asOf: string
   symbol: string
   name: string
+  /**
+   * Taken from the statement's own section header (国内株式 / 外国株式 / 投信).
+   *
+   * Carried rather than inferred at insert time: a statement imported before
+   * its trade history is otherwise the row that creates the instrument, and a
+   * guess there is permanent — nothing later corrects it.
+   */
+  assetClass: AssetClass
   accountType: AccountType
   quantity: Decimal
   valuationJpy: Decimal

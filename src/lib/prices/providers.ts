@@ -43,6 +43,27 @@ async function fetchJson(url: string): Promise<unknown> {
   }
 }
 
+/** As `fetchJson`, for sources that only publish HTML. */
+async function fetchText(url: string): Promise<string | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => {
+    controller.abort()
+  }, TIMEOUT_MS)
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      // A default fetch UA is refused by some JP sites outright.
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; pnltracker/1.0)' },
+    })
+    if (!res.ok) return null
+    return await res.text()
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /**
  * Finnhub `/quote`. US equities only on the free tier.
  *
@@ -74,19 +95,35 @@ async function finnhub(req: QuoteRequest): Promise<Quote | null> {
 }
 
 /**
- * Best-effort JP equity quote.
- *
- * Deliberately thin. Stooq now gates behind a JS proof-of-work challenge and
- * Yahoo's unofficial endpoint rate-limits cloud IPs, so this is expected to fail
- * often — which is exactly why the manual override in Settings exists and why
- * failure here is silent rather than loud.
+ * 東証 listing codes: four characters, historically all digits, but codes issued
+ * since 2024 may end in a letter (`130A`). Matches the venue rule in
+ * `lib/tradingview.ts` — both answer "is this a real listed ticker?".
  */
-async function scrapeJp(req: QuoteRequest): Promise<Quote | null> {
-  if (req.assetClass !== 'JP_EQUITY') return null
-  if (!/^\d{4}$/.test(req.symbol)) return null
+const TSE_CODE = /^\d{3}[\dA-Z]$/
 
+/**
+ * Whether an instrument has a ticker any provider could quote.
+ *
+ * Japanese mutual funds are identified in the exports by name only — there is no
+ * code in any Rakuten CSV — and no free source publishes 基準価額 by fund name.
+ * They are excluded here rather than attempted-and-failed, so a fund never
+ * spends a request and never counts as a provider failure.
+ */
+export function hasQuotableTicker(symbol: string, assetClass: QuoteRequest['assetClass']): boolean {
+  switch (assetClass) {
+    case 'JP_EQUITY':
+      return TSE_CODE.test(symbol)
+    case 'US_EQUITY':
+      return /^[A-Z]{1,5}([ .][A-Z])?$/.test(symbol)
+    case 'FUND':
+      return false
+  }
+}
+
+/** Yahoo's unofficial chart endpoint. Fast, but rate-limits an IP that leans on it. */
+async function yahooJp(symbol: string): Promise<Quote | null> {
   const data = await fetchJson(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${req.symbol}.T?interval=1d&range=1d`,
+    `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.T?interval=1d&range=1d`,
   )
   if (!data || typeof data !== 'object') return null
 
@@ -98,8 +135,48 @@ async function scrapeJp(req: QuoteRequest): Promise<Quote | null> {
   return { price: String(price), currency: 'JPY', asOf: new Date(), source: 'SCRAPE' }
 }
 
-/** Provider chain. Funds have no free source at all — they rely on manual entry. */
+/**
+ * kabutan.jp, read from the quote markup.
+ *
+ * HTML rather than JSON, so it breaks if they restyle the page — but it is the
+ * only free source that answered when Yahoo started refusing, and it agreed with
+ * Yahoo to the yen on every held symbol while both were up. Parsing is pinned to
+ * the `kabuka` class the price sits in, and anything unexpected returns null.
+ */
+async function kabutanJp(symbol: string): Promise<Quote | null> {
+  const html = await fetchText(`https://kabutan.jp/stock/?code=${symbol}`)
+  if (!html) return null
+
+  const match = /kabuka">([\d,]+(?:\.\d+)?)円/.exec(html)
+  const raw = match?.[1]?.replace(/,/g, '')
+  if (!raw) return null
+
+  const price = Number(raw)
+  if (!Number.isFinite(price) || price <= 0) return null
+
+  return { price: String(price), currency: 'JPY', asOf: new Date(), source: 'SCRAPE' }
+}
+
+/**
+ * Best-effort JP equity quote, first source that answers.
+ *
+ * Two sources rather than one because Yahoo rate-limits by IP and a deployed
+ * instance shares an address with every other tenant — a single blocked provider
+ * would otherwise leave every JP position unpriced at once.
+ */
+async function scrapeJp(req: QuoteRequest): Promise<Quote | null> {
+  if (req.assetClass !== 'JP_EQUITY' || !TSE_CODE.test(req.symbol)) return null
+  return (await yahooJp(req.symbol)) ?? (await kabutanJp(req.symbol))
+}
+
+/**
+ * Provider chain.
+ *
+ * Returns null without a request for anything that has no quotable ticker, so a
+ * fund is skipped rather than failed.
+ */
 export async function fetchQuote(req: QuoteRequest): Promise<Quote | null> {
+  if (!hasQuotableTicker(req.symbol, req.assetClass)) return null
   return (await finnhub(req)) ?? (await scrapeJp(req))
 }
 

@@ -12,6 +12,30 @@
  * given key or none, so the ordinals it assigns match those of the full export.
  */
 import type { NormalizedDividend, NormalizedTrade, ParseResult } from '../domain/types'
+import { detectFormat } from './tradeHistory'
+import { decodeShiftJis } from './util'
+
+/**
+ * Order a batch so trade histories commit before statements.
+ *
+ * Two things are resolved from the trade history and cannot be resolved without
+ * it: an instrument's asset class, and which account held the units a dividend
+ * was paid on. A 取引残高報告書 committed first therefore falls back to what its
+ * own section headers say, which is weaker — and for the asset class that answer
+ * used to stick permanently, because nothing later overwrote it.
+ *
+ * The upload screen stages files in whatever order the OS hands over the
+ * `FileList` — drag order, or alphabetical, neither of which is meaningful — so
+ * the ordering is enforced rather than left to how the user dropped them. The
+ * sort is stable, so files of the same kind keep their original order.
+ */
+export function orderFilesForImport<T extends { bytes: Uint8Array }>(files: T[]): T[] {
+  const isStatement = (f: T) => detectFormat(decodeShiftJis(f.bytes)) === 'TORIZAN'
+  return files
+    .map((f, i) => ({ f, i, rank: isStatement(f) ? 1 : 0 }))
+    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.i - b.i))
+    .map(({ f }) => f)
+}
 
 export interface ImportPlan {
   /** Rows not already stored — these would be inserted. */

@@ -13,17 +13,23 @@
  * files on your behalf.
  */
 import Decimal from 'decimal.js'
-import {
-  TAX_RATE_INCOME,
-  TAX_RATE_LOCAL,
-  TAX_RATE_TOTAL,
-  ZERO,
-  type AccountType,
-} from '../domain/types'
+// TAX_RATE_LOCAL is deliberately absent: the local portion is derived as the
+// remainder of the rounded total, never rated independently. See below.
+import { TAX_RATE_INCOME, TAX_RATE_TOTAL, ZERO, type AccountType } from '../domain/types'
 import type { RealizedEvent } from '../pnl/engine'
 import type { AttributedDividend } from './dividends'
 
 const ROUND = Decimal.ROUND_HALF_UP
+
+/**
+ * How long a 譲渡損失 may be carried.
+ *
+ * A loss arising in year Y offsets gains in Y+1 through Y+3 and then lapses —
+ * it is not an indefinite credit. Without the limit a single bad year keeps
+ * suppressing the estimate forever, which understates tax owed by a growing
+ * margin the further out you look.
+ */
+export const CARRYFORWARD_YEARS = 3
 
 /** Which 12-month window a year label covers. */
 export type TaxYearBasis = 'CALENDAR' | 'FISCAL_APR_MAR'
@@ -122,14 +128,20 @@ export function summarizeYear(
   const positiveNet = Decimal.max(ZERO, netTaxable)
   const estimatedCapitalGainsTax = positiveNet.mul(TAX_RATE_TOTAL).toDecimalPlaces(0, ROUND)
 
-  const incomeTaxPortion = positiveNet
-    .mul(TAX_RATE_INCOME)
-    .toDecimalPlaces(0, ROUND)
-    .add(divs.reduce((a, d) => a.add(d.incomeTax), ZERO))
-  const localTaxPortion = positiveNet
-    .mul(TAX_RATE_LOCAL)
-    .toDecimalPlaces(0, ROUND)
-    .add(divs.reduce((a, d) => a.add(d.localTax), ZERO))
+  // Only the income portion is rounded independently; the local portion is the
+  // remainder. Rounding both against the raw net would let them sum to ±1 yen
+  // away from `estimatedCapitalGainsTax`, which rounds the combined 20.315%
+  // once — and that figure is what drives `totalTax`, so the displayed total
+  // would not equal its own parts (38,352 → 7,791 total vs 7,792 split).
+  const capitalGainsIncomeTax = positiveNet.mul(TAX_RATE_INCOME).toDecimalPlaces(0, ROUND)
+  const capitalGainsLocalTax = estimatedCapitalGainsTax.sub(capitalGainsIncomeTax)
+
+  // Dividend withholding is already whole yen per payout, rounded by Rakuten
+  // itself, so it adds in without disturbing the identity above.
+  const incomeTaxPortion = capitalGainsIncomeTax.add(
+    divs.reduce((a, d) => a.add(d.incomeTax), ZERO),
+  )
+  const localTaxPortion = capitalGainsLocalTax.add(divs.reduce((a, d) => a.add(d.localTax), ZERO))
 
   const nisaGains = nisa.reduce((a, e) => a.add(e.realizedJpy), ZERO)
   const nisaDividends = divs.filter((d) => !d.isTaxable).reduce((a, d) => a.add(d.netAmount), ZERO)
@@ -167,7 +179,7 @@ export function summarizeYear(
  * Full year-over-year comparison.
  *
  * Carryforward is threaded between years so a losing year reduces the next
- * year's estimate — the 3-year 繰越控除 allowance. It is informational: under
+ * year's estimate — the 繰越控除 allowance. It is informational: under
  * 源泉徴収あり it applies only if a return is actually filed.
  */
 export function buildYearOverYear(
@@ -182,14 +194,38 @@ export function buildYearOverYear(
 
   const ordered = [...years].sort((a, b) => a - b)
   const summaries: TaxYearSummary[] = []
-  let carry = ZERO
+
+  /**
+   * Unused losses with the year each arose, oldest first.
+   *
+   * Tracked per originating year rather than as one running total, because a
+   * loss expires on its own schedule: a single figure cannot say how much of it
+   * is about to lapse. Expiry is by calendar year, so a gap with no trading
+   * still consumes the allowance.
+   */
+  let lots: { year: number; remaining: Decimal }[] = []
 
   for (const y of ordered) {
-    const s = summarizeYear(y, realized, dividends, basis, applyCarryforward ? carry : ZERO)
+    // Anything past its window simply lapses, whether or not it was ever used.
+    lots = lots.filter((l) => y - l.year <= CARRYFORWARD_YEARS)
+    const available = lots.reduce((a, l) => a.add(l.remaining), ZERO)
+
+    const s = summarizeYear(y, realized, dividends, basis, applyCarryforward ? available : ZERO)
     summaries.push(s)
+
     if (applyCarryforward) {
-      // A loss rolls forward; a profitable year consumes what it used.
-      carry = s.carryforwardLoss
+      // Oldest first — those expire soonest, so spending them first is what
+      // keeps the most relief alive.
+      let toAbsorb = Decimal.max(ZERO, s.taxableGains.sub(s.taxableLosses))
+      for (const l of lots) {
+        const used = Decimal.min(l.remaining, toAbsorb)
+        l.remaining = l.remaining.sub(used)
+        toAbsorb = toAbsorb.sub(used)
+      }
+      lots = lots.filter((l) => l.remaining.gt(0))
+
+      const ownLoss = Decimal.max(ZERO, s.taxableLosses.sub(s.taxableGains))
+      if (ownLoss.gt(0)) lots.push({ year: y, remaining: ownLoss })
     }
   }
 

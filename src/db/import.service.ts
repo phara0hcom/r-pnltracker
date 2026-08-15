@@ -10,7 +10,7 @@
  * database untouched rather than half-imported, which matters because a partial
  * trade history produces confidently wrong cost basis.
  */
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { emptyParseResult, type ParseResult } from '../lib/domain/types'
 import { describePlan, planImport, type ImportPlan } from '../lib/import/plan'
 import { parseTorizan } from '../lib/import/torizan'
@@ -154,35 +154,54 @@ export async function commitImport(
     })
 
     // Instruments first — trades, dividends and snapshots all reference them.
-    // Built from each source separately: trades carry full metadata, whereas a
-    // snapshot only knows a symbol, so they cannot share one mapping step.
-    const fromTrades = plan.newTrades.map((t) =>
-      toInstrumentRow({
-        symbol: t.symbol,
-        name: t.name,
-        assetClass: t.assetClass,
-        currency: t.currency,
-      }),
-    )
-    const fromSnapshots = parsed.snapshots.map((s) =>
-      toInstrumentRow({
-        symbol: s.symbol,
-        name: s.name,
-        // A snapshot row does not state the asset class; the trade history is
-        // authoritative and `onConflictDoNothing` keeps whatever is already there.
-        assetClass: 'FUND',
-        currency: 'JPY',
-      }),
-    )
+    //
+    // Both sources state an asset class, but they are not equally trustworthy:
+    // the trade history carries full metadata, while a statement only knows what
+    // its section header said. So snapshots insert weakly and the trade history
+    // overwrites, which also repairs any row an earlier statement-first import
+    // classified wrongly — that used to be permanent, because the class is read
+    // back from this table for every trade the engine sees.
+    const dedupe = <T extends { id: string }>(rows: T[]): T[] => {
+      const seen = new Set<string>()
+      return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
+    }
 
-    const seenInstruments = new Set<string>()
-    const uniqueInstruments = [...fromTrades, ...fromSnapshots].filter((r) => {
-      if (seenInstruments.has(r.id)) return false
-      seenInstruments.add(r.id)
-      return true
-    })
-    if (uniqueInstruments.length) {
-      await tx.insert(instruments).values(uniqueInstruments).onConflictDoNothing()
+    const fromSnapshots = dedupe(
+      parsed.snapshots.map((s) =>
+        toInstrumentRow({
+          symbol: s.symbol,
+          name: s.name,
+          assetClass: s.assetClass,
+          currency: s.assetClass === 'US_EQUITY' ? 'USD' : 'JPY',
+        }),
+      ),
+    )
+    if (fromSnapshots.length) {
+      await tx.insert(instruments).values(fromSnapshots).onConflictDoNothing()
+    }
+
+    const fromTrades = dedupe(
+      plan.newTrades.map((t) =>
+        toInstrumentRow({
+          symbol: t.symbol,
+          name: t.name,
+          assetClass: t.assetClass,
+          currency: t.currency,
+        }),
+      ),
+    )
+    if (fromTrades.length) {
+      await tx
+        .insert(instruments)
+        .values(fromTrades)
+        .onConflictDoUpdate({
+          target: instruments.symbol,
+          set: {
+            name: sql`excluded.name`,
+            assetClass: sql`excluded.asset_class`,
+            currency: sql`excluded.currency`,
+          },
+        })
     }
 
     if (plan.newTrades.length) {
@@ -273,32 +292,3 @@ export async function commitImport(
   })
 }
 
-/**
- * Undo an import batch.
- *
- * Hard-deletes only the rows that batch created, and only those still untouched
- * — an edited trade is left alone, because the edit is the user's work rather
- * than the importer's.
- */
-export async function revertImport(userId: string, batchId: string): Promise<number> {
-  const rows = await db
-    .select({ id: trades.id })
-    .from(trades)
-    .where(
-      and(
-        eq(trades.userId, userId),
-        eq(trades.importBatchId, batchId),
-        eq(trades.isEdited, false),
-        eq(trades.origin, 'IMPORT'),
-      ),
-    )
-
-  if (!rows.length) return 0
-  await db.delete(trades).where(
-    inArray(
-      trades.id,
-      rows.map((r) => r.id),
-    ),
-  )
-  return rows.length
-}

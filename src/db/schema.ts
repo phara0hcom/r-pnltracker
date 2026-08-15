@@ -321,11 +321,34 @@ export const priceCache = pgTable(
     asOf: timestamp('as_of').notNull(),
     source: priceSourceEnum('source').notNull(),
     fetchedAt: timestamp('fetched_at').notNull().defaultNow(),
-    /** Set when a user types a price in Settings; wins over any provider. */
-    manualOverride: money('manual_override'),
-    manualOverrideAt: timestamp('manual_override_at'),
   },
   (t) => [index('price_cache_fetched_idx').on(t.fetchedAt)],
+)
+
+/**
+ * Hand-entered prices, per user.
+ *
+ * Kept out of `price_cache` deliberately. A fetched quote is market data and is
+ * the same for everyone, so caching it once is right; an override is one user's
+ * judgement about an instrument no provider can price — funds, most JP tickers.
+ * Storing the two in one row would make one user's correction silently rewrite
+ * every other user's valuations, which is the one thing the `userId`-everywhere
+ * rule at the top of this file exists to prevent.
+ */
+export const priceOverrides = pgTable(
+  'price_overrides',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    instrumentId: text('instrument_id')
+      .notNull()
+      .references(() => instruments.id, { onDelete: 'cascade' }),
+    price: money('price').notNull(),
+    currency: currencyEnum('currency').notNull(),
+    setAt: timestamp('set_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.instrumentId] })],
 )
 
 export const fxRates = pgTable(
@@ -430,3 +453,4 @@ export type DbDividend = typeof dividends.$inferSelect
 export type DbNote = typeof notes.$inferSelect
 export type NewDbNote = typeof notes.$inferInsert
 export type DbPriceCache = typeof priceCache.$inferSelect
+export type DbPriceOverride = typeof priceOverrides.$inferSelect

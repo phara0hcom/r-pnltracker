@@ -26,6 +26,24 @@ declare global {
   var __pnlPool: Pool | undefined
 }
 
+/**
+ * True only for a database on this machine.
+ *
+ * Matched on the parsed hostname, never on the raw string: a substring test
+ * would also match a *password* or database name containing "localhost" and
+ * silently drop TLS against a production host. An unparseable URL is treated as
+ * remote, so the failure mode is a stricter connection rather than a plaintext
+ * one.
+ */
+function isLocalHost(url: string): boolean {
+  try {
+    const { hostname } = new URL(url)
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+  } catch {
+    return false
+  }
+}
+
 const pool =
   globalThis.__pnlPool ??
   new Pool({
@@ -37,10 +55,14 @@ const pool =
     // Neon presents a valid public certificate, so verify it. `pg` warns that
     // bare `sslmode=require` will stop implying verification in a future major,
     // so the trust decision is made here explicitly rather than via the URL.
-    ssl: connectionString.includes('localhost') ? false : { rejectUnauthorized: true },
+    ssl: isLocalHost(connectionString) ? false : { rejectUnauthorized: true },
   })
 
-if (process.env.NODE_ENV !== 'production') globalThis.__pnlPool = pool
+// Cached in every environment. Production is the case the cache is actually for
+// — a serverless instance that reuses a warm connection instead of opening one
+// per invocation — so guarding this on NODE_ENV would exclude the only place it
+// matters and leave it doing nothing but deduplicating HMR reloads.
+globalThis.__pnlPool = pool
 
 export const db = drizzle(pool, { schema })
 export { schema }

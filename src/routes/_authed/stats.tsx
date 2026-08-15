@@ -52,12 +52,12 @@ function Stats() {
 
       <Section
         title="US currency attribution"
-        description="Splits US realized P&L into share-price movement versus yen movement. The two components sum exactly to the total — there is no unexplained residual."
+        description="Splits US realized P&L into share-price movement versus yen movement. The three components sum exactly to the total; the third absorbs costs and the averaging residual on positions built at more than one rate."
       >
         <div className={styles.attribution}>
           <AttrBar label="Stock movement" value={d.fx.stockEffect} total={d.fx.total} />
           <AttrBar label="Yen movement" value={d.fx.fxEffect} total={d.fx.total} />
-          <AttrBar label="Fees + rounding" value={d.fx.costEffect} total={d.fx.total} />
+          <AttrBar label="Costs + residual" value={d.fx.costEffect} total={d.fx.total} />
           <div className={styles.attrTotal}>
             <span>Total US realized</span>
             <strong className={tone(d.fx.total)}>{yenSigned(d.fx.total)}</strong>

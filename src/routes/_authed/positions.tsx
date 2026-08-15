@@ -19,6 +19,13 @@ function Positions() {
     initialData: initial,
   })
 
+  // TODO(nit): these totals reconstruct floats from the exact decimal strings
+  // the server deliberately sent as strings, which is the one place the UI does
+  // financial arithmetic — the thing `components/format.ts` and the server-side
+  // formatting exist to prevent. Safe in practice: these are whole yen, and the
+  // portfolio would need to reach ~9×10¹⁵ before a float lost integer precision.
+  // Fix: return the three totals from `getPositions` already summed and
+  // formatted, so the client only renders them.
   const totalCost = rows.reduce((a, r) => a + Number(r.costBasisJpy), 0)
   const priced = rows.filter((r) => r.marketValueJpy != null)
   const totalValue = priced.reduce((a, r) => a + Number(r.marketValueJpy), 0)

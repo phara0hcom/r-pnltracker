@@ -1,0 +1,42 @@
+.profit {
+  color: var(--color-profit);
+}
+
+.dim {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+/* Flags an attribution the data could not confirm. Deliberately quiet — it is a
+   caveat on the bucket, not on the amount. */
+.inferred {
+  padding: 1px var(--space-2);
+  margin-left: var(--space-2);
+  font-size: 0.6875rem;
+  color: var(--color-warn);
+  cursor: help;
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+}
+
+.note {
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  background-color: var(--color-surface);
+  border-left: 2px solid var(--color-warn);
+  border-radius: var(--radius-sm);
+}
+
+/* A missing data source, not a computation the app got wrong — worth stating
+   plainly rather than letting a zero read as "no dividends were paid". */
+.gap {
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  background-color: var(--color-surface);
+  border-left: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+}
