@@ -58,7 +58,7 @@ describe('trade ordering', () => {
   })
 
   it('resolves the real same-day 8411 round trip without warnings', () => {
-    const w = engine.warnings.filter((x) => x.symbol === '8411')
+    const w = engine.warnings.filter((item) => item.symbol === '8411')
     expect(w).toEqual([])
   })
 })
@@ -142,7 +142,7 @@ describe('real portfolio', () => {
   })
 
   it('realizes every closing trade, with no unmatched closes', () => {
-    const closes = trades.filter((x) => x.side === 'SELL' || x.side === 'REDEEM')
+    const closes = trades.filter((item) => item.side === 'SELL' || item.side === 'REDEEM')
     // Every close must find a pool. A non-empty warning list here means the
     // trade history is incomplete or an instrument identity is wrong.
     expect(engine.warnings).toEqual([])
@@ -153,21 +153,21 @@ describe('real portfolio', () => {
     // Collected rather than asserted in-loop so a failure names every offending
     // position instead of stopping at the first.
     const badUs = engine.positions
-      .filter((p) => p.assetClass === 'US_EQUITY')
-      .filter((p) => !(p.avgFxRate.gt(100) && p.avgFxRate.lt(200)))
-      .map((p) => `${p.symbol}: fx=${p.avgFxRate.toFixed()}`)
+      .filter((point) => point.assetClass === 'US_EQUITY')
+      .filter((point) => !(point.avgFxRate.gt(100) && point.avgFxRate.lt(200)))
+      .map((point) => `${point.symbol}: fx=${point.avgFxRate.toFixed()}`)
     expect(badUs).toEqual([])
 
     const badJpy = engine.positions
-      .filter((p) => p.assetClass !== 'US_EQUITY')
-      .filter((p) => !p.avgFxRate.eq(1))
-      .map((p) => `${p.symbol}: fx=${p.avgFxRate.toFixed()}`)
+      .filter((point) => point.assetClass !== 'US_EQUITY')
+      .filter((point) => !point.avgFxRate.eq(1))
+      .map((point) => `${point.symbol}: fx=${point.avgFxRate.toFixed()}`)
     expect(badJpy).toEqual([])
   })
 })
 
 describe('ground truth — official 特定口座年間取引報告書 (2025)', () => {
-  const taxable = engine.realized.filter((e) => e.isTaxable)
+  const taxable = engine.realized.filter((event) => event.isTaxable)
   const byYear = bySettlementYear(taxable)
 
   it('reports zero taxable realized gains for 2025', () => {

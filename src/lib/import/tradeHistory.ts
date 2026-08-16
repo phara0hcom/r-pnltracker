@@ -55,7 +55,7 @@ export function detectFormat(text: string): RakutenFormat | null {
 
 /** Rows whose non-empty cells are all blank markers — trailing junk. */
 function isEmptyRow(cols: string[]): boolean {
-  return cols.every((c) => jtrim(c) === '')
+  return cols.every((cell) => jtrim(cell) === '')
 }
 
 /**
@@ -73,25 +73,25 @@ export function parseJpTradeHistory(text: string, sourceFile: string): ParseResu
   const lines = text.split(/\r?\n/)
   const occurrence = makeOccurrenceCounter()
 
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!
+  for (let lineNo = 1; lineNo < lines.length; lineNo++) {
+    const line = lines[lineNo]!
     if (jtrim(line) === '') continue
-    const c = splitCsvLine(line)
-    if (isEmptyRow(c)) continue
+    const cols = splitCsvLine(line)
+    if (isEmptyRow(cols)) continue
 
-    const tradeDate = parseDate(c[0])
-    const settleDate = parseDate(c[1])
-    const code = toHalfWidth(c[2] ?? '')
-    const name = jtrim(c[3])
-    const accountType = parseAccountType(c[5])
-    const side = parseSide(c[7])
-    const quantity = parseNum(c[10])
-    const unitPrice = parseNum(c[11])
+    const tradeDate = parseDate(cols[0])
+    const settleDate = parseDate(cols[1])
+    const code = toHalfWidth(cols[2] ?? '')
+    const name = jtrim(cols[3])
+    const accountType = parseAccountType(cols[5])
+    const side = parseSide(cols[7])
+    const quantity = parseNum(cols[10])
+    const unitPrice = parseNum(cols[11])
 
     if (!tradeDate || !code || !accountType || !side || !quantity || !unitPrice) {
       result.errors.push({
         file: sourceFile,
-        line: i + 1,
+        line: lineNo + 1,
         message: 'missing required field (date/code/account/side/qty/price)',
         raw: line.slice(0, 200),
       })
@@ -100,23 +100,23 @@ export function parseJpTradeHistory(text: string, sourceFile: string): ParseResu
 
     // 信用 (margin) rows carry a 建約定日; none exist in the current data, but
     // silently folding them into cash positions would corrupt cost basis.
-    if (!isBlank(c[8]) && jtrim(c[8]) !== '現物' && !isBlank(c[17])) {
+    if (!isBlank(cols[8]) && jtrim(cols[8]) !== '現物' && !isBlank(cols[17])) {
       result.errors.push({
         file: sourceFile,
-        line: i + 1,
-        message: `margin trade not supported (信用区分=${jtrim(c[8])})`,
+        line: lineNo + 1,
+        message: `margin trade not supported (信用区分=${jtrim(cols[8])})`,
         raw: line.slice(0, 200),
       })
       continue
     }
 
-    const fee = parseNumOrZero(c[12])
-    const feeTax = parseNumOrZero(c[13])
-    const otherCost = parseNumOrZero(c[14])
+    const fee = parseNumOrZero(cols[12])
+    const feeTax = parseNumOrZero(cols[13])
+    const otherCost = parseNumOrZero(cols[14])
     const gross = quantity.mul(unitPrice)
     const costs = fee.add(feeTax).add(otherCost)
 
-    const reported = parseNum(c[16])
+    const reported = parseNum(cols[16])
     const derived = side === 'BUY' ? gross.add(costs) : gross.sub(costs)
     // Trust the derived figure; `reported` is absent on unsettled rows.
     const netAmount = reported ?? derived
@@ -171,43 +171,43 @@ export function parseUsTradeHistory(text: string, sourceFile: string): ParseResu
   const lines = text.split(/\r?\n/)
   const occurrence = makeOccurrenceCounter()
 
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!
+  for (let lineNo = 1; lineNo < lines.length; lineNo++) {
+    const line = lines[lineNo]!
     if (jtrim(line) === '') continue
-    const c = splitCsvLine(line)
-    if (isEmptyRow(c)) continue
+    const cols = splitCsvLine(line)
+    if (isEmptyRow(cols)) continue
 
-    const tradeDate = parseDate(c[0])
-    const settleDate = parseDate(c[1])
-    const ticker = toHalfWidth(c[2] ?? '')
-    const name = jtrim(c[3])
-    const accountType = parseAccountType(c[4])
-    const side = parseSide(c[6])
-    const quantity = parseNum(c[10])
-    const unitPrice = parseNum(c[11])
-    const fxRate = parseNum(c[13])
+    const tradeDate = parseDate(cols[0])
+    const settleDate = parseDate(cols[1])
+    const ticker = toHalfWidth(cols[2] ?? '')
+    const name = jtrim(cols[3])
+    const accountType = parseAccountType(cols[4])
+    const side = parseSide(cols[6])
+    const quantity = parseNum(cols[10])
+    const unitPrice = parseNum(cols[11])
+    const fxRate = parseNum(cols[13])
 
     if (!tradeDate || !ticker || !accountType || !side || !quantity || !unitPrice || !fxRate) {
       result.errors.push({
         file: sourceFile,
-        line: i + 1,
+        line: lineNo + 1,
         message: 'missing required field (date/ticker/account/side/qty/price/fx)',
         raw: line.slice(0, 200),
       })
       continue
     }
 
-    const fee = parseNumOrZero(c[14])
-    const tax = parseNumOrZero(c[15])
+    const fee = parseNumOrZero(cols[14])
+    const tax = parseNumOrZero(cols[15])
     // 約定代金 is authoritative for gross; fall back to qty×price if absent.
-    const gross = parseNum(c[12]) ?? quantity.mul(unitPrice)
+    const gross = parseNum(cols[12]) ?? quantity.mul(unitPrice)
     const costs = fee.add(tax)
     const netUsd = side === 'BUY' ? gross.add(costs) : gross.sub(costs)
 
     // Prefer Rakuten's own JPY settlement figure when the trade settled in yen;
     // otherwise convert at the trade's rate.
-    const reportedJpy = parseNum(c[17])
-    const reportedUsd = parseNum(c[16])
+    const reportedJpy = parseNum(cols[17])
+    const reportedUsd = parseNum(cols[16])
     // JPY is zero-decimal — an FX conversion must land on whole yen before it
     // reaches cost basis or NISA quota arithmetic.
     const netAmountJpy = toYen(reportedJpy ?? netUsd.mul(fxRate))
@@ -264,24 +264,24 @@ export function parseFundTradeHistory(text: string, sourceFile: string): ParseRe
   const lines = text.split(/\r?\n/)
   const occurrence = makeOccurrenceCounter()
 
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!
+  for (let lineNo = 1; lineNo < lines.length; lineNo++) {
+    const line = lines[lineNo]!
     if (jtrim(line) === '') continue
-    const c = splitCsvLine(line)
-    if (isEmptyRow(c)) continue
+    const cols = splitCsvLine(line)
+    if (isEmptyRow(cols)) continue
 
-    const tradeDate = parseDate(c[0])
-    const settleDate = parseDate(c[1])
-    const fundName = jtrim(c[2])
-    const accountType = parseAccountType(c[4])
-    const side = parseSide(c[5])
-    const quantity = parseNum(c[7])
-    const rawPrice = parseNum(c[8])
+    const tradeDate = parseDate(cols[0])
+    const settleDate = parseDate(cols[1])
+    const fundName = jtrim(cols[2])
+    const accountType = parseAccountType(cols[4])
+    const side = parseSide(cols[5])
+    const quantity = parseNum(cols[7])
+    const rawPrice = parseNum(cols[8])
 
     if (!tradeDate || !fundName || !accountType || !side || !quantity || !rawPrice) {
       result.errors.push({
         file: sourceFile,
-        line: i + 1,
+        line: lineNo + 1,
         message: 'missing required field (date/fund/account/side/qty/price)',
         raw: line.slice(0, 200),
       })
@@ -289,11 +289,11 @@ export function parseFundTradeHistory(text: string, sourceFile: string): ParseRe
     }
 
     const unitPrice = rawPrice.div(FUND_UNIT_DIVISOR)
-    const fee = parseNumOrZero(c[9]) // 経費
+    const fee = parseNumOrZero(cols[9]) // 経費
     const gross = quantity.mul(unitPrice)
     // Rakuten points applied to the purchase; part of acquisition cost, so this
     // is informational only and never reduces basis.
-    const pointsUsed = parsePointsUsed(c[12])
+    const pointsUsed = parsePointsUsed(cols[12])
     // Funds are identified by name, so a rename must fold onto the surviving one.
     const symbol = canonicalSymbol(fundName)
 
@@ -303,7 +303,7 @@ export function parseFundTradeHistory(text: string, sourceFile: string): ParseRe
     // The fallback keys off OPENING_SIDES, not `side === 'BUY'`: 再投資 also
     // acquires units, so its fee is part of acquisition cost and adds. Testing
     // BUY alone silently pushed REINVEST into the disposal branch.
-    const reported = parseNum(c[12])
+    const reported = parseNum(cols[12])
     const netAmount = toYen(
       reported ?? (OPENING_SIDES.includes(side) ? gross.add(fee) : gross.sub(fee)),
     )
@@ -362,18 +362,18 @@ export function parseTradeHistory(text: string, sourceFile: string): ParseResult
     case 'GAIKABU':
     case null:
     default: {
-      const r = emptyParseResult()
-      r.errors.push({
+      const result = emptyParseResult()
+      result.errors.push({
         file: sourceFile,
         line: 0,
         message: `not a tradehistory file (detected: ${fmt ?? 'unknown'})`,
       })
-      return r
+      return result
     }
   }
 }
 
 /** Sum helper used by tests and reporting. */
 export function sumJpy(trades: NormalizedTrade[]): Decimal {
-  return trades.reduce((a, t) => a.add(t.netAmountJpy), new Decimal(0))
+  return trades.reduce((running, trade) => running.add(trade.netAmountJpy), new Decimal(0))
 }

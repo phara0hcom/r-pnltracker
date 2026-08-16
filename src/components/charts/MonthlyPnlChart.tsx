@@ -37,22 +37,22 @@ export interface WindowNav {
   onLatest: () => void
 }
 
-const yen = (v: number) =>
-  (v > 0 ? '+' : v < 0 ? '−' : '') +
+const yen = (amount: number) =>
+  (amount > 0 ? '+' : amount < 0 ? '−' : '') +
   '¥' +
-  Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })
+  Math.abs(amount).toLocaleString('en-US', { maximumFractionDigits: 0 })
 
 /** Compact axis labels: ¥1.2M / ¥340k — full precision lives in the tooltip. */
-const compact = (v: number) => {
-  const abs = Math.abs(v)
-  if (abs >= 1_000_000) return `¥${(v / 1_000_000).toFixed(1)}M`
-  if (abs >= 1_000) return `¥${Math.round(v / 1_000).toString()}k`
-  return `¥${String(Math.round(v))}`
+const compact = (amount: number) => {
+  const magnitude = Math.abs(amount)
+  if (magnitude >= 1_000_000) return `¥${(amount / 1_000_000).toFixed(1)}M`
+  if (magnitude >= 1_000) return `¥${Math.round(amount / 1_000).toString()}k`
+  return `¥${String(Math.round(amount))}`
 }
 
-const monthLabel = (m: string) => {
-  const [y, mo] = m.split('-')
-  return { short: mo ?? '', year: y ?? '' }
+const monthLabel = (month: string) => {
+  const [year, monthNumber] = month.split('-')
+  return { short: monthNumber ?? '', year: year ?? '' }
 }
 
 /**
@@ -83,15 +83,18 @@ function buildTicks(maxPos: number, maxNeg: number, baselinePct: number) {
   // region is usually the smaller share of the plot.
   if (maxPos > 0) {
     const step = niceStep(maxPos, 4)
-    for (let v = step; v <= maxPos * 1.001; v += step) {
-      ticks.push({ value: v, topPct: baselinePct - (v / maxPos) * baselinePct })
+    for (let tick = step; tick <= maxPos * 1.001; tick += step) {
+      ticks.push({ value: tick, topPct: baselinePct - (tick / maxPos) * baselinePct })
     }
   }
   if (maxNeg < 0) {
     const span = Math.abs(maxNeg)
     const step = niceStep(span, 2)
-    for (let v = step; v <= span * 1.001; v += step) {
-      ticks.push({ value: -v, topPct: baselinePct + (v / span) * (100 - baselinePct) })
+    for (let tick = step; tick <= span * 1.001; tick += step) {
+      ticks.push({
+        value: -tick,
+        topPct: baselinePct + (tick / span) * (100 - baselinePct),
+      })
     }
   }
   return ticks
@@ -104,7 +107,7 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
     return <p className={styles.empty}>No closed trades yet.</p>
   }
 
-  const values = data.map((d) => Number(d.realizedJpy))
+  const values = data.map((datum) => Number(datum.realizedJpy))
   const maxPos = Math.max(0, ...values)
   const maxNeg = Math.min(0, ...values)
   // Scale both directions off the same magnitude so a ¥100k gain and a ¥100k
@@ -160,27 +163,27 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
       <div className={styles.valueRow} aria-hidden="true">
         <div className={styles.valueSpacer} />
         <div className={styles.valueCells}>
-          {data.map((d) => {
-            const v = Number(d.realizedJpy)
+          {data.map((datum) => {
+            const realized = Number(datum.realizedJpy)
             return (
               <span
-                key={d.month}
+                key={datum.month}
                 className={cx(
                   styles.valueCell,
-                  d.tradeCount === 0
+                  datum.tradeCount === 0
                     ? styles.valueMuted
-                    : v >= 0
+                    : realized >= 0
                       ? styles.profit
                       : styles.loss,
                 )}
               >
                 <span className={styles.valueAmount}>
-                  {d.tradeCount === 0 ? '·' : compact(v)}
+                  {datum.tradeCount === 0 ? '·' : compact(realized)}
                 </span>
                 <span className={styles.valuePct}>
-                  {d.returnPct == null
+                  {datum.returnPct == null
                     ? ''
-                    : `${d.returnPct >= 0 ? '+' : ''}${(d.returnPct * 100).toFixed(1)}%`}
+                    : `${datum.returnPct >= 0 ? '+' : ''}${(datum.returnPct * 100).toFixed(1)}%`}
                 </span>
               </span>
             )
@@ -190,13 +193,13 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
 
       <div className={styles.wrap}>
         <div className={styles.axis} aria-hidden="true">
-          {ticks.map((t) => (
+          {ticks.map((trade) => (
             <span
-              key={t.value}
+              key={trade.value}
               className={styles.axisTick}
-              style={{ top: `${String(t.topPct)}%` }}
+              style={{ top: `${String(trade.topPct)}%` }}
             >
-              {compact(t.value)}
+              {compact(trade.value)}
             </span>
           ))}
           <span className={styles.axisZero} style={{ top: `${String(baselinePct)}%` }}>
@@ -207,51 +210,51 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
         <div className={styles.plot}>
           {/* Gridlines sit behind the marks and share the axis tick positions,
               so a bar's height can be read off a label rather than guessed. */}
-          {ticks.map((t) => (
+          {ticks.map((trade) => (
             <div
-              key={t.value}
+              key={trade.value}
               className={styles.gridline}
-              style={{ top: `${String(t.topPct)}%` }}
+              style={{ top: `${String(trade.topPct)}%` }}
               aria-hidden="true"
             />
           ))}
           <div className={styles.baseline} style={{ top: `${String(baselinePct)}%` }} />
 
           <div className={styles.bars}>
-            {data.map((d, i) => {
-              const v = Number(d.realizedJpy)
-              const positive = v >= 0
+            {data.map((datum, index) => {
+              const realized = Number(datum.realizedJpy)
+              const positive = realized >= 0
               const heightPct =
-                (Math.abs(v) / scale) * (positive ? baselinePct : 100 - baselinePct)
-              const label = monthLabel(d.month)
+                (Math.abs(realized) / scale) * (positive ? baselinePct : 100 - baselinePct)
+              const label = monthLabel(datum.month)
 
               return (
                 <button
                   type="button"
-                  key={d.month}
+                  key={datum.month}
                   className={styles.slot}
                   aria-label={
-                    d.tradeCount === 0
-                      ? `${d.month}: no closed trades`
-                      : `${d.month}: ${yen(v)} realized${d.returnPct == null ? '' : `, ${(d.returnPct * 100).toFixed(1)} percent`} from ${String(d.tradeCount)} close${d.tradeCount === 1 ? '' : 's'}`
+                    datum.tradeCount === 0
+                      ? `${datum.month}: no closed trades`
+                      : `${datum.month}: ${yen(realized)} realized${datum.returnPct == null ? '' : `, ${(datum.returnPct * 100).toFixed(1)} percent`} from ${String(datum.tradeCount)} close${datum.tradeCount === 1 ? '' : 's'}`
                   }
                   onMouseEnter={() => {
-                    setHover(i)
+                    setHover(index)
                   }}
                   onMouseLeave={() => {
                     setHover(null)
                   }}
                   onFocus={() => {
-                    setHover(i)
+                    setHover(index)
                   }}
                   onBlur={() => {
                     setHover(null)
                   }}
                 >
                   <div className={styles.column} style={{ height: `${String(baselinePct)}%` }}>
-                    {positive && v !== 0 ? (
+                    {positive && realized !== 0 ? (
                       <div
-                        className={cx(styles.bar, styles.barUp, hover === i && styles.barHover)}
+                        className={cx(styles.bar, styles.barUp, hover === index && styles.barHover)}
                         style={{ height: `${String(heightPct)}%` }}
                       />
                     ) : null}
@@ -261,30 +264,30 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
                     className={styles.columnDown}
                     style={{ height: `${String(100 - baselinePct)}%` }}
                   >
-                    {!positive && v !== 0 ? (
+                    {!positive && realized !== 0 ? (
                       <div
-                        className={cx(styles.bar, styles.barDown, hover === i && styles.barHover)}
+                        className={cx(styles.bar, styles.barDown, hover === index && styles.barHover)}
                         style={{ height: `${String(heightPct)}%` }}
                       />
                     ) : null}
                   </div>
 
-                  {hover === i ? (
+                  {hover === index ? (
                     <div className={styles.tooltip} role="tooltip">
-                      <strong>{d.month}</strong>
-                      {d.tradeCount === 0 ? (
+                      <strong>{datum.month}</strong>
+                      {datum.tradeCount === 0 ? (
                         <span className={styles.tooltipMeta}>No closes</span>
                       ) : (
                         <>
                           <span className={positive ? styles.profit : styles.loss}>
-                            {yen(v)}
-                            {d.returnPct == null
+                            {yen(realized)}
+                            {datum.returnPct == null
                               ? ''
-                              : `  (${d.returnPct >= 0 ? '+' : ''}${(d.returnPct * 100).toFixed(1)}%)`}
+                              : `  (${datum.returnPct >= 0 ? '+' : ''}${(datum.returnPct * 100).toFixed(1)}%)`}
                           </span>
                           <span className={styles.tooltipMeta}>
-                            {d.tradeCount} close{d.tradeCount === 1 ? '' : 's'} · on{' '}
-                            {compact(Number(d.costJpy))} cost
+                            {datum.tradeCount} close{datum.tradeCount === 1 ? '' : 's'} · on{' '}
+                            {compact(Number(datum.costJpy))} cost
                           </span>
                         </>
                       )}

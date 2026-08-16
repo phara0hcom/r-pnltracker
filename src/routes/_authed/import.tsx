@@ -33,8 +33,8 @@ async function toPayload(file: File): Promise<UploadPayload> {
   // Chunked rather than one call: String.fromCharCode(...bytes) blows the
   // argument limit on files of any size.
   const CHUNK = 8192
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  for (let offset = 0; offset < bytes.length; offset += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK))
   }
   return { filename: file.name, base64: btoa(binary) }
 }
@@ -44,7 +44,7 @@ interface Staged {
   problem?: string
 }
 
-const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`
+const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`
 
 function Import() {
   const queryClient = useQueryClient()
@@ -58,32 +58,32 @@ function Import() {
 
   const doPreview = useMutation({
     mutationFn: (files: UploadPayload[]) => previewFiles({ data: { files } }),
-    onSuccess: (r) => {
-      setPreview(r)
+    onSuccess: (result) => {
+      setPreview(result)
       setResult(null)
       setFailure(null)
     },
     // Without this a server error renders nothing at all and the screen simply
     // looks inert — which is exactly how this failed before.
-    onError: (e: Error) => {
+    onError: (error: Error) => {
       setFailure(
-        `${e.message || 'The server rejected the upload.'} — if this persists, reload the page: a stale tab can hold a client build the dev server no longer recognises.`,
+        `${error.message || 'The server rejected the upload.'} — if this persists, reload the page: a stale tab can hold a client build the dev server no longer recognises.`,
       )
     },
   })
 
   const doCommit = useMutation({
     mutationFn: (files: UploadPayload[]) => commitFiles({ data: { files } }),
-    onSuccess: (r) => {
-      setResult(r)
+    onSuccess: (result) => {
+      setResult(result)
       setPreview(null)
       setStaged([])
       setPayloads([])
       setFailure(null)
       void queryClient.invalidateQueries()
     },
-    onError: (e: Error) => {
-      setFailure(e.message || 'The import failed. Nothing was written.')
+    onError: (error: Error) => {
+      setFailure(error.message || 'The import failed. Nothing was written.')
     },
   })
 
@@ -104,27 +104,27 @@ function Import() {
     // Adding to the existing selection rather than replacing it, so several
     // drops can be combined before uploading.
     setStaged((prev) => {
-      const seen = new Set(prev.map((s) => `${s.file.name}:${String(s.file.size)}`))
-      return [...prev, ...next.filter((s) => !seen.has(`${s.file.name}:${String(s.file.size)}`))]
+      const seen = new Set(prev.map((staged) => `${staged.file.name}:${String(staged.file.size)}`))
+      return [...prev, ...next.filter((staged) => !seen.has(`${staged.file.name}:${String(staged.file.size)}`))]
     })
   }
 
   const upload = async () => {
-    const usable = staged.filter((s) => !s.problem)
+    const usable = staged.filter((staged) => !staged.problem)
     if (usable.length === 0) return
     setFailure(null)
     try {
-      const list = await Promise.all(usable.map((s) => toPayload(s.file)))
+      const list = await Promise.all(usable.map((staged) => toPayload(staged.file)))
       setPayloads(list)
       doPreview.mutate(list)
-    } catch (e) {
-      setFailure(`Could not read the file: ${(e as Error).message}`)
+    } catch (error) {
+      setFailure(`Could not read the file: ${(error as Error).message}`)
     }
   }
 
-  const usableCount = staged.filter((s) => !s.problem).length
-  const totalNew = preview?.reduce((a, p) => a + p.newTrades + p.newDividends, 0) ?? 0
-  const totalDupes = preview?.reduce((a, p) => a + p.duplicates, 0) ?? 0
+  const usableCount = staged.filter((staged) => !staged.problem).length
+  const totalNew = preview?.reduce((running, file) => running + file.newTrades + file.newDividends, 0) ?? 0
+  const totalDupes = preview?.reduce((running, file) => running + file.duplicates, 0) ?? 0
   const busy = doPreview.isPending || doCommit.isPending
 
   return (
@@ -139,17 +139,17 @@ function Import() {
       <div
         className={cx(styles.drop, dragging && styles.dropActive)}
         role="presentation"
-        onDragOver={(e) => {
-          e.preventDefault()
+        onDragOver={(event) => {
+          event.preventDefault()
           setDragging(true)
         }}
         onDragLeave={() => {
           setDragging(false)
         }}
-        onDrop={(e) => {
-          e.preventDefault()
+        onDrop={(event) => {
+          event.preventDefault()
           setDragging(false)
-          stage(e.dataTransfer.files)
+          stage(event.dataTransfer.files)
         }}
       >
         <p className={styles.dropText}>Drop CSV files here</p>
@@ -159,10 +159,10 @@ function Import() {
             multiple
             accept=".csv"
             className="visually-hidden"
-            onChange={(e) => {
-              stage(e.target.files)
+            onChange={(event) => {
+              stage(event.target.files)
               // Reset so re-choosing the same file still fires a change event.
-              e.target.value = ''
+              event.target.value = ''
             }}
           />
           Choose files
@@ -181,17 +181,17 @@ function Import() {
       {staged.length > 0 ? (
         <Section title="Selected files">
           <ul className={styles.stagedList}>
-            {staged.map((s) => (
-              <li key={`${s.file.name}:${String(s.file.size)}`} className={styles.stagedItem}>
-                <span className={styles.stagedName}>{s.file.name}</span>
-                <span className={styles.stagedSize}>{kb(s.file.size)}</span>
-                {s.problem ? <span className={styles.stagedProblem}>{s.problem}</span> : null}
+            {staged.map((staged) => (
+              <li key={`${staged.file.name}:${String(staged.file.size)}`} className={styles.stagedItem}>
+                <span className={styles.stagedName}>{staged.file.name}</span>
+                <span className={styles.stagedSize}>{kb(staged.file.size)}</span>
+                {staged.problem ? <span className={styles.stagedProblem}>{staged.problem}</span> : null}
                 <button
                   type="button"
                   className={styles.removeButton}
-                  aria-label={`Remove ${s.file.name}`}
+                  aria-label={`Remove ${staged.file.name}`}
                   onClick={() => {
-                    setStaged((prev) => prev.filter((x) => x.file !== s.file))
+                    setStaged((prev) => prev.filter((item) => item.file !== staged.file))
                     setPreview(null)
                   }}
                 >
@@ -250,31 +250,31 @@ function Import() {
               </tr>
             </thead>
             <tbody>
-              {preview.map((p) => (
-                <tr key={p.filename}>
-                  <td>{p.filename}</td>
-                  <td>{p.format}</td>
-                  <td data-numeric>{p.newTrades}</td>
-                  <td data-numeric>{p.newDividends}</td>
-                  <td data-numeric className={styles.dim}>{p.duplicates}</td>
-                  <td data-numeric>{p.snapshots}</td>
-                  <td data-numeric className={p.errors.length ? styles.loss : undefined}>
-                    {p.errors.length}
+              {preview.map((filePreview) => (
+                <tr key={filePreview.filename}>
+                  <td>{filePreview.filename}</td>
+                  <td>{filePreview.format}</td>
+                  <td data-numeric>{filePreview.newTrades}</td>
+                  <td data-numeric>{filePreview.newDividends}</td>
+                  <td data-numeric className={styles.dim}>{filePreview.duplicates}</td>
+                  <td data-numeric>{filePreview.snapshots}</td>
+                  <td data-numeric className={filePreview.errors.length ? styles.loss : undefined}>
+                    {filePreview.errors.length}
                   </td>
                 </tr>
               ))}
             </tbody>
           </Table>
 
-          {preview.some((p) => p.errors.length > 0) ? (
+          {preview.some((filePreview) => filePreview.errors.length > 0) ? (
             <div className={styles.errors}>
               <h3 className={styles.errorTitle}>Unreadable rows</h3>
               <ul>
-                {preview.flatMap((p) =>
-                  p.errors.slice(0, 8).map((e, i) => (
-                    <li key={`${p.filename}-${String(i)}`}>
-                      <code>{p.filename}</code>
-                      {e.line > 0 ? ` line ${String(e.line)}` : ''}: {e.message}
+                {preview.flatMap((filePreview) =>
+                  filePreview.errors.slice(0, 8).map((rowError, index) => (
+                    <li key={`${filePreview.filename}-${String(index)}`}>
+                      <code>{filePreview.filename}</code>
+                      {rowError.line > 0 ? ` line ${String(rowError.line)}` : ''}: {rowError.message}
                     </li>
                   )),
                 )}
@@ -330,13 +330,13 @@ function Import() {
               </tr>
             </thead>
             <tbody>
-              {result.map((r) => (
-                <tr key={r.filename}>
-                  <td>{r.filename}</td>
-                  <td data-numeric>{r.tradesInserted}</td>
-                  <td data-numeric>{r.dividendsInserted}</td>
-                  <td data-numeric>{r.snapshotsInserted}</td>
-                  <td data-numeric className={styles.dim}>{r.duplicatesSkipped}</td>
+              {result.map((result) => (
+                <tr key={result.filename}>
+                  <td>{result.filename}</td>
+                  <td data-numeric>{result.tradesInserted}</td>
+                  <td data-numeric>{result.dividendsInserted}</td>
+                  <td data-numeric>{result.snapshotsInserted}</td>
+                  <td data-numeric className={styles.dim}>{result.duplicatesSkipped}</td>
                 </tr>
               ))}
             </tbody>

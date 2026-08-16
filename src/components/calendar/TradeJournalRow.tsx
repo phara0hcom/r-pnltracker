@@ -33,8 +33,8 @@ function PenIcon() {
 }
 
 /** Native-currency price. Fund figures already arrive per 10,000 口. */
-const price = (v: string, currency: string) =>
-  `${currency === 'USD' ? '$' : '¥'}${Number(v).toLocaleString('en-US', { maximumFractionDigits: 4 })}`
+const price = (amount: string, currency: string) =>
+  `${currency === 'USD' ? '$' : '¥'}${Number(amount).toLocaleString('en-US', { maximumFractionDigits: 4 })}`
 
 function CloseIcon() {
   return (
@@ -60,8 +60,8 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
   const dirty = memo.trim() !== savedMemo.trim() || motivation !== savedMotivation
 
   const save = useMutation({
-    mutationFn: (v: { memo: string | null; motivation: number | null }) =>
-      saveTradeJournal({ data: { tradeId: trade.id, ...v } }),
+    mutationFn: (journal: { memo: string | null; motivation: number | null }) =>
+      saveTradeJournal({ data: { tradeId: trade.id, ...journal } }),
     onSuccess: (_r, v) => {
       setSavedMemo(v.memo ?? '')
       setSavedMotivation(v.motivation)

@@ -47,8 +47,8 @@ describe('deterministic ids', () => {
   })
 
   it('keeps ids stable across re-imports so upserts are true no-ops', () => {
-    const a = trades.map((t) => toTradeRow({ userId: USER, trade: t }).id)
-    const b = loadAllTrades().trades.map((t) => toTradeRow({ userId: USER, trade: t }).id)
+    const a = trades.map((trade) => toTradeRow({ userId: USER, trade: trade }).id)
+    const b = loadAllTrades().trades.map((trade) => toTradeRow({ userId: USER, trade: trade }).id)
     expect(b).toEqual(a)
     expect(new Set(a).size).toBe(trades.length)
   })
@@ -90,7 +90,7 @@ describe('trade round-trip', () => {
   })
 
   it('carries points through without loss', () => {
-    const withPoints = trades.filter((t) => t.pointsUsed)
+    const withPoints = trades.filter((trade) => trade.pointsUsed)
     expect(withPoints).toHaveLength(2)
     for (const t of withPoints) {
       const row = toTradeRow({ userId: USER, trade: t })
@@ -99,7 +99,7 @@ describe('trade round-trip', () => {
   })
 
   it('leaves points null when none were used', () => {
-    const without = trades.find((t) => !t.pointsUsed)!
+    const without = trades.find((trade) => !trade.pointsUsed)!
     expect(toTradeRow({ userId: USER, trade: without }).pointsUsed).toBeNull()
   })
 

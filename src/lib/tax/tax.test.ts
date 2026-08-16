@@ -41,11 +41,11 @@ describe('dividend account attribution', () => {
   it('splits the netWIN distribution between 特定 and 旧NISA by holding size', () => {
     // Both pay ¥500.00 per 10,000 口. The large 旧NISA holding takes ¥21,855
     // tax-free; the small 特定 holding takes ¥739 net of withholding.
-    const dec5 = dividends.filter((d) => d.payDate === '2025-12-05' && d.kind === 'DISTRIBUTION')
+    const dec5 = dividends.filter((day) => day.payDate === '2025-12-05' && day.kind === 'DISTRIBUTION')
     expect(dec5).toHaveLength(2)
 
-    const big = dec5.find((d) => d.netAmount.eq(21855))!
-    const small = dec5.find((d) => d.netAmount.eq(739))!
+    const big = dec5.find((day) => day.netAmount.eq(21855))!
+    const small = dec5.find((day) => day.netAmount.eq(739))!
 
     expect(big.accountType).toBe('NISA_OLD')
     expect(big.isTaxable).toBe(false)
@@ -60,7 +60,7 @@ describe('dividend account attribution', () => {
 
   it('recognises NISA-held equity dividends as tax-free', () => {
     // 8411 みずほ is held in NISA成長投資枠, so its ¥14,500 payouts are exempt.
-    const mizuho = dividends.filter((d) => d.netAmount.eq(14500))
+    const mizuho = dividends.filter((day) => day.netAmount.eq(14500))
     expect(mizuho).toHaveLength(2)
     for (const d of mizuho) expect(d.isTaxable).toBe(false)
   })
@@ -68,7 +68,7 @@ describe('dividend account attribution', () => {
   it('still attributes a dividend paid after the position was closed', () => {
     // フルキャスト (4848) sold 2026-02-18, paid 2026-03-12 — no holding at
     // payment time, so the last known account is used and flagged.
-    const fc = dividends.find((d) => d.payDate === '2026-03-12')!
+    const fc = dividends.find((day) => day.payDate === '2026-03-12')!
     expect(fc.netAmount.toFixed()).toBe('3200')
     expect(fc.accountType).toBe('NISA_GROWTH')
     expect(fc.attributionConfident).toBe(false)
@@ -119,8 +119,8 @@ describe('tax year basis', () => {
     expect(cal.totals.nisaGains.toFixed()).toBe(fis.totals.nisaGains.toFixed())
 
     // The Feb-2026 disposals move: calendar 2026, but fiscal FY2025.
-    const calTrades2026 = cal.years.find((y) => y.year === 2026)!.tradeCount
-    const fisTrades2026 = fis.years.find((y) => y.year === 2026)!.tradeCount
+    const calTrades2026 = cal.years.find((year) => year.year === 2026)!.tradeCount
+    const fisTrades2026 = fis.years.find((year) => year.year === 2026)!.tradeCount
     expect(calTrades2026).not.toBe(fisTrades2026)
   })
 })
@@ -170,7 +170,7 @@ describe('carryforward expiry', () => {
     const yoy = buildYearOverYear(events, [], 'CALENDAR', true)
 
     // 2025 is the third year after the loss, so the relief still stands.
-    const y2025 = yoy.years.find((y) => y.year === 2025)!
+    const y2025 = yoy.years.find((year) => year.year === 2025)!
     expect(y2025.netTaxable.toFixed()).toBe('-400000')
     expect(y2025.estimatedCapitalGainsTax.toFixed()).toBe('0')
   })
@@ -181,7 +181,7 @@ describe('carryforward expiry', () => {
 
     // 2026 is one year too late: the 2022 loss has expired, so the gain is
     // taxed in full rather than being sheltered indefinitely.
-    const y2026 = yoy.years.find((y) => y.year === 2026)!
+    const y2026 = yoy.years.find((year) => year.year === 2026)!
     expect(y2026.netTaxable.toFixed()).toBe('600000')
     expect(y2026.estimatedCapitalGainsTax.toFixed()).toBe('121890') // 600,000 × 20.315%
   })
@@ -191,7 +191,7 @@ describe('carryforward expiry', () => {
     // still spent by the passage of time.
     const events = [close('2021-06-01', -500_000), close('2026-06-01', 500_000)] as never
     const yoy = buildYearOverYear(events, [], 'CALENDAR', true)
-    expect(yoy.years.find((y) => y.year === 2026)!.netTaxable.toFixed()).toBe('500000')
+    expect(yoy.years.find((year) => year.year === 2026)!.netTaxable.toFixed()).toBe('500000')
   })
 
   it('spends the oldest loss first, since it expires soonest', () => {
@@ -207,14 +207,14 @@ describe('carryforward expiry', () => {
     // 2027. Spending 2023 first leaves 2024's loss alive (2027 − 2024 = 3, just
     // inside the window) and the gain is sheltered. Spending 2024 first would
     // leave 2023's, which has lapsed by 2027 — and ¥60,945 would fall due.
-    expect(yoy.years.find((y) => y.year === 2025)!.estimatedCapitalGainsTax.toFixed()).toBe('0')
-    expect(yoy.years.find((y) => y.year === 2027)!.estimatedCapitalGainsTax.toFixed()).toBe('0')
+    expect(yoy.years.find((year) => year.year === 2025)!.estimatedCapitalGainsTax.toFixed()).toBe('0')
+    expect(yoy.years.find((year) => year.year === 2027)!.estimatedCapitalGainsTax.toFixed()).toBe('0')
   })
 
   it('leaves every year untouched when carryforward is not applied', () => {
     const events = [close('2022-03-01', -1_000_000), close('2025-03-01', 600_000)] as never
     const yoy = buildYearOverYear(events, [], 'CALENDAR')
-    expect(yoy.years.find((y) => y.year === 2025)!.netTaxable.toFixed()).toBe('600000')
+    expect(yoy.years.find((year) => year.year === 2025)!.netTaxable.toFixed()).toBe('600000')
   })
 })
 
@@ -222,7 +222,7 @@ describe('year-over-year', () => {
   const yoy = buildYearOverYear(engine.realized, dividends, 'CALENDAR')
 
   it('covers every year with activity, ascending', () => {
-    expect(yoy.years.map((y) => y.year)).toEqual([2022, 2025, 2026])
+    expect(yoy.years.map((year) => year.year)).toEqual([2022, 2025, 2026])
   })
 
   it('accumulates net-after-tax monotonically in profitable years', () => {
@@ -233,8 +233,8 @@ describe('year-over-year', () => {
 
   it('never estimates tax on a year with no taxable gains', () => {
     const wrongly = yoy.years
-      .filter((y) => y.netTaxable.lte(0) && !y.estimatedCapitalGainsTax.isZero())
-      .map((y) => `${String(y.year)}: net=${y.netTaxable.toFixed()} tax=${y.estimatedCapitalGainsTax.toFixed()}`)
+      .filter((year) => year.netTaxable.lte(0) && !year.estimatedCapitalGainsTax.isZero())
+      .map((year) => `${String(year.year)}: net=${year.netTaxable.toFixed()} tax=${year.estimatedCapitalGainsTax.toFixed()}`)
     expect(wrongly).toEqual([])
   })
 

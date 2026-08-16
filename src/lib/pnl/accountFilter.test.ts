@@ -15,7 +15,7 @@ const allTrades = loadAllTrades().trades
 const full = runEngine(allTrades)
 
 const forFilter = (f: AccountFilter) =>
-  runEngine(allTrades.filter((t) => matchesAccountFilter(t.accountType, f)))
+  runEngine(allTrades.filter((trade) => matchesAccountFilter(trade.accountType, f)))
 
 describe('matchesAccountFilter', () => {
   it('treats every NISA frame as NISA, 旧NISA included', () => {
@@ -31,7 +31,7 @@ describe('matchesAccountFilter', () => {
   })
 
   it('is exhaustive — NISA and SPECIFIC partition ALL', () => {
-    const accounts = [...new Set(allTrades.map((t) => t.accountType))]
+    const accounts = [...new Set(allTrades.map((trade) => trade.accountType))]
     for (const a of accounts) {
       expect(matchesAccountFilter(a, 'ALL')).toBe(true)
       // Exactly one of the two buckets claims each account.
@@ -52,27 +52,27 @@ describe('filtering before the engine is exact', () => {
    */
   const positionKeys = (ps: typeof full.positions) =>
     ps
-      .map((p) =>
+      .map((point) =>
         [
-          p.symbol,
-          p.accountType,
-          p.quantity.toFixed(),
-          p.costBasisJpy.toFixed(),
-          p.avgPriceNative.toFixed(),
+          point.symbol,
+          point.accountType,
+          point.quantity.toFixed(),
+          point.costBasisJpy.toFixed(),
+          point.avgPriceNative.toFixed(),
         ].join('|'),
       )
       .sort()
 
   const realizedKeys = (rs: typeof full.realized) =>
     rs
-      .map((e) =>
+      .map((event) =>
         [
-          e.tradeDate,
-          e.symbol,
-          e.accountType,
-          e.quantity.toFixed(),
-          e.realizedJpy.toFixed(),
-          e.costJpy.toFixed(),
+          event.tradeDate,
+          event.symbol,
+          event.accountType,
+          event.quantity.toFixed(),
+          event.realizedJpy.toFixed(),
+          event.costJpy.toFixed(),
         ].join('|'),
       )
       .sort()
@@ -80,7 +80,7 @@ describe('filtering before the engine is exact', () => {
   it('leaves surviving positions identical to the unfiltered run', () => {
     for (const f of ['NISA', 'SPECIFIC'] as const) {
       expect(positionKeys(forFilter(f).positions)).toEqual(
-        positionKeys(full.positions.filter((p) => matchesAccountFilter(p.accountType, f))),
+        positionKeys(full.positions.filter((point) => matchesAccountFilter(point.accountType, f))),
       )
     }
   })
@@ -88,7 +88,7 @@ describe('filtering before the engine is exact', () => {
   it('leaves realized events identical to the unfiltered run', () => {
     for (const f of ['NISA', 'SPECIFIC'] as const) {
       expect(realizedKeys(forFilter(f).realized)).toEqual(
-        realizedKeys(full.realized.filter((e) => matchesAccountFilter(e.accountType, f))),
+        realizedKeys(full.realized.filter((event) => matchesAccountFilter(event.accountType, f))),
       )
     }
   })

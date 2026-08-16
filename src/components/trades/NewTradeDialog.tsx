@@ -97,20 +97,20 @@ export function NewTradeDialog({
           memo: form.memo || undefined,
         },
       }),
-    onSuccess: (r) => {
-      if (r.ok) {
+    onSuccess: (row) => {
+      if (row.ok) {
         setForm(blank())
         setErrors({})
         onCreated()
         onOpenChange(false)
       } else {
-        setErrors(r.errors ?? { _: 'Could not save.' })
+        setErrors(row.errors ?? { _: 'Could not save.' })
       }
     },
   })
 
   const set = <K extends keyof Form>(key: K) => (v: Form[K]) => {
-    setForm((f) => ({ ...f, [key]: v }))
+    setForm((file) => ({ ...file, [key]: v }))
   }
 
   const isUsd = form.assetClass === 'US_EQUITY'
@@ -139,8 +139,8 @@ export function NewTradeDialog({
                 <select
                   className={styles.input}
                   value={form.assetClass}
-                  onChange={(e) => {
-                    set('assetClass')(e.target.value as Form['assetClass'])
+                  onChange={(event) => {
+                    set('assetClass')(event.target.value as Form['assetClass'])
                   }}
                 >
                   <option value="JP_EQUITY">JP equity</option>
@@ -153,8 +153,8 @@ export function NewTradeDialog({
                 <select
                   className={styles.input}
                   value={form.accountType}
-                  onChange={(e) => {
-                    set('accountType')(e.target.value as Form['accountType'])
+                  onChange={(event) => {
+                    set('accountType')(event.target.value as Form['accountType'])
                   }}
                 >
                   <option value="SPECIFIC">特定 (taxable)</option>
@@ -168,8 +168,8 @@ export function NewTradeDialog({
                 <select
                   className={styles.input}
                   value={form.side}
-                  onChange={(e) => {
-                    set('side')(e.target.value as Form['side'])
+                  onChange={(event) => {
+                    set('side')(event.target.value as Form['side'])
                   }}
                 >
                   <option value="BUY">Buy</option>
@@ -189,8 +189,8 @@ export function NewTradeDialog({
                 <input
                   className={cx(styles.input, styles.grow)}
                   value={form.symbol}
-                  onChange={(e) => {
-                    set('symbol')(e.target.value)
+                  onChange={(event) => {
+                    set('symbol')(event.target.value)
                   }}
                 />
               </Field>
@@ -198,8 +198,8 @@ export function NewTradeDialog({
                 <input
                   className={cx(styles.input, styles.grow)}
                   value={form.name}
-                  onChange={(e) => {
-                    set('name')(e.target.value)
+                  onChange={(event) => {
+                    set('name')(event.target.value)
                   }}
                 />
               </Field>
@@ -211,8 +211,8 @@ export function NewTradeDialog({
                   type="date"
                   className={styles.input}
                   value={form.tradeDate}
-                  onChange={(e) => {
-                    set('tradeDate')(e.target.value)
+                  onChange={(event) => {
+                    set('tradeDate')(event.target.value)
                   }}
                 />
               </Field>
@@ -221,8 +221,8 @@ export function NewTradeDialog({
                   type="date"
                   className={styles.input}
                   value={form.settleDate}
-                  onChange={(e) => {
-                    set('settleDate')(e.target.value)
+                  onChange={(event) => {
+                    set('settleDate')(event.target.value)
                   }}
                 />
               </Field>
@@ -234,8 +234,8 @@ export function NewTradeDialog({
                   inputMode="decimal"
                   className={cx(styles.input, styles.num)}
                   value={form.quantity}
-                  onChange={(e) => {
-                    set('quantity')(e.target.value)
+                  onChange={(event) => {
+                    set('quantity')(event.target.value)
                   }}
                 />
               </Field>
@@ -248,8 +248,8 @@ export function NewTradeDialog({
                   inputMode="decimal"
                   className={cx(styles.input, styles.num)}
                   value={form.unitPrice}
-                  onChange={(e) => {
-                    set('unitPrice')(e.target.value)
+                  onChange={(event) => {
+                    set('unitPrice')(event.target.value)
                   }}
                 />
               </Field>
@@ -259,8 +259,8 @@ export function NewTradeDialog({
                     inputMode="decimal"
                     className={cx(styles.input, styles.num)}
                     value={form.fxRate}
-                    onChange={(e) => {
-                      set('fxRate')(e.target.value)
+                    onChange={(event) => {
+                      set('fxRate')(event.target.value)
                     }}
                   />
                 </Field>
@@ -273,8 +273,8 @@ export function NewTradeDialog({
                   inputMode="decimal"
                   className={cx(styles.input, styles.num)}
                   value={form.fee}
-                  onChange={(e) => {
-                    set('fee')(e.target.value)
+                  onChange={(event) => {
+                    set('fee')(event.target.value)
                   }}
                 />
               </Field>
@@ -283,8 +283,8 @@ export function NewTradeDialog({
                   inputMode="decimal"
                   className={cx(styles.input, styles.num)}
                   value={form.feeTax}
-                  onChange={(e) => {
-                    set('feeTax')(e.target.value)
+                  onChange={(event) => {
+                    set('feeTax')(event.target.value)
                   }}
                 />
               </Field>
@@ -294,8 +294,8 @@ export function NewTradeDialog({
               <input
                 className={cx(styles.input, styles.grow)}
                 value={form.memo}
-                onChange={(e) => {
-                  set('memo')(e.target.value)
+                onChange={(event) => {
+                  set('memo')(event.target.value)
                 }}
                 placeholder="Rationale, thesis, mistake…"
               />

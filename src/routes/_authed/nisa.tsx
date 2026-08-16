@@ -16,7 +16,7 @@ const FRAME_LABEL = {
 
 function Nisa() {
   const d = Route.useLoaderData()
-  const years = [...new Set(d.annual.map((a) => a.year))].sort((a, b) => b - a)
+  const years = [...new Set(d.annual.map((frame) => frame.year))].sort((a, b) => b - a)
 
   return (
     <>
@@ -88,12 +88,12 @@ function Nisa() {
       >
         <div className={styles.years}>
           {years.map((year) => {
-            const frames = d.annual.filter((a) => a.year === year)
+            const frames = d.annual.filter((frame) => frame.year === year)
             return (
               <div key={year} className={styles.yearCard}>
                 <h3 className={styles.yearTitle}>{year}</h3>
                 {(['NISA_GROWTH', 'NISA_TSUMITATE'] as const).map((frame) => {
-                  const a = frames.find((f) => f.frame === frame)
+                  const a = frames.find((file) => file.frame === frame)
                   const limit = frame === 'NISA_GROWTH' ? 2_400_000 : 1_200_000
                   const used = a ? Number(a.used) : 0
                   return (
@@ -129,13 +129,13 @@ function Nisa() {
             </tr>
           </thead>
           <tbody>
-            {d.contributions.map((c) => {
-              const total = Number(c.growth) + Number(c.tsumitate)
+            {d.contributions.map((contribution) => {
+              const total = Number(contribution.growth) + Number(contribution.tsumitate)
               return (
-                <tr key={c.year}>
-                  <td>{c.year}</td>
-                  <td data-numeric>{yen(c.growth)}</td>
-                  <td data-numeric>{yen(c.tsumitate)}</td>
+                <tr key={contribution.year}>
+                  <td>{contribution.year}</td>
+                  <td data-numeric>{yen(contribution.growth)}</td>
+                  <td data-numeric>{yen(contribution.tsumitate)}</td>
                   <td data-numeric>{yen(total)}</td>
                   <td data-numeric>{pct(total / 3_600_000)}</td>
                 </tr>

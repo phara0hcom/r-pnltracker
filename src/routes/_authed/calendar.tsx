@@ -69,12 +69,12 @@ function Calendar() {
   const first = dayList[0]
   const leadingBlanks = first ? (new Date(`${first.date}T00:00:00Z`).getUTCDay() + 6) % 7 : 0
 
-  const traded = dayList.filter((d) => d.tradeCount > 0)
+  const traded = dayList.filter((day) => day.tradeCount > 0)
   const monthPnl = dayList.reduce((a, d) => a + (d.realizedJpy ? Number(d.realizedJpy) : 0), 0)
-  const journalled = dayList.filter((d) => d.note != null).length
+  const journalled = dayList.filter((day) => day.note != null).length
 
   // Scale tint by the largest absolute day so a quiet month still shows contrast.
-  const peak = Math.max(1, ...dayList.map((d) => Math.abs(Number(d.realizedJpy ?? 0))))
+  const peak = Math.max(1, ...dayList.map((day) => Math.abs(Number(day.realizedJpy ?? 0))))
 
   return (
     <>
@@ -110,9 +110,9 @@ function Calendar() {
       </PageHeader>
 
       <div className={styles.grid} role="grid" aria-label={`Trading calendar for ${month}`}>
-        {WEEKDAYS.map((w) => (
-          <div key={w} className={styles.weekday} role="columnheader">
-            {w}
+        {WEEKDAYS.map((weekday) => (
+          <div key={weekday} className={styles.weekday} role="columnheader">
+            {weekday}
           </div>
         ))}
 

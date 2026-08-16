@@ -145,7 +145,7 @@ describe('interaction with CSV import', () => {
 
   it('never collides with an imported row', () => {
     const manual = buildManualTrade(parse())
-    const importedHashes = new Set(imported.trades.map((t) => t.sourceRowHash))
+    const importedHashes = new Set(imported.trades.map((trade) => trade.sourceRowHash))
     expect(importedHashes.has(manual.sourceRowHash)).toBe(false)
   })
 
@@ -158,7 +158,7 @@ describe('interaction with CSV import', () => {
     const plan = planImport(imported, stored)
     expect(plan.newTrades).toHaveLength(315)
     expect(plan.duplicateTrades).toBe(0)
-    expect(plan.newTrades.some((t) => t.sourceRowHash === manual.sourceRowHash)).toBe(false)
+    expect(plan.newTrades.some((trade) => trade.sourceRowHash === manual.sourceRowHash)).toBe(false)
   })
 
   it('keeps an edited import recognisable so the correction survives re-import', () => {
@@ -171,7 +171,7 @@ describe('interaction with CSV import', () => {
     expect(edited.quantity.toFixed()).toBe('999')
 
     // Re-importing the CSV therefore skips the row rather than reverting it.
-    const stored = new Set(imported.trades.map((t) => t.sourceRowHash))
+    const stored = new Set(imported.trades.map((trade) => trade.sourceRowHash))
     const plan = planImport(loadAllTrades(), stored)
     expect(plan.newTrades).toHaveLength(0)
   })
@@ -180,19 +180,19 @@ describe('interaction with CSV import', () => {
     // Soft delete: the row stays with `deletedAt` set, so its hash is still
     // present and the importer recognises it as already seen.
     const deleted = imported.trades[5]!
-    const stored = new Set(imported.trades.map((t) => t.sourceRowHash))
+    const stored = new Set(imported.trades.map((trade) => trade.sourceRowHash))
     const plan = planImport(loadAllTrades(), stored)
-    expect(plan.newTrades.some((t) => t.sourceRowHash === deleted.sourceRowHash)).toBe(false)
+    expect(plan.newTrades.some((trade) => trade.sourceRowHash === deleted.sourceRowHash)).toBe(false)
   })
 
   it('would resurrect a hard-deleted row — the reason deletion is soft', () => {
     // Demonstrates the failure mode the tombstone prevents.
     const hardDeleted = imported.trades[5]!
     const stored = new Set(
-      imported.trades.filter((t) => t !== hardDeleted).map((t) => t.sourceRowHash),
+      imported.trades.filter((trade) => trade !== hardDeleted).map((trade) => trade.sourceRowHash),
     )
     const plan = planImport(loadAllTrades(), stored)
-    expect(plan.newTrades.some((t) => t.sourceRowHash === hardDeleted.sourceRowHash)).toBe(true)
+    expect(plan.newTrades.some((trade) => trade.sourceRowHash === hardDeleted.sourceRowHash)).toBe(true)
   })
 })
 
@@ -223,13 +223,13 @@ describe('engine treats manual trades identically', () => {
     // Chosen from the data rather than hardcoded: 8411 was day-traded flat on
     // 2026-07-29, so it has no open lot to close.
     const held = runEngine(all).positions.find(
-      (p) => p.assetClass === 'JP_EQUITY' && p.quantity.gt(0),
+      (point) => point.assetClass === 'JP_EQUITY' && point.quantity.gt(0),
     )
     expect(held).toBeDefined()
     if (!held) throw new Error('no open JP equity position to close')
 
     const sameInstrument = all.filter(
-      (t) => t.symbol === held.symbol && t.accountType === held.accountType,
+      (trade) => trade.symbol === held.symbol && trade.accountType === held.accountType,
     )
     const combined = emptyParseResult()
 

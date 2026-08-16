@@ -23,9 +23,9 @@ export function readShiftJisFile(path: string): string {
 function listFiles(dir: string, pattern: RegExp): string[] {
   if (!existsSync(dir)) return []
   return readdirSync(dir)
-    .filter((f) => pattern.test(f))
+    .filter((name) => pattern.test(name))
     .sort()
-    .map((f) => join(dir, f))
+    .map((name) => join(dir, name))
 }
 
 export const tradeHistoryFiles = (): string[] => listFiles(CSV_DIR, /^tradehistory\(.+\)\.?.*\.csv$/i)
@@ -34,12 +34,12 @@ export const torizanFiles = (): string[] => listFiles(STATEMENT_DIR, /_torizan\.
 /** Merge many ParseResults into one. */
 export function mergeResults(results: ParseResult[]): ParseResult {
   const out = emptyParseResult()
-  for (const r of results) {
-    out.trades.push(...r.trades)
-    out.dividends.push(...r.dividends)
-    out.snapshots.push(...r.snapshots)
-    out.cashMovements.push(...r.cashMovements)
-    out.errors.push(...r.errors)
+  for (const result of results) {
+    out.trades.push(...result.trades)
+    out.dividends.push(...result.dividends)
+    out.snapshots.push(...result.snapshots)
+    out.cashMovements.push(...result.cashMovements)
+    out.errors.push(...result.errors)
   }
   return out
 }
@@ -47,15 +47,15 @@ export function mergeResults(results: ParseResult[]): ParseResult {
 /** Deduplicate by `sourceRowHash`, mirroring what the DB unique index does. */
 export function dedupeTrades(result: ParseResult): ParseResult {
   const seen = new Set<string>()
-  result.trades = result.trades.filter((t) => {
-    if (seen.has(t.sourceRowHash)) return false
-    seen.add(t.sourceRowHash)
+  result.trades = result.trades.filter((trade) => {
+    if (seen.has(trade.sourceRowHash)) return false
+    seen.add(trade.sourceRowHash)
     return true
   })
   const seenDiv = new Set<string>()
-  result.dividends = result.dividends.filter((d) => {
-    if (seenDiv.has(d.sourceRowHash)) return false
-    seenDiv.add(d.sourceRowHash)
+  result.dividends = result.dividends.filter((payout) => {
+    if (seenDiv.has(payout.sourceRowHash)) return false
+    seenDiv.add(payout.sourceRowHash)
     return true
   })
   return result
@@ -63,14 +63,16 @@ export function dedupeTrades(result: ParseResult): ParseResult {
 
 /** All trades from the three tradehistory exports. */
 export function loadAllTrades(): ParseResult {
-  const results = tradeHistoryFiles().map((p) =>
-    parseTradeHistory(readShiftJisFile(p), basename(p)),
+  const results = tradeHistoryFiles().map((path) =>
+    parseTradeHistory(readShiftJisFile(path), basename(path)),
   )
   return dedupeTrades(mergeResults(results))
 }
 
 /** All monthly statements — dividends, cash ledger, position snapshots. */
 export function loadAllStatements(): ParseResult {
-  const results = torizanFiles().map((p) => parseTorizan(readShiftJisFile(p), basename(p)))
+  const results = torizanFiles().map((path) =>
+    parseTorizan(readShiftJisFile(path), basename(path)),
+  )
   return dedupeTrades(mergeResults(results))
 }

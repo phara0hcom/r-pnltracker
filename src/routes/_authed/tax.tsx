@@ -24,14 +24,14 @@ function Tax() {
   const { basis } = Route.useSearch()
   const navigate = Route.useNavigate()
 
-  const { data: d, isPending } = useQuery({
+  const { data: taxData, isPending } = useQuery({
     queryKey: ['tax', basis],
     queryFn: () => getTax({ data: { basis } }),
   })
 
-  if (isPending || !d) return <Empty>Loading tax figures…</Empty>
+  if (isPending || !taxData) return <Empty>Loading tax figures…</Empty>
 
-  const current = d.years.at(-1)
+  const current = taxData.years.at(-1)
 
   return (
     <>
@@ -111,36 +111,36 @@ function Tax() {
             </tr>
           </thead>
           <tbody>
-            {d.years.map((y) => (
-              <tr key={y.year}>
-                <td>{y.year}</td>
-                <td data-numeric className={styles.profit}>{yen(y.taxableGains)}</td>
-                <td data-numeric className={styles.loss}>{yen(y.taxableLosses)}</td>
-                <td data-numeric>{yen(y.netTaxable)}</td>
-                <td data-numeric>{yen(y.estimatedTax)}</td>
-                <td data-numeric className={styles.profit}>{yen(y.nisaGains)}</td>
-                <td data-numeric>{yen(Number(y.dividendGross) + Number(y.nisaDividends))}</td>
-                <td data-numeric>{y.tradeCount}</td>
-                <td data-numeric>{pct(y.winRate, 0)}</td>
-                <td data-numeric className={tone(y.netAfterTax)}>{yen(y.netAfterTax)}</td>
+            {taxData.years.map((year) => (
+              <tr key={year.year}>
+                <td>{year.year}</td>
+                <td data-numeric className={styles.profit}>{yen(year.taxableGains)}</td>
+                <td data-numeric className={styles.loss}>{yen(year.taxableLosses)}</td>
+                <td data-numeric>{yen(year.netTaxable)}</td>
+                <td data-numeric>{yen(year.estimatedTax)}</td>
+                <td data-numeric className={styles.profit}>{yen(year.nisaGains)}</td>
+                <td data-numeric>{yen(Number(year.dividendGross) + Number(year.nisaDividends))}</td>
+                <td data-numeric>{year.tradeCount}</td>
+                <td data-numeric>{pct(year.winRate, 0)}</td>
+                <td data-numeric className={tone(year.netAfterTax)}>{yen(year.netAfterTax)}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
               <th scope="row">Total</th>
-              <td data-numeric>{yen(d.totals.taxableGains)}</td>
+              <td data-numeric>{yen(taxData.totals.taxableGains)}</td>
               <td data-numeric />
               <td data-numeric />
-              <td data-numeric>{yen(d.totals.estimatedTax)}</td>
-              <td data-numeric>{yen(d.totals.nisaGains)}</td>
+              <td data-numeric>{yen(taxData.totals.estimatedTax)}</td>
+              <td data-numeric>{yen(taxData.totals.nisaGains)}</td>
               <td data-numeric colSpan={3} />
-              <td data-numeric>{yen(d.totals.netAfterTax)}</td>
+              <td data-numeric>{yen(taxData.totals.netAfterTax)}</td>
             </tr>
           </tfoot>
         </Table>
 
-        {d.years.some((y) => Number(y.carryforwardLoss) > 0) ? (
+        {taxData.years.some((year) => Number(year.carryforwardLoss) > 0) ? (
           <p className={styles.note}>
             Years that net to a loss show a carryforward. Japanese rules allow a 3-year 繰越控除, but
             only if you file a return — it is not automatic under 源泉徴収あり.
@@ -152,7 +152,7 @@ function Tax() {
         title="Dividends"
         description="Attributed to accounts by matching holdings, since the statement's cash ledger has no account column."
       >
-        {d.dividends.length === 0 ? (
+        {taxData.dividends.length === 0 ? (
           <Empty>No dividends recorded.</Empty>
         ) : (
           <Table>
@@ -167,22 +167,22 @@ function Tax() {
               </tr>
             </thead>
             <tbody>
-              {d.dividends.map((v, i) => (
-                <tr key={`${v.payDate}-${String(i)}`}>
-                  <td>{v.payDate}</td>
-                  <td>{v.kind === 'DIVIDEND' ? '配当金' : '分配金'}</td>
+              {taxData.dividends.map((payout, index) => (
+                <tr key={`${payout.payDate}-${String(index)}`}>
+                  <td>{payout.payDate}</td>
+                  <td>{payout.kind === 'DIVIDEND' ? '配当金' : '分配金'}</td>
                   <td>
-                    {ACCOUNT_LABEL[v.accountType] ?? v.accountType}
-                    {v.isTaxable ? null : <span className={styles.tag}>tax-free</span>}
-                    {v.confident ? null : (
+                    {ACCOUNT_LABEL[payout.accountType] ?? payout.accountType}
+                    {payout.isTaxable ? null : <span className={styles.tag}>tax-free</span>}
+                    {payout.confident ? null : (
                       <span className={styles.tag} title="Paid after the position closed; account inferred from the last holder">
                         inferred
                       </span>
                     )}
                   </td>
-                  <td data-numeric>{yen(v.grossAmount)}</td>
-                  <td data-numeric>{Number(v.tax) === 0 ? '—' : yen(v.tax)}</td>
-                  <td data-numeric>{yen(v.netAmount)}</td>
+                  <td data-numeric>{yen(payout.grossAmount)}</td>
+                  <td data-numeric>{Number(payout.tax) === 0 ? '—' : yen(payout.tax)}</td>
+                  <td data-numeric>{yen(payout.netAmount)}</td>
                 </tr>
               ))}
             </tbody>

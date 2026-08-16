@@ -33,10 +33,10 @@ function Positions() {
   // portfolio would need to reach ~9×10¹⁵ before a float lost integer precision.
   // Fix: return the three totals from `getPositions` already summed and
   // formatted, so the client only renders them.
-  const totalCost = rows.reduce((a, r) => a + Number(r.costBasisJpy), 0)
-  const priced = rows.filter((r) => r.marketValueJpy != null)
-  const totalValue = priced.reduce((a, r) => a + Number(r.marketValueJpy), 0)
-  const totalUnrealized = priced.reduce((a, r) => a + Number(r.unrealizedJpy), 0)
+  const totalCost = rows.reduce((running, row) => running + Number(row.costBasisJpy), 0)
+  const priced = rows.filter((row) => row.marketValueJpy != null)
+  const totalValue = priced.reduce((running, row) => running + Number(row.marketValueJpy), 0)
+  const totalUnrealized = priced.reduce((running, row) => running + Number(row.unrealizedJpy), 0)
   const unpriced = rows.length - priced.length
 
   return (
@@ -91,31 +91,31 @@ function Positions() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={`${r.symbol}-${r.accountType}`}>
+            {rows.map((row) => (
+              <tr key={`${row.symbol}-${row.accountType}`}>
                 <td>
-                  <InstrumentLink symbol={r.symbol} name={r.name} assetClass={r.assetClass} />
+                  <InstrumentLink symbol={row.symbol} name={row.name} assetClass={row.assetClass} />
                 </td>
-                <td>{ACCOUNT_LABEL[r.accountType] ?? r.accountType}</td>
-                <td>{ASSET_LABEL[r.assetClass]}</td>
-                <td data-numeric>{qty(r.quantity)}</td>
+                <td>{ACCOUNT_LABEL[row.accountType] ?? row.accountType}</td>
+                <td>{ASSET_LABEL[row.assetClass]}</td>
+                <td data-numeric>{qty(row.quantity)}</td>
                 <td data-numeric>
-                  {r.currency === 'USD' ? `$${Number(r.avgPriceNative).toFixed(2)}` : yen(r.avgCostPerUnit)}
+                  {row.currency === 'USD' ? `$${Number(row.avgPriceNative).toFixed(2)}` : yen(row.avgCostPerUnit)}
                 </td>
-                <td data-numeric>{yen(r.costBasisJpy)}</td>
+                <td data-numeric>{yen(row.costBasisJpy)}</td>
                 <td data-numeric>
-                  {r.currentPrice == null
+                  {row.currentPrice == null
                     ? '—'
-                    : r.currency === 'USD'
-                      ? `$${Number(r.currentPrice).toFixed(2)}`
-                      : yen(r.currentPrice)}
+                    : row.currency === 'USD'
+                      ? `$${Number(row.currentPrice).toFixed(2)}`
+                      : yen(row.currentPrice)}
                 </td>
-                <td data-numeric>{yen(r.marketValueJpy)}</td>
-                <td data-numeric className={tone(r.unrealizedJpy)}>
-                  {r.unrealizedJpy == null ? '—' : yenSigned(r.unrealizedJpy)}
+                <td data-numeric>{yen(row.marketValueJpy)}</td>
+                <td data-numeric className={tone(row.unrealizedJpy)}>
+                  {row.unrealizedJpy == null ? '—' : yenSigned(row.unrealizedJpy)}
                 </td>
-                <td data-numeric className={tone(r.unrealizedJpy)}>
-                  {pct(r.unrealizedPct)}
+                <td data-numeric className={tone(row.unrealizedJpy)}>
+                  {pct(row.unrealizedPct)}
                 </td>
               </tr>
             ))}

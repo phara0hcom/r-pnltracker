@@ -32,9 +32,9 @@ const decimalString = z
   .string()
   .trim()
   .min(1, 'required')
-  .refine((v) => {
+  .refine((value) => {
     try {
-      return new Decimal(v).isFinite()
+      return new Decimal(value).isFinite()
     } catch {
       return false
     }
@@ -43,7 +43,7 @@ const decimalString = z
 const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD')
-  .refine((v) => !Number.isNaN(Date.parse(v)), 'not a real date')
+  .refine((value) => !Number.isNaN(Date.parse(value)), 'not a real date')
 
 /**
  * Input shape for the manual-entry form.

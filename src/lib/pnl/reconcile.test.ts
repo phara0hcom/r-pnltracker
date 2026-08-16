@@ -32,13 +32,13 @@ const key = (symbol: string, account: AccountType) => `${symbol}\0${account}`
  */
 const usNameToTicker = new Map<string, string>(
   allTrades
-    .filter((t) => t.assetClass === 'US_EQUITY' && t.name)
-    .map((t) => [toHalfWidth(t.name), t.symbol]),
+    .filter((trade) => trade.assetClass === 'US_EQUITY' && trade.name)
+    .map((trade) => [toHalfWidth(trade.name), trade.symbol]),
 )
 
 /** Engine positions as of a date, on a settlement basis. */
 function positionsAsOf(asOf: string): Map<string, Decimal> {
-  const settled = allTrades.filter((t) => t.settleDate <= asOf)
+  const settled = allTrades.filter((trade) => trade.settleDate <= asOf)
   const { positions } = runEngine(settled)
   const m = new Map<string, Decimal>()
   for (const p of positions) m.set(key(p.symbol, p.accountType), p.quantity)
@@ -49,7 +49,7 @@ function positionsAsOf(asOf: string): Map<string, Decimal> {
 function expectedAsOf(asOf: string): { matched: Map<string, Decimal>; unmapped: string[] } {
   const matched = new Map<string, Decimal>()
   const unmapped: string[] = []
-  for (const s of snapshots.filter((x) => x.asOf === asOf)) {
+  for (const s of snapshots.filter((item) => item.asOf === asOf)) {
     // JP equity codes are numeric and join directly; funds need the name map.
     const isCode = /^\d{4}$/.test(s.symbol)
     const symbol = isCode
@@ -65,7 +65,7 @@ function expectedAsOf(asOf: string): { matched: Map<string, Decimal>; unmapped: 
   return { matched, unmapped }
 }
 
-const months = [...new Set(snapshots.map((s) => s.asOf))].sort()
+const months = [...new Set(snapshots.map((entry) => entry.asOf))].sort()
 
 describe('month-end reconciliation vs 取引残高報告書', () => {
   it('has 10 monthly statements to check against', () => {

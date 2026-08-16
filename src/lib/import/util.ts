@@ -21,15 +21,15 @@ export function decodeShiftJis(buf: Buffer | Uint8Array): string {
  * Rakuten right-pads instrument names with 全角スペース, so a plain `.trim()`
  * leaves trailing padding and breaks symbol matching between files.
  */
-export function jtrim(s: string | undefined | null): string {
-  if (s == null) return ''
-  return s.replace(/^[\s　]+|[\s　]+$/g, '')
+export function jtrim(raw: string | undefined | null): string {
+  if (raw == null) return ''
+  return raw.replace(/^[\s　]+|[\s　]+$/g, '')
 }
 
 /** Rakuten's null marker is a bare hyphen. */
-export function isBlank(s: string | undefined | null): boolean {
-  const t = jtrim(s ?? '')
-  return t === '' || t === '-' || t === '—' || t === '－'
+export function isBlank(raw: string | undefined | null): boolean {
+  const trimmed = jtrim(raw ?? '')
+  return trimmed === '' || trimmed === '-' || trimmed === '—' || trimmed === '－'
 }
 
 /**
@@ -37,11 +37,11 @@ export function isBlank(s: string | undefined | null): boolean {
  * full-width digits. Returns null for blanks so callers can distinguish
  * "absent" (unsettled trade) from "zero".
  */
-export function parseNum(s: string | undefined | null): Decimal | null {
-  if (isBlank(s)) return null
-  const normalized = jtrim(s)
+export function parseNum(raw: string | undefined | null): Decimal | null {
+  if (isBlank(raw)) return null
+  const normalized = jtrim(raw)
     // full-width digits/punctuation → ASCII
-    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[０-９]/g, (fullWidth) => String.fromCharCode(fullWidth.charCodeAt(0) - 0xfee0))
     .replace(/[，、]/g, ',')
     .replace(/[．]/g, '.')
     .replace(/[▲△]/g, '-') // Japanese negative markers
@@ -52,13 +52,13 @@ export function parseNum(s: string | undefined | null): Decimal | null {
   // ¥1,000,000 settled, of which ¥2,251 was paid with points. Concatenating
   // every digit turns that into ¥10,000,002,251, which silently destroys the
   // cost basis for any trade that used points.
-  const m = /-?\d[\d,]*(?:\.\d+)?/.exec(normalized)
-  if (!m) return null
-  const cleaned = m[0].replace(/,/g, '')
+  const firstNumber = /-?\d[\d,]*(?:\.\d+)?/.exec(normalized)
+  if (!firstNumber) return null
+  const cleaned = firstNumber[0].replace(/,/g, '')
   if (cleaned === '' || cleaned === '-' || cleaned === '.') return null
   try {
-    const d = new Decimal(cleaned)
-    return d.isFinite() ? d : null
+    const parsed = new Decimal(cleaned)
+    return parsed.isFinite() ? parsed : null
   } catch {
     return null
   }
@@ -69,17 +69,20 @@ export function parseNum(s: string | undefined | null): Decimal | null {
  * applied to the purchase. Points still form part of the acquisition cost, so
  * this is recorded for information and does NOT reduce cost basis.
  */
-export function parsePointsUsed(s: string | undefined | null): Decimal | null {
-  if (isBlank(s)) return null
-  const m = /[（(]\s*([\d,]+)\s*[）)]/.exec(jtrim(s)
-    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)))
-  if (!m) return null
-  return parseNum(m[1])
+export function parsePointsUsed(raw: string | undefined | null): Decimal | null {
+  if (isBlank(raw)) return null
+  const inParentheses = /[（(]\s*([\d,]+)\s*[）)]/.exec(
+    jtrim(raw).replace(/[０-９]/g, (fullWidth) =>
+      String.fromCharCode(fullWidth.charCodeAt(0) - 0xfee0),
+    ),
+  )
+  if (!inParentheses) return null
+  return parseNum(inParentheses[1])
 }
 
 /** Same as `parseNum` but blanks collapse to 0 — for fee columns where "-" means "none charged". */
-export function parseNumOrZero(s: string | undefined | null): Decimal {
-  return parseNum(s) ?? ZERO
+export function parseNumOrZero(raw: string | undefined | null): Decimal {
+  return parseNum(raw) ?? ZERO
 }
 
 /**
@@ -104,24 +107,24 @@ export function toYen(amount: Decimal): Decimal {
  * Returns null when unparseable so the row can be reported rather than
  * silently landing in the wrong tax year.
  */
-export function parseDate(s: string | undefined | null): string | null {
-  if (isBlank(s)) return null
-  const t = jtrim(s).replace(/[年月]/g, '/').replace(/日/g, '')
-  const m = /(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/.exec(t)
-  if (!m) return null
-  const [, y, mo, d] = m
-  const yy = Number(y)
-  const mm = Number(mo)
-  const dd = Number(d)
+export function parseDate(raw: string | undefined | null): string | null {
+  if (isBlank(raw)) return null
+  const withSlashes = jtrim(raw).replace(/[年月]/g, '/').replace(/日/g, '')
+  const parts = /(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/.exec(withSlashes)
+  if (!parts) return null
+  const [, rawYear, rawMonth, rawDay] = parts
+  const year = Number(rawYear)
+  const month = Number(rawMonth)
+  const day = Number(rawDay)
   // TODO(nit): the day is range-checked without reference to the month, so
   // 2026-02-30 and 2026-04-31 parse as valid and are returned well-formed. The
   // row then fails at INSERT, where Postgres rejects the date — a 500 on the
   // import instead of a row-level error the user can see and correct.
   // Fix: round-trip the constructed date and reject if it moved, e.g.
-  //   const dt = new Date(Date.UTC(yy, mm - 1, dd))
-  //   if (dt.getUTCMonth() !== mm - 1 || dt.getUTCDate() !== dd) return null
-  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null
-  return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
+  //   const asDate = new Date(Date.UTC(year, month - 1, day))
+  //   if (asDate.getUTCMonth() !== month - 1 || asDate.getUTCDate() !== day) return null
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
 /**
@@ -132,14 +135,15 @@ export function parseDate(s: string | undefined | null): string | null {
  * `Ｎ成長`, and full-width variants show up in both. All are folded here.
  */
 export function parseAccountType(raw: string | undefined | null): AccountType | null {
-  const t = jtrim(raw).replace(/[Ｎ]/g, 'N').replace(/\s/g, '')
-  if (t === '') return null
+  const label = jtrim(raw).replace(/[Ｎ]/g, 'N').replace(/\s/g, '')
+  if (label === '') return null
   // Order matters: 旧NISA must be tested before the generic NISA checks.
-  if (t.includes('旧NISA') || t.includes('旧ＮＩＳＡ')) return 'NISA_OLD'
-  if (t.includes('つみたて') || t.includes('積立') || t === 'N積立') return 'NISA_TSUMITATE'
-  if (t.includes('成長') || t === 'N成長') return 'NISA_GROWTH'
-  if (t.includes('非課税')) return 'NISA_OLD' // legacy label in the balance report
-  if (t.includes('特定')) return 'SPECIFIC'
+  if (label.includes('旧NISA') || label.includes('旧ＮＩＳＡ')) return 'NISA_OLD'
+  if (label.includes('つみたて') || label.includes('積立') || label === 'N積立')
+    return 'NISA_TSUMITATE'
+  if (label.includes('成長') || label === 'N成長') return 'NISA_GROWTH'
+  if (label.includes('非課税')) return 'NISA_OLD' // legacy label in the balance report
+  if (label.includes('特定')) return 'SPECIFIC'
   // TODO(nit): 一般口座 is folded into 特定口座. Both are taxable, so every total
   // stays right, but they differ in who files: 特定 (源泉徴収あり) is withheld at
   // source by Rakuten, whereas 一般 is self-reported and nothing is withheld.
@@ -149,18 +153,18 @@ export function parseAccountType(raw: string | undefined | null): AccountType | 
   // everywhere `SPECIFIC` is, and exclude it from the withheld-at-source figure
   // in `lib/tax/report.ts`. Left folded for now because the current exports
   // contain no 一般 rows.
-  if (t.includes('一般')) return 'SPECIFIC'
+  if (label.includes('一般')) return 'SPECIFIC'
   return null
 }
 
 /** 売買区分 / 取引 → side. */
 export function parseSide(raw: string | undefined | null): TradeSide | null {
-  const t = jtrim(raw).replace(/\s/g, '')
-  if (t === '') return null
-  if (t.includes('再投資')) return 'REINVEST'
-  if (t.includes('解約') || t.includes('直解')) return 'REDEEM'
-  if (t.includes('買付') || t === '買' || t.includes('買い')) return 'BUY'
-  if (t.includes('売付') || t === '売' || t.includes('売り')) return 'SELL'
+  const label = jtrim(raw).replace(/\s/g, '')
+  if (label === '') return null
+  if (label.includes('再投資')) return 'REINVEST'
+  if (label.includes('解約') || label.includes('直解')) return 'REDEEM'
+  if (label.includes('買付') || label === '買' || label.includes('買い')) return 'BUY'
+  if (label.includes('売付') || label === '売' || label.includes('売り')) return 'SELL'
   return null
 }
 
@@ -176,12 +180,12 @@ export function assetClassFor(kind: 'JP' | 'US' | 'FUND'): AssetClass {
  * and those must collapse to one row rather than duplicating.
  */
 export function rowHash(parts: (string | number | Decimal | null | undefined)[]): string {
-  const norm = parts.map((p) => {
-    if (p == null) return ''
-    if (p instanceof Decimal) return p.toFixed()
-    return String(p)
+  const normalized = parts.map((part) => {
+    if (part == null) return ''
+    if (part instanceof Decimal) return part.toFixed()
+    return String(part)
   })
-  return createHash('sha256').update(norm.join('|')).digest('hex').slice(0, 32)
+  return createHash('sha256').update(normalized.join('|')).digest('hex').slice(0, 32)
 }
 
 /**
@@ -196,11 +200,11 @@ export function rowHash(parts: (string | number | Decimal | null | undefined)[])
  * therefore the same hashes.
  */
 export function makeOccurrenceCounter(): (key: string) => number {
-  const seen = new Map<string, number>()
+  const seenCount = new Map<string, number>()
   return (key: string) => {
-    const n = seen.get(key) ?? 0
-    seen.set(key, n + 1)
-    return n
+    const alreadySeen = seenCount.get(key) ?? 0
+    seenCount.set(key, alreadySeen + 1)
+    return alreadySeen
   }
 }
 
@@ -212,49 +216,50 @@ export function makeOccurrenceCounter(): (key: string) => number {
  * together with `---` separator lines, and a strict parser rejects them.
  */
 export function splitCsvLine(line: string): string[] {
-  const out: string[] = []
-  let cur = ''
+  const fields: string[] = []
+  let field = ''
   let inQuotes = false
-  for (let i = 0; i < line.length; i++) {
-    // Non-null: `i` is bounded by `line.length`, but noUncheckedIndexedAccess
+  for (let index = 0; index < line.length; index++) {
+    // Non-null: `index` is bounded by `line.length`, but noUncheckedIndexedAccess
     // cannot see that.
-    const c = line[i]!
+    const char = line[index]!
     if (inQuotes) {
-      if (c === '"') {
-        if (line[i + 1] === '"') {
-          cur += '"'
-          i++
+      if (char === '"') {
+        // A doubled quote inside a quoted field is one literal quote.
+        if (line[index + 1] === '"') {
+          field += '"'
+          index++
         } else {
           inQuotes = false
         }
       } else {
-        cur += c
+        field += char
       }
-    } else if (c === '"') {
+    } else if (char === '"') {
       inQuotes = true
-    } else if (c === ',') {
-      out.push(cur)
-      cur = ''
+    } else if (char === ',') {
+      fields.push(field)
+      field = ''
     } else {
-      cur += c
+      field += char
     }
   }
-  out.push(cur)
-  return out
+  fields.push(field)
+  return fields
 }
 
 /** True for the `-----` rules that delimit tables in the statement files. */
 export function isSeparator(line: string): boolean {
-  const t = jtrim(line).replace(/"/g, '')
-  return t.length > 0 && /^-+$/.test(t)
+  const bare = jtrim(line).replace(/"/g, '')
+  return bare.length > 0 && /^-+$/.test(bare)
 }
 
 /** Strip Rakuten's `(1369)` / `(AAPL)` suffix and padding from an instrument name. */
 export function extractCode(nameField: string): { name: string; code: string | null } {
   const raw = jtrim(nameField)
-  const m = /^(.*?)[（(]([^（）()]+)[）)]\s*$/.exec(raw)
-  if (m) {
-    return { name: jtrim(m[1]), code: jtrim(m[2]) }
+  const nameAndCode = /^(.*?)[（(]([^（）()]+)[）)]\s*$/.exec(raw)
+  if (nameAndCode) {
+    return { name: jtrim(nameAndCode[1]), code: jtrim(nameAndCode[2]) }
   }
   return { name: raw, code: null }
 }
@@ -264,21 +269,20 @@ export function extractCode(nameField: string): { name: string; code: string | n
  * The balance report writes tickers as `ＡＡＰＬ`; the trade history uses `AAPL`.
  * Both must resolve to the same instrument.
  */
-export function toHalfWidth(s: string): string {
+export function toHalfWidth(raw: string): string {
   return (
-    jtrim(s)
-      .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    jtrim(raw)
+      .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (fullWidth) =>
+        String.fromCharCode(fullWidth.charCodeAt(0) - 0xfee0),
+      )
       // Rakuten mixes several dash codepoints for the same character across
       // files — U+FF0D in the balance report vs U+2212 elsewhere — so instrument
       // names fail to join unless they are all folded to ASCII hyphen.
       //
-      // TODO(nit): `ー` (U+30FC, katakana prolonged sound mark) is matched only
-      // to be mapped back to itself. It is a letter in fund names (ファンド),
-      // never a dash, so folding it would corrupt them — but including it in the
-      // class and then special-casing it reads as a bug every time.
-      // Fix: drop `ー` from the character class and delete the callback:
-      //   .replace(/[－−–—―]/g, '-')
-      .replace(/[－−–—―ー]/g, (c) => (c === 'ー' ? 'ー' : '-'))
+      // `ー` (U+30FC) is deliberately absent from this class: it is the katakana
+      // prolonged sound mark, a letter in fund names (ファンド), never a dash.
+      // Folding it would corrupt every fund name that contains one.
+      .replace(/[－−–—―]/g, '-')
       .replace(/　/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()

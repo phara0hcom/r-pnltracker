@@ -73,35 +73,37 @@ export interface FxAttributionSummary {
 }
 
 /** Decompose one realized close. Only meaningful for USD-quoted instruments. */
-export function attributeOne(e: RealizedEvent): FxAttribution {
-  const q = e.quantity
-  const p0 = e.entryPriceNative
-  const p1 = e.exitPriceNative
-  const r0 = e.entryFxRate
-  const r1 = e.exitFxRate
+export function attributeOne(close: RealizedEvent): FxAttribution {
+  // Named after the module header's notation: P₀/P₁ are entry and exit price,
+  // R₀/R₁ the matching FX rates.
+  const quantity = close.quantity
+  const entryPrice = close.entryPriceNative
+  const exitPrice = close.exitPriceNative
+  const entryRate = close.entryFxRate
+  const exitRate = close.exitFxRate
 
-  const stockEffectJpy = p1.sub(p0).mul(r1).mul(q)
-  const fxEffectJpy = p0.mul(r1.sub(r0)).mul(q)
+  const stockEffectJpy = exitPrice.sub(entryPrice).mul(exitRate).mul(quantity)
+  const fxEffectJpy = entryPrice.mul(exitRate.sub(entryRate)).mul(quantity)
   const grossJpy = stockEffectJpy.add(fxEffectJpy)
   // Residual — mostly transaction cost and rounding, plus the averaging
   // cross-term when the pool was built at more than one price/rate.
-  const costEffectJpy = e.realizedJpy.sub(grossJpy)
+  const costEffectJpy = close.realizedJpy.sub(grossJpy)
 
   return {
-    symbol: e.symbol,
-    name: e.name,
-    accountType: e.accountType,
-    tradeDate: e.tradeDate,
-    quantity: q,
-    entryPriceUsd: p0,
-    exitPriceUsd: p1,
-    entryFxRate: r0,
-    exitFxRate: r1,
+    symbol: close.symbol,
+    name: close.name,
+    accountType: close.accountType,
+    tradeDate: close.tradeDate,
+    quantity,
+    entryPriceUsd: entryPrice,
+    exitPriceUsd: exitPrice,
+    entryFxRate: entryRate,
+    exitFxRate: exitRate,
     stockEffectJpy,
     fxEffectJpy,
     costEffectJpy,
-    totalJpy: e.realizedJpy,
-    totalUsd: p1.sub(p0).mul(q),
+    totalJpy: close.realizedJpy,
+    totalUsd: exitPrice.sub(entryPrice).mul(quantity),
   }
 }
 
@@ -112,24 +114,30 @@ export function attributeOne(e: RealizedEvent): FxAttribution {
  * split is meaningless and would dilute the figure with structural zeros.
  */
 export function attributeFx(realized: RealizedEvent[]): FxAttributionSummary {
-  const events = realized
-    .filter((e) => e.assetClass === 'US_EQUITY')
-    .map(attributeOne)
+  const events = realized.filter((close) => close.assetClass === 'US_EQUITY').map(attributeOne)
 
-  const stockEffectJpy = events.reduce((a, e) => a.add(e.stockEffectJpy), ZERO)
-  const fxEffectJpy = events.reduce((a, e) => a.add(e.fxEffectJpy), ZERO)
-  const costEffectJpy = events.reduce((a, e) => a.add(e.costEffectJpy), ZERO)
-  const totalJpy = events.reduce((a, e) => a.add(e.totalJpy), ZERO)
+  const sumOf = (pick: (event: FxAttribution) => Decimal) =>
+    events.reduce((running, event) => running.add(pick(event)), ZERO)
 
-  const totalQty = events.reduce((a, e) => a.add(e.quantity), ZERO)
-  const avgEntryFx = totalQty.gt(0)
-    ? events.reduce((a, e) => a.add(e.entryFxRate.mul(e.quantity)), ZERO).div(totalQty)
-    : ZERO
-  const avgExitFx = totalQty.gt(0)
-    ? events.reduce((a, e) => a.add(e.exitFxRate.mul(e.quantity)), ZERO).div(totalQty)
-    : ZERO
+  const stockEffectJpy = sumOf((event) => event.stockEffectJpy)
+  const fxEffectJpy = sumOf((event) => event.fxEffectJpy)
+  const costEffectJpy = sumOf((event) => event.costEffectJpy)
+  const totalJpy = sumOf((event) => event.totalJpy)
 
-  const grossAbs = stockEffectJpy.abs().add(fxEffectJpy.abs())
+  // Weighted by quantity: a 100-share close should move the average rate more
+  // than a 1-share close did.
+  const totalQuantity = sumOf((event) => event.quantity)
+  const weightedRate = (pick: (event: FxAttribution) => Decimal) =>
+    totalQuantity.gt(0)
+      ? sumOf((event) => pick(event).mul(event.quantity)).div(totalQuantity)
+      : ZERO
+
+  const avgEntryFx = weightedRate((event) => event.entryFxRate)
+  const avgExitFx = weightedRate((event) => event.exitFxRate)
+
+  // Absolute, so a gain and an offsetting loss do not cancel into a zero
+  // denominator and report currency as explaining none of the movement.
+  const grossAbsolute = stockEffectJpy.abs().add(fxEffectJpy.abs())
 
   return {
     events,
@@ -137,7 +145,7 @@ export function attributeFx(realized: RealizedEvent[]): FxAttributionSummary {
     fxEffectJpy,
     costEffectJpy,
     totalJpy,
-    fxShare: grossAbs.isZero() ? null : fxEffectJpy.abs().div(grossAbs).toNumber(),
+    fxShare: grossAbsolute.isZero() ? null : fxEffectJpy.abs().div(grossAbsolute).toNumber(),
     avgEntryFx,
     avgExitFx,
   }

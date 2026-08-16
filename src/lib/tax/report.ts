@@ -85,10 +85,11 @@ const TAXABLE_ACCOUNT: AccountType = 'SPECIFIC'
  * falls in FY2025 (Apr 2025 – Mar 2026).
  */
 export function taxYearOf(settleDate: string, basis: TaxYearBasis): number {
-  const y = Number(settleDate.slice(0, 4))
-  if (basis === 'CALENDAR') return y
-  const m = Number(settleDate.slice(5, 7))
-  return m <= 3 ? y - 1 : y
+  const calendarYear = Number(settleDate.slice(0, 4))
+  if (basis === 'CALENDAR') return calendarYear
+  const month = Number(settleDate.slice(5, 7))
+  // Jan–Mar still belongs to the fiscal year that opened the previous April.
+  return month <= 3 ? calendarYear - 1 : calendarYear
 }
 
 /** Human label — fiscal years are marked so they are never mistaken for tax-official. */
@@ -103,27 +104,30 @@ export function summarizeYear(
   basis: TaxYearBasis,
   priorCarryforward: Decimal = ZERO,
 ): TaxYearSummary {
-  const events = realized.filter((e) => taxYearOf(e.settleDate, basis) === year)
-  const divs = dividends.filter((d) => taxYearOf(d.payDate, basis) === year)
+  const closes = realized.filter((close) => taxYearOf(close.settleDate, basis) === year)
+  const payouts = dividends.filter((payout) => taxYearOf(payout.payDate, basis) === year)
 
-  const taxable = events.filter((e) => e.accountType === TAXABLE_ACCOUNT)
-  const nisa = events.filter((e) => e.accountType !== TAXABLE_ACCOUNT)
+  const taxableCloses = closes.filter((close) => close.accountType === TAXABLE_ACCOUNT)
+  const nisaCloses = closes.filter((close) => close.accountType !== TAXABLE_ACCOUNT)
 
-  const taxableGains = taxable
-    .filter((e) => e.realizedJpy.gt(0))
-    .reduce((a, e) => a.add(e.realizedJpy), ZERO)
-  const taxableLosses = taxable
-    .filter((e) => e.realizedJpy.lt(0))
-    .reduce((a, e) => a.add(e.realizedJpy.abs()), ZERO)
+  const taxableGains = taxableCloses
+    .filter((close) => close.realizedJpy.gt(0))
+    .reduce((running, close) => running.add(close.realizedJpy), ZERO)
+  const taxableLosses = taxableCloses
+    .filter((close) => close.realizedJpy.lt(0))
+    .reduce((running, close) => running.add(close.realizedJpy.abs()), ZERO)
 
   // Losses offset gains within the year; a prior-year carryforward reduces it
   // further, but only if a return was filed (informational — not automatic).
   const netTaxable = taxableGains.sub(taxableLosses).sub(priorCarryforward)
 
-  const dividendGross = divs
-    .filter((d) => d.isTaxable)
-    .reduce((a, d) => a.add(d.grossAmount), ZERO)
-  const dividendTaxWithheld = divs.reduce((a, d) => a.add(d.incomeTax).add(d.localTax), ZERO)
+  const dividendGross = payouts
+    .filter((payout) => payout.isTaxable)
+    .reduce((running, payout) => running.add(payout.grossAmount), ZERO)
+  const dividendTaxWithheld = payouts.reduce(
+    (running, payout) => running.add(payout.incomeTax).add(payout.localTax),
+    ZERO,
+  )
 
   const positiveNet = Decimal.max(ZERO, netTaxable)
   const estimatedCapitalGainsTax = positiveNet.mul(TAX_RATE_TOTAL).toDecimalPlaces(0, ROUND)
@@ -139,15 +143,19 @@ export function summarizeYear(
   // Dividend withholding is already whole yen per payout, rounded by Rakuten
   // itself, so it adds in without disturbing the identity above.
   const incomeTaxPortion = capitalGainsIncomeTax.add(
-    divs.reduce((a, d) => a.add(d.incomeTax), ZERO),
+    payouts.reduce((running, payout) => running.add(payout.incomeTax), ZERO),
   )
-  const localTaxPortion = capitalGainsLocalTax.add(divs.reduce((a, d) => a.add(d.localTax), ZERO))
+  const localTaxPortion = capitalGainsLocalTax.add(
+    payouts.reduce((running, payout) => running.add(payout.localTax), ZERO),
+  )
 
-  const nisaGains = nisa.reduce((a, e) => a.add(e.realizedJpy), ZERO)
-  const nisaDividends = divs.filter((d) => !d.isTaxable).reduce((a, d) => a.add(d.netAmount), ZERO)
+  const nisaGains = nisaCloses.reduce((running, close) => running.add(close.realizedJpy), ZERO)
+  const nisaDividends = payouts
+    .filter((payout) => !payout.isTaxable)
+    .reduce((running, payout) => running.add(payout.netAmount), ZERO)
 
-  const wins = events.filter((e) => e.realizedJpy.gt(0)).length
-  const losses = events.filter((e) => e.realizedJpy.lt(0)).length
+  const wins = closes.filter((close) => close.realizedJpy.gt(0)).length
+  const losses = closes.filter((close) => close.realizedJpy.lt(0)).length
 
   const totalTax = estimatedCapitalGainsTax.add(dividendTaxWithheld)
   const grossPnl = taxableGains.sub(taxableLosses).add(nisaGains).add(dividendGross).add(nisaDividends)
@@ -167,10 +175,10 @@ export function summarizeYear(
     nisaGains,
     nisaDividends,
     carryforwardLoss: Decimal.max(ZERO, netTaxable.neg()),
-    tradeCount: events.length,
+    tradeCount: closes.length,
     winCount: wins,
     lossCount: losses,
-    winRate: events.length ? wins / events.length : null,
+    winRate: closes.length ? wins / closes.length : null,
     netAfterTax: grossPnl.sub(totalTax),
   }
 }
@@ -189,10 +197,10 @@ export function buildYearOverYear(
   applyCarryforward = false,
 ): YearOverYear {
   const years = new Set<number>()
-  for (const e of realized) years.add(taxYearOf(e.settleDate, basis))
-  for (const d of dividends) years.add(taxYearOf(d.payDate, basis))
+  for (const close of realized) years.add(taxYearOf(close.settleDate, basis))
+  for (const payout of dividends) years.add(taxYearOf(payout.payDate, basis))
 
-  const ordered = [...years].sort((a, b) => a - b)
+  const orderedYears = [...years].sort((earlier, later) => earlier - later)
   const summaries: TaxYearSummary[] = []
 
   /**
@@ -203,46 +211,55 @@ export function buildYearOverYear(
    * is about to lapse. Expiry is by calendar year, so a gap with no trading
    * still consumes the allowance.
    */
-  let lots: { year: number; remaining: Decimal }[] = []
+  let lossLots: { year: number; remaining: Decimal }[] = []
 
-  for (const y of ordered) {
+  for (const year of orderedYears) {
     // Anything past its window simply lapses, whether or not it was ever used.
-    lots = lots.filter((l) => y - l.year <= CARRYFORWARD_YEARS)
-    const available = lots.reduce((a, l) => a.add(l.remaining), ZERO)
+    lossLots = lossLots.filter((lot) => year - lot.year <= CARRYFORWARD_YEARS)
+    const availableRelief = lossLots.reduce((running, lot) => running.add(lot.remaining), ZERO)
 
-    const s = summarizeYear(y, realized, dividends, basis, applyCarryforward ? available : ZERO)
-    summaries.push(s)
+    const summary = summarizeYear(
+      year,
+      realized,
+      dividends,
+      basis,
+      applyCarryforward ? availableRelief : ZERO,
+    )
+    summaries.push(summary)
 
     if (applyCarryforward) {
       // Oldest first — those expire soonest, so spending them first is what
       // keeps the most relief alive.
-      let toAbsorb = Decimal.max(ZERO, s.taxableGains.sub(s.taxableLosses))
-      for (const l of lots) {
-        const used = Decimal.min(l.remaining, toAbsorb)
-        l.remaining = l.remaining.sub(used)
-        toAbsorb = toAbsorb.sub(used)
+      let gainsToAbsorb = Decimal.max(ZERO, summary.taxableGains.sub(summary.taxableLosses))
+      for (const lot of lossLots) {
+        const used = Decimal.min(lot.remaining, gainsToAbsorb)
+        lot.remaining = lot.remaining.sub(used)
+        gainsToAbsorb = gainsToAbsorb.sub(used)
       }
-      lots = lots.filter((l) => l.remaining.gt(0))
+      lossLots = lossLots.filter((lot) => lot.remaining.gt(0))
 
-      const ownLoss = Decimal.max(ZERO, s.taxableLosses.sub(s.taxableGains))
-      if (ownLoss.gt(0)) lots.push({ year: y, remaining: ownLoss })
+      const lossThisYear = Decimal.max(ZERO, summary.taxableLosses.sub(summary.taxableGains))
+      if (lossThisYear.gt(0)) lossLots.push({ year, remaining: lossThisYear })
     }
   }
 
-  let running = ZERO
-  const cumulativeNetAfterTax = summaries.map((s) => {
-    running = running.add(s.netAfterTax)
-    return { year: s.year, value: running }
+  let cumulative = ZERO
+  const cumulativeNetAfterTax = summaries.map((summary) => {
+    cumulative = cumulative.add(summary.netAfterTax)
+    return { year: summary.year, value: cumulative }
   })
+
+  const sumOf = (pick: (summary: TaxYearSummary) => Decimal) =>
+    summaries.reduce((running, summary) => running.add(pick(summary)), ZERO)
 
   return {
     years: summaries,
     cumulativeNetAfterTax,
     totals: {
-      taxableGains: summaries.reduce((a, s) => a.add(s.taxableGains), ZERO),
-      estimatedTax: summaries.reduce((a, s) => a.add(s.totalTax), ZERO),
-      nisaGains: summaries.reduce((a, s) => a.add(s.nisaGains), ZERO),
-      netAfterTax: summaries.reduce((a, s) => a.add(s.netAfterTax), ZERO),
+      taxableGains: sumOf((summary) => summary.taxableGains),
+      estimatedTax: sumOf((summary) => summary.totalTax),
+      nisaGains: sumOf((summary) => summary.nisaGains),
+      netAfterTax: sumOf((summary) => summary.netAfterTax),
     },
   }
 }

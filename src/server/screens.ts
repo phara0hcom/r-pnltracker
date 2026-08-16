@@ -65,8 +65,8 @@ function accountFilterInput(data?: { account?: string }): { account: AccountFilt
 async function engineFor(userId: string, account: AccountFilter = 'ALL') {
   const records = await listTrades(userId)
   const list = records
-    .map((r) => r.trade)
-    .filter((t) => matchesAccountFilter(t.accountType, account))
+    .map((record) => record.trade)
+    .filter((trade) => matchesAccountFilter(trade.accountType, account))
   return { trades: list, engine: runEngine(list) }
 }
 
@@ -76,7 +76,7 @@ async function overridesFor(userId: string) {
     .select({ instrumentId: priceOverrides.instrumentId, price: priceOverrides.price })
     .from(priceOverrides)
     .where(eq(priceOverrides.userId, userId))
-  return new Map(rows.map((r) => [r.instrumentId, r.price]))
+  return new Map(rows.map((row) => [row.instrumentId, row.price]))
 }
 
 /**
@@ -137,46 +137,49 @@ export const getPositions = createServerFn({ method: 'GET' })
       overridesFor(context.userId),
       usdJpyRate(),
     ])
-    const priceBySymbol = new Map(priced.map((p) => [p.instrument.symbol, p.price]))
+    const priceBySymbol = new Map(priced.map((row) => [row.instrument.symbol, row.price]))
 
     return engine.positions
-      .map((p) => {
-        const avgCost = p.costBasisJpy.div(p.quantity)
-        const cached = priceBySymbol.get(p.symbol)
-        const override = overrides.get(instrumentId(p.symbol)) ?? null
+      .map((position) => {
+        const avgCost = position.costBasisJpy.div(position.quantity)
+        const cached = priceBySymbol.get(position.symbol)
+        const override = overrides.get(instrumentId(position.symbol)) ?? null
         // A manual override always wins over a fetched quote.
-        const raw = override ?? cached?.price ?? null
+        const currentPrice = override ?? cached?.price ?? null
 
         let marketValueJpy: string | null = null
         let unrealizedJpy: string | null = null
         let unrealizedPct: number | null = null
 
-        if (raw) {
+        if (currentPrice) {
           // USD quotes convert at the live rate, so unrealized P&L includes the
           // currency move — for a JPY-based holder that is a real part of the
           // position's value, not a rounding detail. The entry rate is used only
           // until a rate has ever been fetched; it makes the currency component
           // read as zero, which is wrong but at least not invented.
-          const fx = p.assetClass === 'US_EQUITY' ? (liveFx ?? p.avgFxRate) : ZERO.add(1)
-          const value = ZERO.add(raw).mul(p.quantity).mul(fx)
-          marketValueJpy = value.toFixed(0)
-          const gain = value.sub(p.costBasisJpy)
+          const rate =
+            position.assetClass === 'US_EQUITY' ? (liveFx ?? position.avgFxRate) : ZERO.add(1)
+          const marketValue = ZERO.add(currentPrice).mul(position.quantity).mul(rate)
+          marketValueJpy = marketValue.toFixed(0)
+          const gain = marketValue.sub(position.costBasisJpy)
           unrealizedJpy = gain.toFixed(0)
-          unrealizedPct = p.costBasisJpy.gt(0) ? gain.div(p.costBasisJpy).toNumber() : null
+          unrealizedPct = position.costBasisJpy.gt(0)
+            ? gain.div(position.costBasisJpy).toNumber()
+            : null
         }
 
         return {
-          symbol: p.symbol,
-          name: p.name,
-          assetClass: p.assetClass,
-          accountType: p.accountType,
-          quantity: p.quantity.toFixed(),
-          costBasisJpy: p.costBasisJpy.toFixed(0),
+          symbol: position.symbol,
+          name: position.name,
+          assetClass: position.assetClass,
+          accountType: position.accountType,
+          quantity: position.quantity.toFixed(),
+          costBasisJpy: position.costBasisJpy.toFixed(0),
           avgCostPerUnit: avgCost.toFixed(4),
-          avgPriceNative: p.avgPriceNative.toFixed(4),
-          avgFxRate: p.avgFxRate.toFixed(2),
-          currency: p.assetClass === 'US_EQUITY' ? ('USD' as const) : ('JPY' as const),
-          currentPrice: raw,
+          avgPriceNative: position.avgPriceNative.toFixed(4),
+          avgFxRate: position.avgFxRate.toFixed(2),
+          currency: position.assetClass === 'US_EQUITY' ? ('USD' as const) : ('JPY' as const),
+          currentPrice,
           priceAsOf: cached?.asOf.toISOString() ?? null,
           priceSource: override ? 'MANUAL' : (cached?.source ?? null),
           marketValueJpy,
@@ -184,7 +187,7 @@ export const getPositions = createServerFn({ method: 'GET' })
           unrealizedPct,
         }
       })
-      .sort((a, b) => Number(b.costBasisJpy) - Number(a.costBasisJpy))
+      .sort((left, right) => Number(right.costBasisJpy) - Number(left.costBasisJpy))
   })
 
 // ── NISA ────────────────────────────────────────────────────────────────────
@@ -232,19 +235,19 @@ export const getNisa = createServerFn({ method: 'GET' })
       pendingRestoration: report.lifetime.pendingRestoration.toFixed(0),
       restorationDate: report.lifetime.restorationDate,
       legacyBookValue: legacyNisaBookValue(engine.positions).toFixed(0),
-      annual: report.annual.map((a) => ({
-        year: a.year,
-        frame: a.frame,
-        limit: a.limit.toFixed(0),
-        used: a.used.toFixed(0),
-        remaining: a.remaining.toFixed(0),
-        utilization: a.utilization,
-        isMaxed: a.isMaxed,
+      annual: report.annual.map((frame) => ({
+        year: frame.year,
+        frame: frame.frame,
+        limit: frame.limit.toFixed(0),
+        used: frame.used.toFixed(0),
+        remaining: frame.remaining.toFixed(0),
+        utilization: frame.utilization,
+        isMaxed: frame.isMaxed,
       })),
-      contributions: report.contributionsByYear.map((c) => ({
-        year: c.year,
-        growth: c.growth.toFixed(0),
-        tsumitate: c.tsumitate.toFixed(0),
+      contributions: report.contributionsByYear.map((contribution) => ({
+        year: contribution.year,
+        growth: contribution.growth.toFixed(0),
+        tsumitate: contribution.tsumitate.toFixed(0),
       })),
     }
   })
@@ -305,22 +308,22 @@ export const getTax = createServerFn({ method: 'GET' })
 
     return {
       basis,
-      years: yoy.years.map((y) => ({
-        year: y.year,
-        taxableGains: y.taxableGains.toFixed(0),
-        taxableLosses: y.taxableLosses.toFixed(0),
-        netTaxable: y.netTaxable.toFixed(0),
-        estimatedTax: y.estimatedCapitalGainsTax.toFixed(0),
-        incomePortion: y.incomeTaxPortion.toFixed(0),
-        localPortion: y.localTaxPortion.toFixed(0),
-        dividendGross: y.dividendGross.toFixed(0),
-        dividendWithheld: y.dividendTaxWithheld.toFixed(0),
-        nisaGains: y.nisaGains.toFixed(0),
-        nisaDividends: y.nisaDividends.toFixed(0),
-        carryforwardLoss: y.carryforwardLoss.toFixed(0),
-        tradeCount: y.tradeCount,
-        winRate: y.winRate,
-        netAfterTax: y.netAfterTax.toFixed(0),
+      years: yoy.years.map((summary) => ({
+        year: summary.year,
+        taxableGains: summary.taxableGains.toFixed(0),
+        taxableLosses: summary.taxableLosses.toFixed(0),
+        netTaxable: summary.netTaxable.toFixed(0),
+        estimatedTax: summary.estimatedCapitalGainsTax.toFixed(0),
+        incomePortion: summary.incomeTaxPortion.toFixed(0),
+        localPortion: summary.localTaxPortion.toFixed(0),
+        dividendGross: summary.dividendGross.toFixed(0),
+        dividendWithheld: summary.dividendTaxWithheld.toFixed(0),
+        nisaGains: summary.nisaGains.toFixed(0),
+        nisaDividends: summary.nisaDividends.toFixed(0),
+        carryforwardLoss: summary.carryforwardLoss.toFixed(0),
+        tradeCount: summary.tradeCount,
+        winRate: summary.winRate,
+        netAfterTax: summary.netAfterTax.toFixed(0),
       })),
       totals: {
         taxableGains: yoy.totals.taxableGains.toFixed(0),
@@ -328,19 +331,19 @@ export const getTax = createServerFn({ method: 'GET' })
         nisaGains: yoy.totals.nisaGains.toFixed(0),
         netAfterTax: yoy.totals.netAfterTax.toFixed(0),
       },
-      cumulative: yoy.cumulativeNetAfterTax.map((c) => ({
-        year: c.year,
-        value: c.value.toFixed(0),
+      cumulative: yoy.cumulativeNetAfterTax.map((point) => ({
+        year: point.year,
+        value: point.value.toFixed(0),
       })),
-      dividends: divs.map((d) => ({
-        payDate: d.payDate,
-        kind: d.kind,
-        accountType: d.accountType,
-        grossAmount: d.grossAmount.toFixed(0),
-        tax: d.incomeTax.add(d.localTax).toFixed(0),
-        netAmount: d.netAmount.toFixed(0),
-        isTaxable: d.isTaxable,
-        confident: d.attributionConfident,
+      dividends: divs.map((payout) => ({
+        payDate: payout.payDate,
+        kind: payout.kind,
+        accountType: payout.accountType,
+        grossAmount: payout.grossAmount.toFixed(0),
+        tax: payout.incomeTax.add(payout.localTax).toFixed(0),
+        netAmount: payout.netAmount.toFixed(0),
+        isTaxable: payout.isTaxable,
+        confident: payout.attributionConfident,
       })),
     }
   })
@@ -432,117 +435,135 @@ export const getDividends = createServerFn({ method: 'GET' })
     // Dividends carry their own attributed account, so they are filtered on
     // that rather than inherited from the trade filter — a payment can land in
     // an account whose position has since been closed.
-    const rows = allRows.filter((r) => matchesAccountFilter(r.d.accountType, data.account))
+    const rows = allRows.filter((row) => matchesAccountFilter(row.d.accountType, data.account))
 
     // Rakuten books the 再投資 a few days before the payment date and does not
     // always file it under the account the payment was attributed to, so the
     // match is on instrument + exact amount within a short window rather than
     // on an id — there is no id linking the two in any export.
-    const reinvestments = allTrades.filter((t) => t.side === 'REINVEST')
-    const findReinvestment = (symbol: string, payDate: string, net: string) =>
+    const reinvestments = allTrades.filter((trade) => trade.side === 'REINVEST')
+    const MATCH_WINDOW_MS = 7 * 86_400_000
+    const findReinvestment = (symbol: string, payDate: string, netAmount: string) =>
       reinvestments.find(
-        (t) =>
-          t.symbol === symbol &&
-          t.netAmountJpy.toFixed(0) === net &&
-          Math.abs(Date.parse(t.tradeDate) - Date.parse(payDate)) <= 7 * 86_400_000,
+        (trade) =>
+          trade.symbol === symbol &&
+          trade.netAmountJpy.toFixed(0) === netAmount &&
+          Math.abs(Date.parse(trade.tradeDate) - Date.parse(payDate)) <= MATCH_WINDOW_MS,
       ) ?? null
 
-    const out: DividendRow[] = rows.map(({ d, instrument }) => {
-      const net = ZERO.add(d.netAmount).toFixed(0)
+    const out: DividendRow[] = rows.map(({ d: payout, instrument }) => {
+      const netAmount = ZERO.add(payout.netAmount).toFixed(0)
       const symbol = instrument?.symbol ?? ''
-      const reinvested = d.kind === 'DISTRIBUTION' ? findReinvestment(symbol, d.payDate, net) : null
+      const reinvested =
+        payout.kind === 'DISTRIBUTION' ? findReinvestment(symbol, payout.payDate, netAmount) : null
 
       return {
-        payDate: d.payDate,
+        payDate: payout.payDate,
         symbol,
         name: instrument?.name ?? symbol,
         assetClass: instrument?.assetClass ?? 'JP_EQUITY',
-        accountType: d.accountType,
-        kind: d.kind,
-        grossAmount: ZERO.add(d.grossAmount).toFixed(0),
-        incomeTax: ZERO.add(d.incomeTax).toFixed(0),
-        localTax: ZERO.add(d.localTax).toFixed(0),
-        netAmount: net,
-        isTaxable: d.isTaxable,
-        confident: d.attributionConfident,
+        accountType: payout.accountType,
+        kind: payout.kind,
+        grossAmount: ZERO.add(payout.grossAmount).toFixed(0),
+        incomeTax: ZERO.add(payout.incomeTax).toFixed(0),
+        localTax: ZERO.add(payout.localTax).toFixed(0),
+        netAmount,
+        isTaxable: payout.isTaxable,
+        confident: payout.attributionConfident,
         reinvestedJpy: reinvested ? reinvested.netAmountJpy.toFixed(0) : null,
         reinvestedUnits: reinvested ? reinvested.quantity.toFixed() : null,
       }
     })
 
-    out.sort((a, b) => (a.payDate === b.payDate ? 0 : a.payDate < b.payDate ? 1 : -1))
+    // Newest first.
+    out.sort((left, right) =>
+      left.payDate === right.payDate ? 0 : left.payDate < right.payDate ? 1 : -1,
+    )
 
-    const sum = (pick: (r: DividendRow) => string) =>
-      out.reduce((acc, r) => acc.add(pick(r)), ZERO)
+    const sumOf = (pick: (row: DividendRow) => string) =>
+      out.reduce((running, row) => running.add(pick(row)), ZERO)
 
-    const byYear = new Map<number, DividendRow[]>()
-    for (const r of out) {
-      const y = Number(r.payDate.slice(0, 4))
-      byYear.set(y, [...(byYear.get(y) ?? []), r])
+    /** Groups rows in place; the push form avoids rebuilding the array per row. */
+    const groupBy = <K,>(keyOf: (row: DividendRow) => K) => {
+      const groups = new Map<K, DividendRow[]>()
+      for (const row of out) {
+        const key = keyOf(row)
+        const existing = groups.get(key)
+        if (existing) existing.push(row)
+        else groups.set(key, [row])
+      }
+      return groups
     }
 
-    const bySym = new Map<string, DividendRow[]>()
-    for (const r of out) {
-      bySym.set(r.symbol, [...(bySym.get(r.symbol) ?? []), r])
-    }
+    const byYear = groupBy((row) => Number(row.payDate.slice(0, 4)))
+    const bySymbolKey = groupBy((row) => row.symbol)
+
+    const sumRows = (rows: DividendRow[], pick: (row: DividendRow) => string) =>
+      rows.reduce((running, row) => running.add(pick(row)), ZERO)
 
     return {
       rows: out,
       totals: {
-        gross: sum((r) => r.grossAmount).toFixed(0),
-        tax: sum((r) => r.incomeTax).add(sum((r) => r.localTax)).toFixed(0),
-        net: sum((r) => r.netAmount).toFixed(0),
-        taxFreeGross: out
-          .filter((r) => !r.isTaxable)
-          .reduce((a, r) => a.add(r.grossAmount), ZERO)
+        gross: sumOf((row) => row.grossAmount).toFixed(0),
+        tax: sumOf((row) => row.incomeTax)
+          .add(sumOf((row) => row.localTax))
           .toFixed(0),
-        taxableGross: out
-          .filter((r) => r.isTaxable)
-          .reduce((a, r) => a.add(r.grossAmount), ZERO)
-          .toFixed(0),
+        net: sumOf((row) => row.netAmount).toFixed(0),
+        taxFreeGross: sumRows(
+          out.filter((row) => !row.isTaxable),
+          (row) => row.grossAmount,
+        ).toFixed(0),
+        taxableGross: sumRows(
+          out.filter((row) => row.isTaxable),
+          (row) => row.grossAmount,
+        ).toFixed(0),
         count: out.length,
       },
       byYear: [...byYear.entries()]
-        .sort((a, b) => b[0] - a[0])
-        .map(([year, list]) => ({
+        .sort(([earlier], [later]) => later - earlier)
+        .map(([year, rows]) => ({
           year,
-          gross: list.reduce((a, r) => a.add(r.grossAmount), ZERO).toFixed(0),
-          tax: list.reduce((a, r) => a.add(r.incomeTax).add(r.localTax), ZERO).toFixed(0),
-          net: list.reduce((a, r) => a.add(r.netAmount), ZERO).toFixed(0),
-          count: list.length,
+          gross: sumRows(rows, (row) => row.grossAmount).toFixed(0),
+          tax: sumRows(rows, (row) => row.incomeTax)
+            .add(sumRows(rows, (row) => row.localTax))
+            .toFixed(0),
+          net: sumRows(rows, (row) => row.netAmount).toFixed(0),
+          count: rows.length,
         })),
-      bySymbol: [...bySym.values()]
-        .map((list) => {
-          const first = list[0]!
+      bySymbol: [...bySymbolKey.values()]
+        .map((rows) => {
+          const first = rows[0]!
           return {
             symbol: first.symbol,
             name: first.name,
             assetClass: first.assetClass,
-            gross: list.reduce((a, r) => a.add(r.grossAmount), ZERO).toFixed(0),
-            net: list.reduce((a, r) => a.add(r.netAmount), ZERO).toFixed(0),
-            count: list.length,
+            gross: sumRows(rows, (row) => row.grossAmount).toFixed(0),
+            net: sumRows(rows, (row) => row.netAmount).toFixed(0),
+            count: rows.length,
             // Rows are already newest-first, so the first is the latest payment.
             lastPaid: first.payDate,
           }
         })
-        .sort((a, b) => Number(b.gross) - Number(a.gross)),
-      hasInferred: out.some((r) => !r.confident),
+        .sort((left, right) => Number(right.gross) - Number(left.gross)),
+      hasInferred: out.some((row) => !row.confident),
       usHoldings: (() => {
-        const longest = longestHoldBySymbol(
+        const longestBySymbol = longestHoldBySymbol(
           holdingWindows(
-            allTrades.filter((t) => t.assetClass === 'US_EQUITY'),
+            allTrades.filter((trade) => trade.assetClass === 'US_EQUITY'),
             todayLocal(),
           ),
         )
-        const entries = [...longest.entries()]
+        const entries = [...longestBySymbol.entries()]
+        const A_MONTH = 31
+        const A_QUARTER = 90
         return {
           tickerCount: entries.length,
-          longestHoldDays: Math.max(0, ...entries.map(([, d]) => d)),
-          shortHoldCount: entries.filter(([, d]) => d < 31).length,
+          longestHoldDays: Math.max(0, ...entries.map(([, days]) => days)),
+          shortHoldCount: entries.filter(([, days]) => days < A_MONTH).length,
           quarterSpanning: entries
-            .filter(([, d]) => d >= 90)
+            .filter(([, days]) => days >= A_QUARTER)
             .map(([symbol, days]) => ({ symbol, days }))
-            .sort((a, b) => b.days - a.days),
+            .sort((left, right) => right.days - left.days),
         }
       })(),
     }
@@ -592,77 +613,81 @@ export const getStats = createServerFn({ method: 'GET' })
   .validator(accountFilterInput)
   .handler(async ({ data, context }): Promise<StatsScreenData> => {
     const { engine } = await engineFor(context.userId, data.account)
-    const s = computeStats(engine.realized)
+    const stats = computeStats(engine.realized)
     const fx = attributeFx(engine.realized)
     const daily = dailyPnl(engine.realized)
     const journal = await listNotes(context.userId)
 
-    const group = (keys: string[], pick: (k: string) => Parameters<typeof computeStats>[1]) =>
+    /** Same stats recomputed per bucket, dropping buckets with no closes. */
+    const group = (keys: string[], filterFor: (key: string) => Parameters<typeof computeStats>[1]) =>
       keys
         .map((key) => {
-          const g = computeStats(engine.realized, pick(key))
+          const bucketStats = computeStats(engine.realized, filterFor(key))
           return {
             key,
-            tradeCount: g.tradeCount,
-            winRate: g.winRate,
-            netPnl: g.netPnl.toFixed(0),
-            profitFactor: g.profitFactor,
+            tradeCount: bucketStats.tradeCount,
+            winRate: bucketStats.winRate,
+            netPnl: bucketStats.netPnl.toFixed(0),
+            profitFactor: bucketStats.profitFactor,
           }
         })
-        .filter((g) => g.tradeCount > 0)
+        .filter((bucketStats) => bucketStats.tradeCount > 0)
 
     /** Bucket each journalled day's realized P&L by its 1–5 score. */
     const bucket = (field: 'mood' | 'motivation') => {
-      const acc = new Map<number, { days: number; total: typeof ZERO }>()
+      const byScore = new Map<number, { days: number; total: typeof ZERO }>()
       for (const note of journal) {
         const score = note[field]
         if (score == null) continue
-        const pnl = daily.get(note.date)
-        if (!pnl) continue
-        const cur = acc.get(score) ?? { days: 0, total: ZERO }
-        acc.set(score, { days: cur.days + 1, total: cur.total.add(pnl) })
+        const dayPnl = daily.get(note.date)
+        if (!dayPnl) continue
+        const running = byScore.get(score) ?? { days: 0, total: ZERO }
+        byScore.set(score, { days: running.days + 1, total: running.total.add(dayPnl) })
       }
-      return [...acc.entries()]
-        .sort((a, b) => a[0] - b[0])
-        .map(([score, v]) => ({
+      return [...byScore.entries()]
+        .sort(([lowerScore], [higherScore]) => lowerScore - higherScore)
+        .map(([score, totals]) => ({
           [field]: score,
-          days: v.days,
-          totalPnl: v.total.toFixed(0),
-          avgPnl: v.total.div(v.days).toFixed(0),
+          days: totals.days,
+          totalPnl: totals.total.toFixed(0),
+          avgPnl: totals.total.div(totals.days).toFixed(0),
         }))
     }
 
     return {
-      tradeCount: s.tradeCount,
-      winCount: s.winCount,
-      lossCount: s.lossCount,
-      winRate: s.winRate,
-      grossProfit: s.grossProfit.toFixed(0),
-      grossLoss: s.grossLoss.toFixed(0),
-      netPnl: s.netPnl.toFixed(0),
-      avgWin: s.avgWin?.toFixed(0) ?? null,
-      avgLoss: s.avgLoss?.toFixed(0) ?? null,
-      payoffRatio: s.payoffRatio,
-      profitFactor: s.profitFactor,
-      maxDrawdown: s.maxDrawdown.toFixed(0),
-      maxDrawdownPct: s.maxDrawdownPct,
-      longestWinStreak: s.longestWinStreak,
-      longestLossStreak: s.longestLossStreak,
-      avgHoldingDays: s.avgHoldingDays,
-      medianHoldingDays: s.medianHoldingDays,
-      equityCurve: s.equityCurve.map((p) => ({ date: p.date, value: p.value.toFixed(0) })),
-      byAccount: group(['SPECIFIC', 'NISA_GROWTH', 'NISA_TSUMITATE', 'NISA_OLD'], (k) => ({
-        accountTypes: [k as 'SPECIFIC'],
+      tradeCount: stats.tradeCount,
+      winCount: stats.winCount,
+      lossCount: stats.lossCount,
+      winRate: stats.winRate,
+      grossProfit: stats.grossProfit.toFixed(0),
+      grossLoss: stats.grossLoss.toFixed(0),
+      netPnl: stats.netPnl.toFixed(0),
+      avgWin: stats.avgWin?.toFixed(0) ?? null,
+      avgLoss: stats.avgLoss?.toFixed(0) ?? null,
+      payoffRatio: stats.payoffRatio,
+      profitFactor: stats.profitFactor,
+      maxDrawdown: stats.maxDrawdown.toFixed(0),
+      maxDrawdownPct: stats.maxDrawdownPct,
+      longestWinStreak: stats.longestWinStreak,
+      longestLossStreak: stats.longestLossStreak,
+      avgHoldingDays: stats.avgHoldingDays,
+      medianHoldingDays: stats.medianHoldingDays,
+      equityCurve: stats.equityCurve.map((point) => ({
+        date: point.date,
+        value: point.value.toFixed(0),
       })),
-      byAssetClass: group(['JP_EQUITY', 'US_EQUITY', 'FUND'], (k) => ({
-        assetClasses: [k as 'JP_EQUITY'],
+      byAccount: group(['SPECIFIC', 'NISA_GROWTH', 'NISA_TSUMITATE', 'NISA_OLD'], (accountType) => ({
+        accountTypes: [accountType as 'SPECIFIC'],
       })),
-      symbols: bySymbol(engine.realized).map((r) => ({
-        symbol: r.symbol,
-        name: r.name,
-        tradeCount: r.tradeCount,
-        netPnl: r.netPnl.toFixed(0),
-        winRate: r.winRate,
+      byAssetClass: group(['JP_EQUITY', 'US_EQUITY', 'FUND'], (assetClass) => ({
+        assetClasses: [assetClass as 'JP_EQUITY'],
+      })),
+      symbols: bySymbol(engine.realized).map((performance) => ({
+        symbol: performance.symbol,
+        name: performance.name,
+        tradeCount: performance.tradeCount,
+        netPnl: performance.netPnl.toFixed(0),
+        winRate: performance.winRate,
       })),
       fx: {
         closes: fx.events.length,
@@ -751,79 +776,82 @@ export const getCalendar = createServerFn({ method: 'GET' })
       string,
       { realized: string; pct: number | null; entryPrice: string; holdingDays: number }
     >()
-    for (const e of engine.realized) {
+    for (const close of engine.realized) {
       realizedByKey.set(
-        `${e.tradeDate}|${e.symbol}|${e.accountType}|${e.quantity.toFixed()}`,
+        `${close.tradeDate}|${close.symbol}|${close.accountType}|${close.quantity.toFixed()}`,
         {
-          realized: e.realizedJpy.toFixed(0),
-          pct: e.costJpy.gt(0) ? e.realizedJpy.div(e.costJpy).toNumber() : null,
+          realized: close.realizedJpy.toFixed(0),
+          pct: close.costJpy.gt(0) ? close.realizedJpy.div(close.costJpy).toNumber() : null,
           // Same per-10,000 convention as the exit price, so the two are
           // directly comparable on screen.
           entryPrice:
-            e.assetClass === 'FUND'
-              ? e.entryPriceNative.mul(10_000).toFixed(0)
-              : e.entryPriceNative.toFixed(e.assetClass === 'US_EQUITY' ? 2 : 1),
-          holdingDays: e.holdingDays,
+            close.assetClass === 'FUND'
+              ? close.entryPriceNative.mul(10_000).toFixed(0)
+              : close.entryPriceNative.toFixed(close.assetClass === 'US_EQUITY' ? 2 : 1),
+          holdingDays: close.holdingDays,
         },
       )
     }
 
     const records = await listTrades(context.userId)
     const byDate = new Map<string, CalendarTrade[]>()
-    for (const r of records) {
-      const t = r.trade
-      if (t.tradeDate < first || t.tradeDate > last) continue
-      if (!matchesAccountFilter(t.accountType, data.account)) continue
-      const isClose = t.side === 'SELL' || t.side === 'REDEEM'
-      const hit = realizedByKey.get(
-        `${t.tradeDate}|${t.symbol}|${t.accountType}|${t.quantity.toFixed()}`,
+    for (const record of records) {
+      const trade = record.trade
+      if (trade.tradeDate < first || trade.tradeDate > last) continue
+      if (!matchesAccountFilter(trade.accountType, data.account)) continue
+      const isClose = trade.side === 'SELL' || trade.side === 'REDEEM'
+      const realized = realizedByKey.get(
+        `${trade.tradeDate}|${trade.symbol}|${trade.accountType}|${trade.quantity.toFixed()}`,
       )
-      const list = byDate.get(t.tradeDate) ?? []
-      list.push({
-        id: r.id,
-        symbol: t.symbol,
-        name: t.name,
-        accountType: t.accountType,
-        assetClass: t.assetClass,
-        side: t.side,
-        quantity: t.quantity.toFixed(),
+      const dayTrades = byDate.get(trade.tradeDate) ?? []
+      dayTrades.push({
+        id: record.id,
+        symbol: trade.symbol,
+        name: trade.name,
+        accountType: trade.accountType,
+        assetClass: trade.assetClass,
+        side: trade.side,
+        quantity: trade.quantity.toFixed(),
         // Funds are stored per single 口 but quoted per 10,000, so display the
         // figure Rakuten shows rather than the internal one.
         unitPrice:
-          t.assetClass === 'FUND'
-            ? t.unitPrice.mul(10_000).toFixed(0)
-            : t.unitPrice.toFixed(t.currency === 'USD' ? 2 : 1),
-        currency: t.currency,
-        amountJpy: t.netAmountJpy.toFixed(0),
-        realizedJpy: isClose ? (hit?.realized ?? null) : null,
-        returnPct: isClose ? (hit?.pct ?? null) : null,
-        entryPrice: isClose ? (hit?.entryPrice ?? null) : null,
-        holdingDays: isClose ? (hit?.holdingDays ?? null) : null,
-        memo: r.memo,
-        motivation: r.motivation,
+          trade.assetClass === 'FUND'
+            ? trade.unitPrice.mul(10_000).toFixed(0)
+            : trade.unitPrice.toFixed(trade.currency === 'USD' ? 2 : 1),
+        currency: trade.currency,
+        amountJpy: trade.netAmountJpy.toFixed(0),
+        realizedJpy: isClose ? (realized?.realized ?? null) : null,
+        returnPct: isClose ? (realized?.pct ?? null) : null,
+        entryPrice: isClose ? (realized?.entryPrice ?? null) : null,
+        holdingDays: isClose ? (realized?.holdingDays ?? null) : null,
+        memo: record.memo,
+        motivation: record.motivation,
       })
-      byDate.set(t.tradeDate, list)
+      byDate.set(trade.tradeDate, dayTrades)
     }
 
     // Rakuten's exports carry no execution time — only 約定日 — so there is no
     // true intraday order to restore. Group by instrument instead, opens before
     // closes, which puts a same-day round trip on adjacent rows and matches the
     // order the engine processed that pool in.
-    for (const list of byDate.values()) {
-      list.sort((a, b) => {
-        if (a.symbol !== b.symbol) return a.symbol.localeCompare(b.symbol)
-        if (a.accountType !== b.accountType) return a.accountType.localeCompare(b.accountType)
-        const ao = OPENING_SIDES.includes(a.side) ? 0 : 1
-        const bo = OPENING_SIDES.includes(b.side) ? 0 : 1
-        return ao - bo
+    for (const dayTrades of byDate.values()) {
+      dayTrades.sort((left, right) => {
+        if (left.symbol !== right.symbol) return left.symbol.localeCompare(right.symbol)
+        if (left.accountType !== right.accountType)
+          return left.accountType.localeCompare(right.accountType)
+        const leftOpens = OPENING_SIDES.includes(left.side) ? 0 : 1
+        const rightOpens = OPENING_SIDES.includes(right.side) ? 0 : 1
+        return leftOpens - rightOpens
       })
     }
 
-    const journal = new Map((await listNotes(context.userId, first, last)).map((n) => [n.date, n]))
+    const journal = new Map(
+      (await listNotes(context.userId, first, last)).map((note) => [note.date, note]),
+    )
 
     const days: CalendarDay[] = []
-    for (let d = 1; d <= lastDay; d++) {
-      const date = `${String(year)}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    for (let dayOfMonth = 1; dayOfMonth <= lastDay; dayOfMonth++) {
+      const date = `${String(year)}-${String(month).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`
       const pnl = daily.get(date)
       const note = journal.get(date)
       const dayTrades = byDate.get(date) ?? []

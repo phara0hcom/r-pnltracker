@@ -27,8 +27,8 @@ for (const w of engine.warnings) {
 console.log(`\n=== REALIZED BY SETTLEMENT YEAR ===`)
 const byYear = [...bySettlementYear(engine.realized).entries()].sort((a, b) => a[0] - b[0])
 for (const [year, events] of byYear) {
-  const taxable = events.filter((e) => e.isTaxable)
-  const exempt = events.filter((e) => !e.isTaxable)
+  const taxable = events.filter((close) => close.isTaxable)
+  const exempt = events.filter((close) => !close.isTaxable)
   console.log(
     `  ${year}  n=${String(events.length).padStart(3)}  ` +
       `特定 ${yen(totalRealized(taxable)).padStart(14)}  ` +

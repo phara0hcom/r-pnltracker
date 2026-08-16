@@ -44,19 +44,19 @@ const SECTION_TITLES: Record<string, Section> = {
 
 /** 商品等 column in the holdings table → asset class. */
 function holdingAssetClass(shohin: string): AssetClass | null {
-  const t = jtrim(shohin)
-  if (t.includes('国内株式')) return 'JP_EQUITY'
-  if (t.includes('外国株式')) return 'US_EQUITY'
-  if (t.includes('国内投信') || t.includes('外国投信')) return 'FUND'
+  const label = jtrim(shohin)
+  if (label.includes('国内株式')) return 'JP_EQUITY'
+  if (label.includes('外国株式')) return 'US_EQUITY'
+  if (label.includes('国内投信') || label.includes('外国投信')) return 'FUND'
   return null // 金銭等 (cash), 債券, etc.
 }
 
 /** Currency marker rows look like `【円】` or `【ＵＳドル　　（USD ）】`. */
 function currencyFromMarker(cell: string): Currency | null {
-  const t = toHalfWidth(cell)
-  if (!t.includes('【')) return null
-  if (t.includes('USD') || t.includes('ドル')) return 'USD'
-  if (t.includes('円')) return 'JPY'
+  const normalized = toHalfWidth(cell)
+  if (!normalized.includes('【')) return null
+  if (normalized.includes('USD') || normalized.includes('ドル')) return 'USD'
+  if (normalized.includes('円')) return 'JPY'
   return null
 }
 
@@ -101,7 +101,7 @@ export function parseTorizan(text: string, sourceFile: string): ParseResult {
     const first = jtrim(cols[0]);
 
     // A lone cell on a line is a section title.
-    if (cols.filter((c) => jtrim(c) !== '').length === 1 && first !== '') {
+    if (cols.filter((cell) => jtrim(cell) !== '').length === 1 && first !== '') {
       section = SECTION_TITLES[first] ?? 'OTHER'
       sawHeader = false
       continue

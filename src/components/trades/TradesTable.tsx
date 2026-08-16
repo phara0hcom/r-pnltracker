@@ -148,8 +148,8 @@ export function TradesTable({
             Trades, sorted by {sortBy} {sortDir === 'asc' ? 'ascending' : 'descending'}
           </caption>
           <colgroup>
-            {COLUMNS.map((c) => (
-              <col key={c} style={{ width: `${String(widths[c] ?? DEFAULT_WIDTHS[c] ?? 100)}px` }} />
+            {COLUMNS.map((cell) => (
+              <col key={cell} style={{ width: `${String(widths[cell] ?? DEFAULT_WIDTHS[cell] ?? 100)}px` }} />
             ))}
           </colgroup>
           <thead>
@@ -269,11 +269,11 @@ function Th({
           type="button"
           aria-label={`Resize ${label} column. Use arrow keys to adjust.`}
           className={styles.resizeHandle}
-          onPointerDown={(e) => {
-            onResizeStart(colKey, e)
+          onPointerDown={(event) => {
+            onResizeStart(colKey, event)
           }}
-          onKeyDown={(e) => {
-            onResizeKey(colKey, e)
+          onKeyDown={(event) => {
+            onResizeKey(colKey, event)
           }}
         />
       </div>
@@ -446,7 +446,7 @@ function EditRow({
   })
 
   const set = (key: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setDraft((d) => ({ ...d, [key]: e.target.value }))
+    setDraft((day) => ({ ...day, [key]: e.target.value }))
   }
 
   /** Enter saves, Escape cancels — expected of any inline editor. */

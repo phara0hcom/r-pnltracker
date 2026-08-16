@@ -88,13 +88,13 @@ function Stats() {
             </tr>
           </thead>
           <tbody>
-            {d.byAccount.map((g) => (
-              <tr key={g.key}>
-                <td>{ACCOUNT_LABEL[g.key] ?? g.key}</td>
-                <td data-numeric>{g.tradeCount}</td>
-                <td data-numeric>{pct(g.winRate, 0)}</td>
-                <td data-numeric className={tone(g.netPnl)}>{yen(g.netPnl)}</td>
-                <td data-numeric>{ratio(g.profitFactor)}</td>
+            {d.byAccount.map((group) => (
+              <tr key={group.key}>
+                <td>{ACCOUNT_LABEL[group.key] ?? group.key}</td>
+                <td data-numeric>{group.tradeCount}</td>
+                <td data-numeric>{pct(group.winRate, 0)}</td>
+                <td data-numeric className={tone(group.netPnl)}>{yen(group.netPnl)}</td>
+                <td data-numeric>{ratio(group.profitFactor)}</td>
               </tr>
             ))}
           </tbody>
@@ -113,13 +113,13 @@ function Stats() {
             </tr>
           </thead>
           <tbody>
-            {d.byAssetClass.map((g) => (
-              <tr key={g.key}>
-                <td>{ASSET_LABEL[g.key] ?? g.key}</td>
-                <td data-numeric>{g.tradeCount}</td>
-                <td data-numeric>{pct(g.winRate, 0)}</td>
-                <td data-numeric className={tone(g.netPnl)}>{yen(g.netPnl)}</td>
-                <td data-numeric>{ratio(g.profitFactor)}</td>
+            {d.byAssetClass.map((group) => (
+              <tr key={group.key}>
+                <td>{ASSET_LABEL[group.key] ?? group.key}</td>
+                <td data-numeric>{group.tradeCount}</td>
+                <td data-numeric>{pct(group.winRate, 0)}</td>
+                <td data-numeric className={tone(group.netPnl)}>{yen(group.netPnl)}</td>
+                <td data-numeric>{ratio(group.profitFactor)}</td>
               </tr>
             ))}
           </tbody>
@@ -139,11 +139,11 @@ function Stats() {
           <div className={styles.correlations}>
             <CorrelationTable
               caption="By mood"
-              rows={d.moodCorrelation.map((r) => ({ score: r.mood, ...r }))}
+              rows={d.moodCorrelation.map((row) => ({ score: row.mood, ...row }))}
             />
             <CorrelationTable
               caption="By motivation"
-              rows={d.motivationCorrelation.map((r) => ({ score: r.motivation, ...r }))}
+              rows={d.motivationCorrelation.map((row) => ({ score: row.motivation, ...row }))}
             />
           </div>
         )}
@@ -160,15 +160,15 @@ function Stats() {
             </tr>
           </thead>
           <tbody>
-            {d.symbols.map((r) => (
-              <tr key={r.symbol}>
+            {d.symbols.map((row) => (
+              <tr key={row.symbol}>
                 <td>
-                  <strong>{r.symbol}</strong>
-                  <div className={styles.subName}>{r.name}</div>
+                  <strong>{row.symbol}</strong>
+                  <div className={styles.subName}>{row.name}</div>
                 </td>
-                <td data-numeric>{r.tradeCount}</td>
-                <td data-numeric>{pct(r.winRate, 0)}</td>
-                <td data-numeric className={tone(r.netPnl)}>{yen(r.netPnl)}</td>
+                <td data-numeric>{row.tradeCount}</td>
+                <td data-numeric>{pct(row.winRate, 0)}</td>
+                <td data-numeric className={tone(row.netPnl)}>{yen(row.netPnl)}</td>
               </tr>
             ))}
           </tbody>
@@ -225,12 +225,12 @@ function CorrelationTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.score}>
-              <td>{'★'.repeat(r.score)}<span className={styles.dim}>{'☆'.repeat(5 - r.score)}</span></td>
-              <td data-numeric>{r.days}</td>
-              <td data-numeric className={tone(r.avgPnl)}>{yenSigned(r.avgPnl)}</td>
-              <td data-numeric className={tone(r.totalPnl)}>{yenSigned(r.totalPnl)}</td>
+          {rows.map((row) => (
+            <tr key={row.score}>
+              <td>{'★'.repeat(row.score)}<span className={styles.dim}>{'☆'.repeat(5 - row.score)}</span></td>
+              <td data-numeric>{row.days}</td>
+              <td data-numeric className={tone(row.avgPnl)}>{yenSigned(row.avgPnl)}</td>
+              <td data-numeric className={tone(row.totalPnl)}>{yenSigned(row.totalPnl)}</td>
             </tr>
           ))}
         </tbody>

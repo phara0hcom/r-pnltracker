@@ -52,7 +52,7 @@ export const refreshPrices = createServerFn({ method: 'POST' })
   .middleware([authed])
   .handler(async ({ context }): Promise<RefreshResult> => {
     const records = await listTrades(context.userId)
-    const { positions } = runEngine(records.map((r) => r.trade))
+    const { positions } = runEngine(records.map((record) => record.trade))
 
     const [cached, overridden] = await Promise.all([
       db.select().from(priceCache),
@@ -61,8 +61,8 @@ export const refreshPrices = createServerFn({ method: 'POST' })
         .from(priceOverrides)
         .where(eq(priceOverrides.userId, context.userId)),
     ])
-    const byId = new Map(cached.map((c) => [c.instrumentId, c]))
-    const overriddenIds = new Set(overridden.map((o) => o.instrumentId))
+    const byId = new Map(cached.map((row) => [row.instrumentId, row]))
+    const overriddenIds = new Set(overridden.map((row) => row.instrumentId))
     const now = Date.now()
 
     let updated = 0
@@ -71,8 +71,8 @@ export const refreshPrices = createServerFn({ method: 'POST' })
     let noSource = 0
     const needsManual: string[] = []
 
-    for (const p of positions) {
-      const id = instrumentId(p.symbol)
+    for (const position of positions) {
+      const id = instrumentId(position.symbol)
       const existing = byId.get(id)
 
       // A manual override is authoritative; never spend quota refreshing a
@@ -81,9 +81,9 @@ export const refreshPrices = createServerFn({ method: 'POST' })
 
       // Nothing to ask: no provider quotes an instrument that has no ticker.
       // Checked before the TTL so the count is stable regardless of cache age.
-      if (!hasQuotableTicker(p.symbol, p.assetClass)) {
+      if (!hasQuotableTicker(position.symbol, position.assetClass)) {
         noSource++
-        if (!existing) needsManual.push(p.symbol)
+        if (!existing) needsManual.push(position.symbol)
         continue
       }
 
@@ -91,10 +91,10 @@ export const refreshPrices = createServerFn({ method: 'POST' })
       if (existing && now - existing.fetchedAt.getTime() < TTL_MS) continue
 
       attempted++
-      const quote = await fetchQuote({ symbol: p.symbol, assetClass: p.assetClass })
+      const quote = await fetchQuote({ symbol: position.symbol, assetClass: position.assetClass })
       if (!quote) {
         failed++
-        if (!existing) needsManual.push(p.symbol)
+        if (!existing) needsManual.push(position.symbol)
         continue
       }
 
@@ -173,8 +173,8 @@ export const listPrices = createServerFn({ method: 'GET' })
   .middleware([authed])
   .handler(async ({ context }): Promise<PriceEntry[]> => {
     const records = await listTrades(context.userId)
-    const { positions } = runEngine(records.map((r) => r.trade))
-    const ids = positions.map((p) => instrumentId(p.symbol))
+    const { positions } = runEngine(records.map((record) => record.trade))
+    const ids = positions.map((position) => instrumentId(position.symbol))
     if (ids.length === 0) return []
 
     const [cached, overrides] = await Promise.all([
@@ -186,34 +186,34 @@ export const listPrices = createServerFn({ method: 'GET' })
           and(eq(priceOverrides.userId, context.userId), inArray(priceOverrides.instrumentId, ids)),
         ),
     ])
-    const byId = new Map(cached.map((c) => [c.instrumentId, c]))
-    const overrideById = new Map(overrides.map((o) => [o.instrumentId, o]))
+    const byId = new Map(cached.map((row) => [row.instrumentId, row]))
+    const overrideById = new Map(overrides.map((row) => [row.instrumentId, row]))
 
     return positions
-      .map((p) => {
-        const id = instrumentId(p.symbol)
-        const c = byId.get(id)
-        const o = overrideById.get(id)
+      .map((position) => {
+        const id = instrumentId(position.symbol)
+        const cached = byId.get(id)
+        const override = overrideById.get(id)
         return {
-          symbol: p.symbol,
-          name: p.name,
-          assetClass: p.assetClass,
+          symbol: position.symbol,
+          name: position.name,
+          assetClass: position.assetClass,
           // An override wins, exactly as it does in `getPositions` — reading the
           // cache alone showed "—" for every hand-priced fund, because a fund
           // has no cache row at all. That is the one case the override exists
           // for, so the screen denied having saved the value the user just typed.
-          price: o?.price ?? c?.price ?? null,
-          currency: o?.currency ?? c?.currency ?? null,
-          source: o ? 'MANUAL' : (c?.source ?? null),
-          asOf: (o?.setAt ?? c?.asOf)?.toISOString() ?? null,
-          manualOverride: o?.price ?? null,
+          price: override?.price ?? cached?.price ?? null,
+          currency: override?.currency ?? cached?.currency ?? null,
+          source: override ? 'MANUAL' : (cached?.source ?? null),
+          asOf: (override?.setAt ?? cached?.asOf)?.toISOString() ?? null,
+          manualOverride: override?.price ?? null,
           // Only instruments no provider can quote at all — funds. JP equities
           // scrape reliably, so flagging them here sent the user to type prices
           // the app was already fetching.
-          needsManual: !hasQuotableTicker(p.symbol, p.assetClass),
+          needsManual: !hasQuotableTicker(position.symbol, position.assetClass),
         }
       })
-      .sort((a, b) => a.symbol.localeCompare(b.symbol))
+      .sort((left, right) => left.symbol.localeCompare(right.symbol))
   })
 
 /**
@@ -229,10 +229,10 @@ const manualPriceSchema = z.object({
   price: z
     .string()
     .trim()
-    .refine((v) => {
+    .refine((raw) => {
       try {
-        const d = new Decimal(v)
-        return d.isFinite() && d.gt(0)
+        const parsed = new Decimal(raw)
+        return parsed.isFinite() && parsed.gt(0)
       } catch {
         return false
       }

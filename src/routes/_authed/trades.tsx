@@ -86,26 +86,30 @@ function TradesScreen() {
   }
 
   const filtered = useMemo(() => {
-    const q = search.symbol?.trim().toLowerCase()
-    const list = rows.filter((r) => {
-      if (search.from && r.tradeDate < search.from) return false
-      if (search.to && r.tradeDate > search.to) return false
-      if (search.account && r.accountType !== search.account) return false
-      if (search.assetClass && r.assetClass !== search.assetClass) return false
-      if (search.side && r.side !== search.side) return false
-      if (q && !r.symbol.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q)) {
+    const searchText = search.symbol?.trim().toLowerCase()
+    const list = rows.filter((row) => {
+      if (search.from && row.tradeDate < search.from) return false
+      if (search.to && row.tradeDate > search.to) return false
+      if (search.account && row.accountType !== search.account) return false
+      if (search.assetClass && row.assetClass !== search.assetClass) return false
+      if (search.side && row.side !== search.side) return false
+      if (
+        searchText &&
+        !row.symbol.toLowerCase().includes(searchText) &&
+        !row.name.toLowerCase().includes(searchText)
+      ) {
         return false
       }
       if (search.outcome) {
-        if (r.realizedJpy == null) return false
-        const v = Number(r.realizedJpy)
-        if (search.outcome === 'win' && v <= 0) return false
-        if (search.outcome === 'loss' && v >= 0) return false
+        if (row.realizedJpy == null) return false
+        const realized = Number(row.realizedJpy)
+        if (search.outcome === 'win' && realized <= 0) return false
+        if (search.outcome === 'loss' && realized >= 0) return false
       }
       return true
     })
 
-    const dir = search.sortDir === 'asc' ? 1 : -1
+    const direction = search.sortDir === 'asc' ? 1 : -1
     const key = search.sortBy
     // Return % is a number; the rest of the numeric columns are decimal strings.
     // Either way they must compare numerically, never lexically — otherwise
@@ -117,17 +121,17 @@ function TradesScreen() {
       key === 'realizedJpy' ||
       key === 'returnPct'
 
-    return [...list].sort((a, b) => {
-      const av = a[key]
-      const bv = b[key]
+    return [...list].sort((left, right) => {
+      const leftValue = left[key]
+      const rightValue = right[key]
       // Rows without a realized figure sort last regardless of direction —
       // an open position is not "worse" than a loss.
-      if (av == null) return 1
-      if (bv == null) return -1
-      if (numeric) return (Number(av) - Number(bv)) * dir
+      if (leftValue == null) return 1
+      if (rightValue == null) return -1
+      if (numeric) return (Number(leftValue) - Number(rightValue)) * direction
       // Remaining columns are strings, but the union still includes number, so
       // coerce rather than assume.
-      return String(av).localeCompare(String(bv)) * dir
+      return String(leftValue).localeCompare(String(rightValue)) * direction
     })
   }, [rows, search])
 
@@ -151,9 +155,12 @@ function TradesScreen() {
   )
 
   const totals = useMemo(() => {
-    const realized = filtered.reduce((a, r) => a + (r.realizedJpy ? Number(r.realizedJpy) : 0), 0)
-    const closes = filtered.filter((r) => r.realizedJpy != null)
-    const wins = closes.filter((r) => Number(r.realizedJpy) > 0).length
+    const realized = filtered.reduce(
+      (running, row) => running + (row.realizedJpy ? Number(row.realizedJpy) : 0),
+      0,
+    )
+    const closes = filtered.filter((row) => row.realizedJpy != null)
+    const wins = closes.filter((row) => Number(row.realizedJpy) > 0).length
     return {
       count: filtered.length,
       realized,
@@ -225,11 +232,11 @@ function TradesScreen() {
           pageCount={pageCount}
           perPage={perPage}
           total={filtered.length}
-          onPage={(p) => {
-            setSearch({ page: p })
+          onPage={(point) => {
+            setSearch({ page: point })
           }}
-          onPerPage={(n) => {
-            setSearch({ perPage: n })
+          onPerPage={(note) => {
+            setSearch({ perPage: note })
           }}
         />
       ) : null}
@@ -262,8 +269,8 @@ function Filters({
           className={styles.input}
           placeholder="Symbol or name"
           value={search.symbol ?? ''}
-          onChange={(e) => {
-            onChange({ symbol: e.target.value || undefined })
+          onChange={(event) => {
+            onChange({ symbol: event.target.value || undefined })
           }}
         />
       </label>
@@ -274,8 +281,8 @@ function Filters({
           type="date"
           className={styles.input}
           value={search.from ?? ''}
-          onChange={(e) => {
-            onChange({ from: e.target.value || undefined })
+          onChange={(event) => {
+            onChange({ from: event.target.value || undefined })
           }}
         />
       </label>
@@ -286,8 +293,8 @@ function Filters({
           type="date"
           className={styles.input}
           value={search.to ?? ''}
-          onChange={(e) => {
-            onChange({ to: e.target.value || undefined })
+          onChange={(event) => {
+            onChange({ to: event.target.value || undefined })
           }}
         />
       </label>
@@ -297,8 +304,8 @@ function Filters({
         <select
           className={styles.input}
           value={search.account ?? ''}
-          onChange={(e) => {
-            onChange({ account: (e.target.value || undefined) as TradeSearch['account'] })
+          onChange={(event) => {
+            onChange({ account: (event.target.value || undefined) as TradeSearch['account'] })
           }}
         >
           <option value="">All</option>
@@ -314,8 +321,8 @@ function Filters({
         <select
           className={styles.input}
           value={search.assetClass ?? ''}
-          onChange={(e) => {
-            onChange({ assetClass: (e.target.value || undefined) as TradeSearch['assetClass'] })
+          onChange={(event) => {
+            onChange({ assetClass: (event.target.value || undefined) as TradeSearch['assetClass'] })
           }}
         >
           <option value="">All</option>
@@ -330,8 +337,8 @@ function Filters({
         <select
           className={styles.input}
           value={search.side ?? ''}
-          onChange={(e) => {
-            onChange({ side: (e.target.value || undefined) as TradeSearch['side'] })
+          onChange={(event) => {
+            onChange({ side: (event.target.value || undefined) as TradeSearch['side'] })
           }}
         >
           <option value="">All</option>
@@ -347,8 +354,8 @@ function Filters({
         <select
           className={styles.input}
           value={search.outcome ?? ''}
-          onChange={(e) => {
-            onChange({ outcome: (e.target.value || undefined) as TradeSearch['outcome'] })
+          onChange={(event) => {
+            onChange({ outcome: (event.target.value || undefined) as TradeSearch['outcome'] })
           }}
         >
           <option value="">All</option>
@@ -398,8 +405,8 @@ function Pagination({
   pageCount: number
   perPage: number
   total: number
-  onPage: (p: number) => void
-  onPerPage: (n: PerPage) => void
+  onPage: (page: number) => void
+  onPerPage: (perPage: PerPage) => void
 }) {
   const first = (page - 1) * perPage + 1
   const last = Math.min(page * perPage, total)
@@ -415,13 +422,13 @@ function Pagination({
         <select
           className={styles.perPageSelect}
           value={perPage}
-          onChange={(e) => {
-            onPerPage(Number(e.target.value) as PerPage)
+          onChange={(event) => {
+            onPerPage(Number(event.target.value) as PerPage)
           }}
         >
-          {[25, 50, 100, 250].map((n) => (
-            <option key={n} value={n}>
-              {n}
+          {[25, 50, 100, 250].map((note) => (
+            <option key={note} value={note}>
+              {note}
             </option>
           ))}
         </select>

@@ -32,9 +32,13 @@ import { decodeShiftJis } from './util'
 export function orderFilesForImport<T extends { bytes: Uint8Array }>(files: T[]): T[] {
   const isStatement = (f: T) => detectFormat(decodeShiftJis(f.bytes)) === 'TORIZAN'
   return files
-    .map((f, i) => ({ f, i, rank: isStatement(f) ? 1 : 0 }))
-    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.i - b.i))
-    .map(({ f }) => f)
+    // Original index carried alongside so the sort is stable: files of equal
+    // rank keep the order the user chose them in.
+    .map((file, chosenOrder) => ({ file, chosenOrder, rank: isStatement(file) ? 1 : 0 }))
+    .sort((left, right) =>
+      left.rank !== right.rank ? left.rank - right.rank : left.chosenOrder - right.chosenOrder,
+    )
+    .map(({ file }) => file)
 }
 
 export interface ImportPlan {
@@ -64,28 +68,28 @@ export function planImport(
   const newTrades: NormalizedTrade[] = []
   let duplicateTrades = 0
 
-  for (const t of parsed.trades) {
+  for (const trade of parsed.trades) {
     // Guards both against re-importing a stored row and against the same row
     // appearing twice within one upload batch.
-    if (seenTrades.has(t.sourceRowHash)) {
+    if (seenTrades.has(trade.sourceRowHash)) {
       duplicateTrades++
       continue
     }
-    seenTrades.add(t.sourceRowHash)
-    newTrades.push(t)
+    seenTrades.add(trade.sourceRowHash)
+    newTrades.push(trade)
   }
 
   const seenDividends = new Set(existingDividendHashes)
   const newDividends: NormalizedDividend[] = []
   let duplicateDividends = 0
 
-  for (const d of parsed.dividends) {
-    if (seenDividends.has(d.sourceRowHash)) {
+  for (const payout of parsed.dividends) {
+    if (seenDividends.has(payout.sourceRowHash)) {
       duplicateDividends++
       continue
     }
-    seenDividends.add(d.sourceRowHash)
-    newDividends.push(d)
+    seenDividends.add(payout.sourceRowHash)
+    newDividends.push(payout)
   }
 
   return {

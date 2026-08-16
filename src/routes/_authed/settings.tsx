@@ -43,13 +43,14 @@ function Settings() {
   })
 
   const save = useMutation({
-    mutationFn: (v: { symbol: string; price: string | null }) => setManualPrice({ data: v }),
+    mutationFn: (override: { symbol: string; price: string | null }) =>
+      setManualPrice({ data: override }),
     onSuccess: () => {
       void queryClient.invalidateQueries()
     },
   })
 
-  const unpriced = prices.filter((p) => p.price == null && p.manualOverride == null)
+  const unpriced = prices.filter((entry) => entry.price == null && entry.manualOverride == null)
 
   return (
     <>
@@ -104,32 +105,32 @@ function Settings() {
               </tr>
             </thead>
             <tbody>
-              {prices.map((p) => {
-                const draft = drafts[p.symbol] ?? p.manualOverride ?? ''
+              {prices.map((entry) => {
+                const draft = drafts[entry.symbol] ?? entry.manualOverride ?? ''
                 return (
-                  <tr key={p.symbol}>
+                  <tr key={entry.symbol}>
                     <td>
-                      <InstrumentLink symbol={p.symbol} name={p.name} assetClass={p.assetClass} />
+                      <InstrumentLink symbol={entry.symbol} name={entry.name} assetClass={entry.assetClass} />
                     </td>
-                    <td>{ASSET_LABEL[p.assetClass] ?? p.assetClass}</td>
+                    <td>{ASSET_LABEL[entry.assetClass] ?? entry.assetClass}</td>
                     <td data-numeric>
-                      {p.price == null
+                      {entry.price == null
                         ? '—'
-                        : p.currency === 'USD'
-                          ? `$${Number(p.price).toFixed(2)}`
-                          : `¥${Number(p.price).toLocaleString('en-US')}`}
+                        : entry.currency === 'USD'
+                          ? `$${Number(entry.price).toFixed(2)}`
+                          : `¥${Number(entry.price).toLocaleString('en-US')}`}
                     </td>
                     <td>
-                      {p.source ? (
-                        <span className={cx(styles.tag, p.source === 'MANUAL' && styles.tagManual)}>
-                          {p.source}
+                      {entry.source ? (
+                        <span className={cx(styles.tag, entry.source === 'MANUAL' && styles.tagManual)}>
+                          {entry.source}
                         </span>
                       ) : (
                         <span className={styles.tagMissing}>none</span>
                       )}
                     </td>
                     <td className={styles.dim}>
-                      {p.asOf ? new Date(p.asOf).toLocaleDateString() : '—'}
+                      {entry.asOf ? new Date(entry.asOf).toLocaleDateString() : '—'}
                     </td>
                     <td>
                       <div className={styles.overrideCell}>
@@ -137,32 +138,32 @@ function Settings() {
                           inputMode="decimal"
                           className={styles.input}
                           value={draft}
-                          placeholder={p.needsManual ? 'set price' : 'auto'}
-                          onChange={(e) => {
-                            setDrafts((d) => ({ ...d, [p.symbol]: e.target.value }))
+                          placeholder={entry.needsManual ? 'set price' : 'auto'}
+                          onChange={(event) => {
+                            setDrafts((previous) => ({ ...previous, [entry.symbol]: event.target.value }))
                           }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              save.mutate({ symbol: p.symbol, price: draft || null })
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              save.mutate({ symbol: entry.symbol, price: draft || null })
                             }
                           }}
-                          aria-label={`Manual price for ${p.symbol}`}
+                          aria-label={`Manual price for ${entry.symbol}`}
                         />
                         <button
                           type="button"
                           className={styles.small}
                           onClick={() => {
-                            save.mutate({ symbol: p.symbol, price: draft || null })
+                            save.mutate({ symbol: entry.symbol, price: draft || null })
                           }}
                         >
                           Save
                         </button>
-                        {p.manualOverride ? (
+                        {entry.manualOverride ? (
                           <ConfirmButton
                             confirmLabel="Clear?"
                             onConfirm={() => {
-                              setDrafts((d) => ({ ...d, [p.symbol]: '' }))
-                              save.mutate({ symbol: p.symbol, price: null })
+                              setDrafts((previous) => ({ ...previous, [entry.symbol]: '' }))
+                              save.mutate({ symbol: entry.symbol, price: null })
                             }}
                           >
                             Clear
@@ -208,12 +209,12 @@ function Settings() {
 
         {check.data ? (
           <ul className={styles.checks}>
-            {check.data.map((c) => (
-              <li key={c.provider} className={styles.checkRow}>
-                <span className={cx(styles.dot, styles[`dot${c.state}`])} aria-hidden="true" />
-                <strong className={styles.checkName}>{c.provider}</strong>
-                <span className={styles.checkState}>{STATE_LABEL[c.state]}</span>
-                <span className={styles.checkDetail}>{c.detail}</span>
+            {check.data.map((check) => (
+              <li key={check.provider} className={styles.checkRow}>
+                <span className={cx(styles.dot, styles[`dot${check.state}`])} aria-hidden="true" />
+                <strong className={styles.checkName}>{check.provider}</strong>
+                <span className={styles.checkState}>{STATE_LABEL[check.state]}</span>
+                <span className={styles.checkDetail}>{check.detail}</span>
               </li>
             ))}
           </ul>

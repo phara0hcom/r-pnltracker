@@ -98,7 +98,7 @@ describe('holdingWindows', () => {
       ],
       AS_OF,
     )
-    expect(w.map((x) => x.days)).toEqual([10, 20])
+    expect(w.map((item) => item.days)).toEqual([10, 20])
   })
 
   it('measures a still-open position against the as-of date', () => {
@@ -119,23 +119,23 @@ describe('holdingWindows', () => {
       ],
       AS_OF,
     )
-    expect(w.find((x) => x.symbol === 'AAA')?.days).toBe(5)
-    expect(w.find((x) => x.symbol === 'BBB')?.to).toBeNull()
+    expect(w.find((item) => item.symbol === 'AAA')?.days).toBe(5)
+    expect(w.find((item) => item.symbol === 'BBB')?.to).toBeNull()
   })
 })
 
 describe('holdingWindows against the real US trades', () => {
-  const usTrades = loadAllTrades().trades.filter((t) => t.assetClass === 'US_EQUITY')
+  const usTrades = loadAllTrades().trades.filter((trade) => trade.assetClass === 'US_EQUITY')
   const windows = holdingWindows(usTrades, AS_OF)
   const longest = longestHoldBySymbol(windows)
 
   it('produces a window for every US ticker traded', () => {
-    const traded = new Set(usTrades.map((t) => t.symbol))
+    const traded = new Set(usTrades.map((trade) => trade.symbol))
     expect(longest.size).toBe(traded.size)
   })
 
   it('never reports a negative hold', () => {
-    expect(windows.every((w) => w.days >= 0)).toBe(true)
+    expect(windows.every((window) => window.days >= 0)).toBe(true)
   })
 
   it('finds the long-held names', () => {

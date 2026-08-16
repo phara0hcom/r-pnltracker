@@ -57,19 +57,23 @@ export function useColumnWidths(defaults: ColumnWidths) {
       const startWidth = widths[key] ?? defaults[key] ?? 100
       drag.current = { key, startX: event.clientX, startWidth }
 
-      const onMove = (e: PointerEvent) => {
-        const d = drag.current
-        if (!d) return
-        const next = Math.max(MIN_WIDTH, d.startWidth + (e.clientX - d.startX))
-        setWidths((w) => ({ ...w, [d.key]: next }))
+      const onMove = (event: PointerEvent) => {
+        const active = drag.current
+        if (!active) return
+        const next = Math.max(MIN_WIDTH, active.startWidth + (event.clientX - active.startX))
+        setWidths((w) => ({ ...w, [active.key]: next }))
       }
 
       const onUp = () => {
-        const d = drag.current
+        const active = drag.current
         drag.current = null
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
-        if (d) setWidths((w) => { persist(w); return w })
+        if (active)
+          setWidths((current) => {
+            persist(current)
+            return current
+          })
       }
 
       window.addEventListener('pointermove', onMove)

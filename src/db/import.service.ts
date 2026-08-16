@@ -63,8 +63,8 @@ export function parseFile(filename: string, bytes: Uint8Array): ParseResult {
     default: {
       // Daily reports duplicate the trade history; accepting them would add
       // nothing and risk double-counting under a different hash.
-      const r = emptyParseResult()
-      r.errors.push({
+      const result = emptyParseResult()
+      result.errors.push({
         file: filename,
         line: 0,
         message:
@@ -72,7 +72,7 @@ export function parseFile(filename: string, bytes: Uint8Array): ParseResult {
             ? 'Unrecognised file. Expected a Rakuten tradehistory or 取引残高報告書 CSV.'
             : `${format} files duplicate the trade history and are not imported.`,
       })
-      return r
+      return result
     }
   }
 }
@@ -87,8 +87,8 @@ async function existingHashes(userId: string): Promise<{
     db.select({ h: dividends.sourceRowHash }).from(dividends).where(eq(dividends.userId, userId)),
   ])
   return {
-    trades: new Set(tradeRows.map((r) => r.h)),
-    dividends: new Set(dividendRows.map((r) => r.h)),
+    trades: new Set(tradeRows.map((row) => row.h)),
+    dividends: new Set(dividendRows.map((row) => row.h)),
   }
 }
 
@@ -150,7 +150,7 @@ export async function commitImport(
       rowsParsed: parsed.trades.length + parsed.dividends.length,
       rowsInserted: plan.newTrades.length + plan.newDividends.length,
       rowsSkipped: plan.duplicateTrades + plan.duplicateDividends,
-      errors: plan.errors.map((e) => ({ line: e.line, message: e.message })),
+      errors: plan.errors.map((error) => ({ line: error.line, message: error.message })),
     })
 
     // Instruments first — trades, dividends and snapshots all reference them.
@@ -163,16 +163,16 @@ export async function commitImport(
     // back from this table for every trade the engine sees.
     const dedupe = <T extends { id: string }>(rows: T[]): T[] => {
       const seen = new Set<string>()
-      return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
+      return rows.filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true)))
     }
 
     const fromSnapshots = dedupe(
-      parsed.snapshots.map((s) =>
+      parsed.snapshots.map((snapshot) =>
         toInstrumentRow({
-          symbol: s.symbol,
-          name: s.name,
-          assetClass: s.assetClass,
-          currency: s.assetClass === 'US_EQUITY' ? 'USD' : 'JPY',
+          symbol: snapshot.symbol,
+          name: snapshot.name,
+          assetClass: snapshot.assetClass,
+          currency: snapshot.assetClass === 'US_EQUITY' ? 'USD' : 'JPY',
         }),
       ),
     )
@@ -181,12 +181,12 @@ export async function commitImport(
     }
 
     const fromTrades = dedupe(
-      plan.newTrades.map((t) =>
+      plan.newTrades.map((trade) =>
         toInstrumentRow({
-          symbol: t.symbol,
-          name: t.name,
-          assetClass: t.assetClass,
-          currency: t.currency,
+          symbol: trade.symbol,
+          name: trade.name,
+          assetClass: trade.assetClass,
+          currency: trade.currency,
         }),
       ),
     )
@@ -251,32 +251,32 @@ export async function commitImport(
         .innerJoin(instruments, eq(trades.instrumentId, instruments.id))
         .where(eq(trades.userId, userId))
 
-      const history = allTrades.map((r) =>
-        fromTradeRow(r.trade, {
-          symbol: r.instrument.symbol,
-          name: r.instrument.name,
-          assetClass: r.instrument.assetClass,
+      const history = allTrades.map((row) =>
+        fromTradeRow(row.trade, {
+          symbol: row.instrument.symbol,
+          name: row.instrument.name,
+          assetClass: row.instrument.assetClass,
         }),
       )
 
       const attributed = attributeDividends(plan.newDividends, history)
       await tx
         .insert(dividends)
-        .values(attributed.map((d) => toDividendRow(userId, d)))
+        .values(attributed.map((payout) => toDividendRow(userId, payout)))
         .onConflictDoNothing()
     }
 
     if (parsed.snapshots.length) {
       await tx
         .insert(positionSnapshots)
-        .values(parsed.snapshots.map((s) => toSnapshotRow(userId, s)))
+        .values(parsed.snapshots.map((snapshot) => toSnapshotRow(userId, snapshot)))
         .onConflictDoNothing()
     }
 
     if (parsed.cashMovements.length) {
       await tx
         .insert(cashMovements)
-        .values(parsed.cashMovements.map((c) => toCashRow(userId, c)))
+        .values(parsed.cashMovements.map((movement) => toCashRow(userId, movement)))
         .onConflictDoNothing()
     }
 

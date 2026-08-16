@@ -110,15 +110,18 @@ const fromEpochDays = (days: number): string =>
  */
 export function sortTradesForEngine(trades: NormalizedTrade[]): NormalizedTrade[] {
   return trades
-    .map((t, i) => ({ t, i }))
-    .sort((a, b) => {
-      if (a.t.tradeDate !== b.t.tradeDate) return a.t.tradeDate < b.t.tradeDate ? -1 : 1
-      const ao = OPENING_SIDES.includes(a.t.side) ? 0 : 1
-      const bo = OPENING_SIDES.includes(b.t.side) ? 0 : 1
-      if (ao !== bo) return ao - bo
-      return a.i - b.i
+    // The original index is carried alongside so the sort stays stable: equal
+    // keys fall back to file order rather than an arbitrary engine ordering.
+    .map((trade, fileOrder) => ({ trade, fileOrder }))
+    .sort((left, right) => {
+      if (left.trade.tradeDate !== right.trade.tradeDate)
+        return left.trade.tradeDate < right.trade.tradeDate ? -1 : 1
+      const leftOpens = OPENING_SIDES.includes(left.trade.side) ? 0 : 1
+      const rightOpens = OPENING_SIDES.includes(right.trade.side) ? 0 : 1
+      if (leftOpens !== rightOpens) return leftOpens - rightOpens
+      return left.fileOrder - right.fileOrder
     })
-    .map(({ t }) => t)
+    .map(({ trade }) => trade)
 }
 
 export function runEngine(trades: NormalizedTrade[]): EngineResult {
@@ -126,62 +129,62 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
   const realized: RealizedEvent[] = []
   const warnings: EngineWarning[] = []
 
-  for (const t of sortTradesForEngine(trades)) {
-    const key = poolKey(t.symbol, t.accountType)
+  for (const trade of sortTradesForEngine(trades)) {
+    const key = poolKey(trade.symbol, trade.accountType)
     let pool = pools.get(key)
 
-    if (OPENING_SIDES.includes(t.side)) {
+    if (OPENING_SIDES.includes(trade.side)) {
       if (!pool) {
         pool = {
-          symbol: t.symbol,
-          name: t.name,
-          assetClass: t.assetClass,
-          accountType: t.accountType,
+          symbol: trade.symbol,
+          name: trade.name,
+          assetClass: trade.assetClass,
+          accountType: trade.accountType,
           quantity: ZERO,
           costBasisJpy: ZERO,
-          avgFxRate: t.fxRate,
+          avgFxRate: trade.fxRate,
           avgPriceNative: ZERO,
           weightedDateSum: ZERO,
         }
         pools.set(key, pool)
       }
 
-      const newQty = pool.quantity.add(t.quantity)
+      const newQty = pool.quantity.add(trade.quantity)
       // REINVEST carries a real acquisition cost (the distribution rolled in),
       // so it increases basis exactly like a cash buy.
-      pool.costBasisJpy = pool.costBasisJpy.add(t.netAmountJpy)
-      pool.avgFxRate = weightedAvg(pool.avgFxRate, pool.quantity, t.fxRate, t.quantity, newQty)
+      pool.costBasisJpy = pool.costBasisJpy.add(trade.netAmountJpy)
+      pool.avgFxRate = weightedAvg(pool.avgFxRate, pool.quantity, trade.fxRate, trade.quantity, newQty)
       pool.avgPriceNative = weightedAvg(
         pool.avgPriceNative,
         pool.quantity,
-        t.unitPrice,
-        t.quantity,
+        trade.unitPrice,
+        trade.quantity,
         newQty,
       )
-      pool.weightedDateSum = pool.weightedDateSum.add(t.quantity.mul(toEpochDays(t.tradeDate)))
+      pool.weightedDateSum = pool.weightedDateSum.add(trade.quantity.mul(toEpochDays(trade.tradeDate)))
       pool.quantity = newQty
       continue
     }
 
-    if (!CLOSING_SIDES.includes(t.side)) continue
+    if (!CLOSING_SIDES.includes(trade.side)) continue
 
     if (!pool || pool.quantity.lte(0)) {
       warnings.push({
-        tradeDate: t.tradeDate,
-        symbol: t.symbol,
-        accountType: t.accountType,
+        tradeDate: trade.tradeDate,
+        symbol: trade.symbol,
+        accountType: trade.accountType,
         message: 'close with no open position — trade history may be incomplete',
       })
       continue
     }
 
     // Guard against selling more than held (data gaps before the export window).
-    let qty = t.quantity
+    let qty = trade.quantity
     if (qty.gt(pool.quantity)) {
       warnings.push({
-        tradeDate: t.tradeDate,
-        symbol: t.symbol,
-        accountType: t.accountType,
+        tradeDate: trade.tradeDate,
+        symbol: trade.symbol,
+        accountType: trade.accountType,
         message: `close qty ${qty.toFixed()} exceeds held ${pool.quantity.toFixed()} — clamped`,
       })
       qty = pool.quantity
@@ -193,30 +196,30 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
     const costJpy = toYen(avgCostPerUnit.mul(qty))
     // Scale proceeds if the quantity was clamped, so P&L stays consistent.
     const proceedsJpy = toYen(
-      t.quantity.eq(qty) ? t.netAmountJpy : t.netAmountJpy.mul(qty).div(t.quantity),
+      trade.quantity.eq(qty) ? trade.netAmountJpy : trade.netAmountJpy.mul(qty).div(trade.quantity),
     )
 
     const avgEntryDays = pool.weightedDateSum.div(pool.quantity)
     const avgEntryDate = fromEpochDays(avgEntryDays.toNumber())
 
     realized.push({
-      tradeDate: t.tradeDate,
-      settleDate: t.settleDate,
-      symbol: t.symbol,
-      name: t.name || pool.name,
-      assetClass: t.assetClass,
-      accountType: t.accountType,
+      tradeDate: trade.tradeDate,
+      settleDate: trade.settleDate,
+      symbol: trade.symbol,
+      name: trade.name || pool.name,
+      assetClass: trade.assetClass,
+      accountType: trade.accountType,
       quantity: qty,
       proceedsJpy,
       costJpy,
       realizedJpy: proceedsJpy.sub(costJpy),
       entryPriceNative: pool.avgPriceNative,
-      exitPriceNative: t.unitPrice,
+      exitPriceNative: trade.unitPrice,
       entryFxRate: pool.avgFxRate,
-      exitFxRate: t.fxRate,
+      exitFxRate: trade.fxRate,
       avgEntryDate,
-      holdingDays: Math.max(0, toEpochDays(t.tradeDate) - Math.round(avgEntryDays.toNumber())),
-      isTaxable: t.accountType === 'SPECIFIC',
+      holdingDays: Math.max(0, toEpochDays(trade.tradeDate) - Math.round(avgEntryDays.toNumber())),
+      isTaxable: trade.accountType === 'SPECIFIC',
     })
 
     // Reduce the pool proportionally; average cost per unit is unchanged by a sale.
@@ -233,7 +236,7 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
   }
 
   const positions = [...pools.values()]
-    .filter((p) => p.quantity.gt(0))
+    .filter((position) => position.quantity.gt(0))
     .map(({ weightedDateSum: _drop, ...rest }) => rest)
 
   return { positions, realized, warnings }
@@ -258,8 +261,8 @@ export function totalRealized(
   filter?: (e: RealizedEvent) => boolean,
 ): Decimal {
   return events
-    .filter((e) => filter?.(e) ?? true)
-    .reduce((a, e) => a.add(e.realizedJpy), new Decimal(0))
+    .filter((close) => filter?.(close) ?? true)
+    .reduce((running, close) => running.add(close.realizedJpy), new Decimal(0))
 }
 
 /**
@@ -271,11 +274,11 @@ export function totalRealized(
  */
 export function bySettlementYear(events: RealizedEvent[]): Map<number, RealizedEvent[]> {
   const out = new Map<number, RealizedEvent[]>()
-  for (const e of events) {
-    const y = Number(e.settleDate.slice(0, 4))
-    const list = out.get(y)
-    if (list) list.push(e)
-    else out.set(y, [e])
+  for (const close of events) {
+    const year = Number(close.settleDate.slice(0, 4))
+    const list = out.get(year)
+    if (list) list.push(close)
+    else out.set(year, [close])
   }
   return out
 }

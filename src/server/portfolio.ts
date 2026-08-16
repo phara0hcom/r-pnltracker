@@ -87,11 +87,11 @@ export interface DashboardData {
 
 /** Monday-start week containing `now`, as an inclusive ISO date range. */
 function currentWeek(now: Date): { from: string; to: string } {
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const midnightUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   // getUTCDay is Sunday-based; shift so Monday is 0.
-  const offset = (d.getUTCDay() + 6) % 7
-  const monday = new Date(d)
-  monday.setUTCDate(d.getUTCDate() - offset)
+  const offsetFromMonday = (midnightUtc.getUTCDay() + 6) % 7
+  const monday = new Date(midnightUtc)
+  monday.setUTCDate(midnightUtc.getUTCDate() - offsetFromMonday)
   const sunday = new Date(monday)
   sunday.setUTCDate(monday.getUTCDate() + 6)
   return { from: monday.toISOString().slice(0, 10), to: sunday.toISOString().slice(0, 10) }
@@ -104,13 +104,13 @@ function currentWeek(now: Date): { from: string; to: string } {
  * performance question, not a tax one.
  */
 function summarize(events: RealizedEvent[], label: string, from: string, to: string): PeriodSummary {
-  const inRange = events.filter((e) => e.tradeDate >= from && e.tradeDate <= to)
-  const wins = inRange.filter((e) => e.realizedJpy.gt(0))
-  const losses = inRange.filter((e) => e.realizedJpy.lt(0))
+  const inRange = events.filter((close) => close.tradeDate >= from && close.tradeDate <= to)
+  const wins = inRange.filter((close) => close.realizedJpy.gt(0))
+  const losses = inRange.filter((close) => close.realizedJpy.lt(0))
 
-  const grossProfit = wins.reduce((a, e) => a.add(e.realizedJpy), ZERO)
-  const grossLoss = losses.reduce((a, e) => a.add(e.realizedJpy.abs()), ZERO)
-  const cost = inRange.reduce((a, e) => a.add(e.costJpy), ZERO)
+  const grossProfit = wins.reduce((running, close) => running.add(close.realizedJpy), ZERO)
+  const grossLoss = losses.reduce((running, close) => running.add(close.realizedJpy.abs()), ZERO)
+  const cost = inRange.reduce((running, close) => running.add(close.costJpy), ZERO)
   const net = grossProfit.sub(grossLoss)
 
   return {
@@ -139,39 +139,39 @@ function summarize(events: RealizedEvent[], label: string, from: string, to: str
 function monthlySeries(events: RealizedEvent[]): MonthlyPoint[] {
   if (events.length === 0) return []
 
-  const acc = new Map<string, { total: typeof ZERO; cost: typeof ZERO; count: number }>()
-  for (const e of events) {
-    const key = e.tradeDate.slice(0, 7)
-    const cur = acc.get(key) ?? { total: ZERO, cost: ZERO, count: 0 }
-    acc.set(key, {
-      total: cur.total.add(e.realizedJpy),
-      cost: cur.cost.add(e.costJpy),
-      count: cur.count + 1,
+  const byMonth = new Map<string, { total: typeof ZERO; cost: typeof ZERO; count: number }>()
+  for (const close of events) {
+    const key = close.tradeDate.slice(0, 7)
+    const running = byMonth.get(key) ?? { total: ZERO, cost: ZERO, count: 0 }
+    byMonth.set(key, {
+      total: running.total.add(close.realizedJpy),
+      cost: running.cost.add(close.costJpy),
+      count: running.count + 1,
     })
   }
 
-  const keys = [...acc.keys()].sort()
+  const keys = [...byMonth.keys()].sort()
   const firstKey = keys[0]
   const lastKey = keys.at(-1)
   if (!firstKey || !lastKey) return []
 
   // Months with no closes must still appear, or the axis lies about time.
   const out: MonthlyPoint[] = []
-  const [fy, fm] = firstKey.split('-').map(Number)
-  const [ly, lm] = lastKey.split('-').map(Number)
-  const cursor = new Date(Date.UTC(fy ?? 2022, (fm ?? 1) - 1, 1))
-  const end = new Date(Date.UTC(ly ?? 2026, (lm ?? 12) - 1, 1))
+  const [firstYear, firstMonth] = firstKey.split('-').map(Number)
+  const [lastYear, lastMonth] = lastKey.split('-').map(Number)
+  const cursor = new Date(Date.UTC(firstYear ?? 2022, (firstMonth ?? 1) - 1, 1))
+  const end = new Date(Date.UTC(lastYear ?? 2026, (lastMonth ?? 12) - 1, 1))
 
   while (cursor <= end) {
     const key = cursor.toISOString().slice(0, 7)
-    const v = acc.get(key)
+    const month = byMonth.get(key)
     out.push({
       month: key,
-      realizedJpy: (v?.total ?? ZERO).toFixed(0),
-      costJpy: (v?.cost ?? ZERO).toFixed(0),
+      realizedJpy: (month?.total ?? ZERO).toFixed(0),
+      costJpy: (month?.cost ?? ZERO).toFixed(0),
       // Guard the divide: a zero cost basis would yield Infinity.
-      returnPct: v?.cost.gt(0) ? v.total.div(v.cost).toNumber() : null,
-      tradeCount: v?.count ?? 0,
+      returnPct: month?.cost.gt(0) ? month.total.div(month.cost).toNumber() : null,
+      tradeCount: month?.count ?? 0,
     })
     cursor.setUTCMonth(cursor.getUTCMonth() + 1)
   }
@@ -192,8 +192,8 @@ export const getDashboard = createServerFn({ method: 'GET' })
     // Filtered before the engine runs: pools are keyed (symbol × accountType),
     // so removing whole accounts leaves the rest identical.
     const trades = records
-      .map((r) => r.trade)
-      .filter((t) => matchesAccountFilter(t.accountType, data.account))
+      .map((record) => record.trade)
+      .filter((trade) => matchesAccountFilter(trade.accountType, data.account))
 
     const engine = runEngine(trades)
     const stats = computeStats(engine.realized)
@@ -201,8 +201,11 @@ export const getDashboard = createServerFn({ method: 'GET' })
     const nisa = buildNisaReport(trades, engine.realized, now.getFullYear())
     const fx = attributeFx(engine.realized)
 
-    const maxedGrowth = nisa.annual.find((a) => a.frame === 'NISA_GROWTH' && a.isMaxed)
-    const invested = engine.positions.reduce((a, p) => a.add(p.costBasisJpy), ZERO)
+    const maxedGrowth = nisa.annual.find((frame) => frame.frame === 'NISA_GROWTH' && frame.isMaxed)
+    const invested = engine.positions.reduce(
+      (running, position) => running.add(position.costBasisJpy),
+      ZERO,
+    )
 
     const week = currentWeek(now)
     const monthStart = `${now.toISOString().slice(0, 7)}-01`
@@ -228,6 +231,9 @@ export const getDashboard = createServerFn({ method: 'GET' })
       nisaGrowthMaxedYear: maxedGrowth?.year ?? null,
       stockEffectJpy: fx.stockEffectJpy.toFixed(0),
       fxEffectJpy: fx.fxEffectJpy.toFixed(0),
-      equityCurve: stats.equityCurve.map((p) => ({ date: p.date, value: p.value.toFixed(0) })),
+      equityCurve: stats.equityCurve.map((point) => ({
+        date: point.date,
+        value: point.value.toFixed(0),
+      })),
     }
   })

@@ -129,7 +129,7 @@ describe('rule 3 — annual frames never restore', () => {
         unitPrice: new Decimal(2_400_000),
       }),
     ]
-    const annual = annualUsage(list).find((a) => a.year === 2026)!
+    const annual = annualUsage(list).find((left) => left.year === 2026)!
     // Selling does not hand back this year's ¥2.4M — it is spent.
     expect(annual.used.toFixed()).toBe('2400000')
     expect(annual.remaining.toFixed()).toBe('0')
@@ -139,10 +139,10 @@ describe('rule 3 — annual frames never restore', () => {
   it('applies the right cap to each frame', () => {
     const list = [buy(2026, 'NISA_GROWTH', 100), buy(2026, 'NISA_TSUMITATE', 100)]
     const annual = annualUsage(list)
-    expect(annual.find((a) => a.frame === 'NISA_GROWTH')!.limit.toFixed()).toBe(
+    expect(annual.find((left) => left.frame === 'NISA_GROWTH')!.limit.toFixed()).toBe(
       ANNUAL_GROWTH_LIMIT.toFixed(),
     )
-    expect(annual.find((a) => a.frame === 'NISA_TSUMITATE')!.limit.toFixed()).toBe(
+    expect(annual.find((left) => left.frame === 'NISA_TSUMITATE')!.limit.toFixed()).toBe(
       ANNUAL_TSUMITATE_LIMIT.toFixed(),
     )
   })
@@ -208,7 +208,7 @@ describe('real portfolio', () => {
     // Externally verifiable: filling a frame to the yen is deliberate, and it
     // confirms quota is counted on trade date rather than settlement date.
     const growth2026 = report.annual.find(
-      (a) => a.year === 2026 && a.frame === 'NISA_GROWTH',
+      (left) => left.year === 2026 && left.frame === 'NISA_GROWTH',
     )!
     expect(growth2026.used.toFixed()).toBe('2400000')
     expect(growth2026.remaining.toFixed()).toBe('0')
@@ -223,12 +223,12 @@ describe('real portfolio', () => {
 
   it('excludes the 旧NISA purchases from the lifetime total', () => {
     const legacy = trades
-      .filter((x) => x.accountType === 'NISA_OLD' && x.side === 'BUY')
+      .filter((item) => item.accountType === 'NISA_OLD' && item.side === 'BUY')
       .reduce((acc, x) => acc.add(x.netAmountJpy), new Decimal(0))
     expect(legacy.gt(2_000_000)).toBe(true) // 旧NISA buys exist and are substantial
 
     const newNisaBuys = trades
-      .filter((x) => (x.accountType === 'NISA_GROWTH' || x.accountType === 'NISA_TSUMITATE') && x.side === 'BUY')
+      .filter((item) => (item.accountType === 'NISA_GROWTH' || item.accountType === 'NISA_TSUMITATE') && item.side === 'BUY')
       .reduce((acc, x) => acc.add(x.netAmountJpy), new Decimal(0))
 
     // Lifetime used must never include the 旧NISA money.
@@ -248,7 +248,7 @@ describe('real portfolio', () => {
   })
 
   it('produces a contribution series covering the new-NISA years', () => {
-    const years = report.contributionsByYear.map((c) => c.year)
+    const years = report.contributionsByYear.map((cell) => cell.year)
     expect(years).toEqual([2024, 2025, 2026])
   })
 })

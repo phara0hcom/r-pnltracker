@@ -57,7 +57,7 @@ export function NoteDialog({
       motivation,
       tags: tagText
         .split(',')
-        .map((t) => t.trim())
+        .map((tag) => tag.trim())
         .filter(Boolean),
     })
   }
@@ -73,10 +73,10 @@ export function NoteDialog({
         <Dialog.Overlay className={styles.overlay} />
         <Dialog.Content
           className={styles.content}
-          onKeyDown={(e) => {
+          onKeyDown={(event) => {
             // Cmd/Ctrl+Enter saves — Enter alone must stay usable in the textarea.
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault()
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault()
               submit()
             }
           }}
@@ -123,8 +123,8 @@ export function NoteDialog({
                   </span>
                 </div>
                 <ul className={styles.tradeList}>
-                  {day.trades.map((t) => (
-                    <TradeJournalRow key={t.id} trade={t} />
+                  {day.trades.map((trade) => (
+                    <TradeJournalRow key={trade.id} trade={trade} />
                   ))}
                 </ul>
               </section>
@@ -153,8 +153,8 @@ export function NoteDialog({
                 type="text"
                 className={styles.input}
                 value={title}
-                onChange={(e) => {
-                  setTitle(e.target.value)
+                onChange={(event) => {
+                  setTitle(event.target.value)
                 }}
                 placeholder="One line on the day"
               />
@@ -166,8 +166,8 @@ export function NoteDialog({
                 className={styles.textarea}
                 rows={6}
                 value={body}
-                onChange={(e) => {
-                  setBody(e.target.value)
+                onChange={(event) => {
+                  setBody(event.target.value)
                 }}
                 placeholder="What did you do, and why? What would you repeat or avoid?"
               />
@@ -179,8 +179,8 @@ export function NoteDialog({
                 type="text"
                 className={styles.input}
                 value={tagText}
-                onChange={(e) => {
-                  setTagText(e.target.value)
+                onChange={(event) => {
+                  setTagText(event.target.value)
                 }}
                 placeholder="revenge-trade, plan-followed, news-driven"
               />
@@ -245,22 +245,22 @@ function ScoreGroup({
         {value ? <span className={styles.scoreLabel}>{labels[value]}</span> : null}
       </legend>
       <div className={styles.scores}>
-        {[1, 2, 3, 4, 5].map((n) => (
-          <label key={n} className={cx(styles.score, value === n && styles.scoreActive)}>
+        {[1, 2, 3, 4, 5].map((score) => (
+          <label key={score} className={cx(styles.score, value === score && styles.scoreActive)}>
             <input
               type="radio"
               name={name}
               className="visually-hidden"
-              checked={value === n}
+              checked={value === score}
               onChange={() => {
-                onChange(n)
+                onChange(score)
               }}
               onClick={() => {
-                if (value === n) onChange(null)
+                if (value === score) onChange(null)
               }}
             />
-            <span aria-hidden="true">{n}</span>
-            <span className="visually-hidden">{labels[n]}</span>
+            <span aria-hidden="true">{score}</span>
+            <span className="visually-hidden">{labels[score]}</span>
           </label>
         ))}
       </div>

@@ -51,12 +51,15 @@ export interface TradingStats {
   equityCurve: { date: string; value: Decimal }[]
 }
 
-export function applyFilter(events: RealizedEvent[], f: StatsFilter = {}): RealizedEvent[] {
-  return events.filter((e) => {
-    if (f.accountTypes?.length && !f.accountTypes.includes(e.accountType)) return false
-    if (f.assetClasses?.length && !f.assetClasses.includes(e.assetClass)) return false
-    if (f.from && e.tradeDate < f.from) return false
-    if (f.to && e.tradeDate > f.to) return false
+export function applyFilter(
+  events: RealizedEvent[],
+  filter: StatsFilter = {},
+): RealizedEvent[] {
+  return events.filter((close) => {
+    if (filter.accountTypes?.length && !filter.accountTypes.includes(close.accountType)) return false
+    if (filter.assetClasses?.length && !filter.assetClasses.includes(close.assetClass)) return false
+    if (filter.from && close.tradeDate < filter.from) return false
+    if (filter.to && close.tradeDate > filter.to) return false
     return true
   })
 }
@@ -69,36 +72,37 @@ export function applyFilter(events: RealizedEvent[], f: StatsFilter = {}): Reali
  */
 function drawdown(curve: Decimal[]): { max: Decimal; pct: number | null } {
   let peak = ZERO
-  let max = ZERO
-  let pctAtMax: number | null = null
+  let deepestFall = ZERO
+  let pctAtDeepest: number | null = null
 
-  for (const v of curve) {
-    if (v.gt(peak)) peak = v
-    const dd = peak.sub(v)
-    if (dd.gt(max)) {
-      max = dd
-      pctAtMax = peak.gt(0) ? dd.div(peak).toNumber() : null
+  for (const value of curve) {
+    if (value.gt(peak)) peak = value
+    const fallFromPeak = peak.sub(value)
+    if (fallFromPeak.gt(deepestFall)) {
+      deepestFall = fallFromPeak
+      pctAtDeepest = peak.gt(0) ? fallFromPeak.div(peak).toNumber() : null
     }
   }
-  return { max, pct: pctAtMax }
+  return { max: deepestFall, pct: pctAtDeepest }
 }
 
 function longestStreak(events: RealizedEvent[], winning: boolean): number {
-  let best = 0
-  let run = 0
-  for (const e of events) {
-    const match = winning ? e.realizedJpy.gt(0) : e.realizedJpy.lt(0)
-    run = match ? run + 1 : 0
-    if (run > best) best = run
+  let longest = 0
+  let current = 0
+  for (const close of events) {
+    const continuesStreak = winning ? close.realizedJpy.gt(0) : close.realizedJpy.lt(0)
+    current = continuesStreak ? current + 1 : 0
+    if (current > longest) longest = current
   }
-  return best
+  return longest
 }
 
 function median(values: number[]): number | null {
   if (!values.length) return null
-  const s = [...values].sort((a, b) => a - b)
-  const mid = Math.floor(s.length / 2)
-  return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2
+  const sorted = [...values].sort((low, high) => low - high)
+  const mid = Math.floor(sorted.length / 2)
+  // Even counts have no single middle, so average the two straddling it.
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2
 }
 
 export function computeStats(
@@ -106,65 +110,70 @@ export function computeStats(
   filter: StatsFilter = {},
 ): TradingStats {
   // Chronological order matters for streaks and the equity curve.
-  const list = applyFilter(events, filter).sort((a, b) =>
-    a.tradeDate < b.tradeDate ? -1 : a.tradeDate > b.tradeDate ? 1 : 0,
+  const closes = applyFilter(events, filter).sort((left, right) =>
+    left.tradeDate < right.tradeDate ? -1 : left.tradeDate > right.tradeDate ? 1 : 0,
   )
 
-  const wins = list.filter((e) => e.realizedJpy.gt(0))
-  const losses = list.filter((e) => e.realizedJpy.lt(0))
-  const breakeven = list.filter((e) => e.realizedJpy.isZero())
+  const wins = closes.filter((close) => close.realizedJpy.gt(0))
+  const losses = closes.filter((close) => close.realizedJpy.lt(0))
+  const breakeven = closes.filter((close) => close.realizedJpy.isZero())
 
-  const grossProfit = wins.reduce((a, e) => a.add(e.realizedJpy), ZERO)
-  const grossLoss = losses.reduce((a, e) => a.add(e.realizedJpy.abs()), ZERO)
+  const grossProfit = wins.reduce((running, close) => running.add(close.realizedJpy), ZERO)
+  const grossLoss = losses.reduce((running, close) => running.add(close.realizedJpy.abs()), ZERO)
   const netPnl = grossProfit.sub(grossLoss)
 
   const avgWin = wins.length ? grossProfit.div(wins.length) : null
   const avgLoss = losses.length ? grossLoss.div(losses.length) : null
 
-  let running = ZERO
-  const equityCurve = list.map((e) => {
-    running = running.add(e.realizedJpy)
-    return { date: e.tradeDate, value: running }
+  let cumulative = ZERO
+  const equityCurve = closes.map((close) => {
+    cumulative = cumulative.add(close.realizedJpy)
+    return { date: close.tradeDate, value: cumulative }
   })
 
-  const { max: maxDrawdown, pct: maxDrawdownPct } = drawdown(equityCurve.map((p) => p.value))
+  const { max: maxDrawdown, pct: maxDrawdownPct } = drawdown(
+    equityCurve.map((point) => point.value),
+  )
 
   // Weight holding period by position size — a 3-day flip of ¥5,000 should not
   // count the same as a 2-year hold of ¥2,000,000.
-  const totalCost = list.reduce((a, e) => a.add(e.costJpy.abs()), ZERO)
+  const totalCost = closes.reduce((running, close) => running.add(close.costJpy.abs()), ZERO)
   const avgHoldingDays = totalCost.gt(0)
-    ? list
-        .reduce((a, e) => a.add(e.costJpy.abs().mul(e.holdingDays)), ZERO)
+    ? closes
+        .reduce(
+          (running, close) => running.add(close.costJpy.abs().mul(close.holdingDays)),
+          ZERO,
+        )
         .div(totalCost)
         .toNumber()
     : null
 
   return {
-    tradeCount: list.length,
+    tradeCount: closes.length,
     winCount: wins.length,
     lossCount: losses.length,
     breakevenCount: breakeven.length,
-    winRate: list.length ? wins.length / list.length : null,
+    winRate: closes.length ? wins.length / closes.length : null,
     grossProfit,
     grossLoss,
     netPnl,
     avgWin,
     avgLoss,
     largestWin: wins.length
-      ? wins.reduce((a, e) => (e.realizedJpy.gt(a.realizedJpy) ? e : a))
+      ? wins.reduce((best, close) => (close.realizedJpy.gt(best.realizedJpy) ? close : best))
       : null,
     largestLoss: losses.length
-      ? losses.reduce((a, e) => (e.realizedJpy.lt(a.realizedJpy) ? e : a))
+      ? losses.reduce((worst, close) => (close.realizedJpy.lt(worst.realizedJpy) ? close : worst))
       : null,
     // No losses means the ratio is undefined, not infinite.
     profitFactor: grossLoss.isZero() ? null : grossProfit.div(grossLoss).toNumber(),
     payoffRatio: avgWin && avgLoss?.gt(0) ? avgWin.div(avgLoss).toNumber() : null,
     maxDrawdown,
     maxDrawdownPct,
-    longestWinStreak: longestStreak(list, true),
-    longestLossStreak: longestStreak(list, false),
+    longestWinStreak: longestStreak(closes, true),
+    longestLossStreak: longestStreak(closes, false),
     avgHoldingDays,
-    medianHoldingDays: median(list.map((e) => e.holdingDays)),
+    medianHoldingDays: median(closes.map((close) => close.holdingDays)),
     equityCurve,
   }
 }
@@ -181,27 +190,27 @@ export interface SymbolPerformance {
 }
 
 export function bySymbol(events: RealizedEvent[], filter: StatsFilter = {}): SymbolPerformance[] {
-  const groups = new Map<string, RealizedEvent[]>()
-  for (const e of applyFilter(events, filter)) {
-    const list = groups.get(e.symbol)
-    if (list) list.push(e)
-    else groups.set(e.symbol, [e])
+  const bySymbolKey = new Map<string, RealizedEvent[]>()
+  for (const close of applyFilter(events, filter)) {
+    const existing = bySymbolKey.get(close.symbol)
+    if (existing) existing.push(close)
+    else bySymbolKey.set(close.symbol, [close])
   }
 
-  return [...groups.entries()]
-    .map(([symbol, list]) => {
-      const winCount = list.filter((e) => e.realizedJpy.gt(0)).length
+  return [...bySymbolKey.entries()]
+    .map(([symbol, symbolCloses]) => {
+      const winCount = symbolCloses.filter((close) => close.realizedJpy.gt(0)).length
       return {
         symbol,
-        name: list[0]!.name,
-        assetClass: list[0]!.assetClass,
-        tradeCount: list.length,
-        netPnl: list.reduce((a, e) => a.add(e.realizedJpy), ZERO),
+        name: symbolCloses[0]!.name,
+        assetClass: symbolCloses[0]!.assetClass,
+        tradeCount: symbolCloses.length,
+        netPnl: symbolCloses.reduce((running, close) => running.add(close.realizedJpy), ZERO),
         winCount,
-        winRate: winCount / list.length,
+        winRate: winCount / symbolCloses.length,
       }
     })
-    .sort((a, b) => b.netPnl.cmp(a.netPnl))
+    .sort((left, right) => right.netPnl.cmp(left.netPnl))
 }
 
 /**
@@ -209,9 +218,9 @@ export function bySymbol(events: RealizedEvent[], filter: StatsFilter = {}): Sym
  * Keyed on trade date, since the journal is about how a day felt to trade.
  */
 export function dailyPnl(events: RealizedEvent[]): Map<string, Decimal> {
-  const out = new Map<string, Decimal>()
-  for (const e of events) {
-    out.set(e.tradeDate, (out.get(e.tradeDate) ?? ZERO).add(e.realizedJpy))
+  const byDate = new Map<string, Decimal>()
+  for (const close of events) {
+    byDate.set(close.tradeDate, (byDate.get(close.tradeDate) ?? ZERO).add(close.realizedJpy))
   }
-  return out
+  return byDate
 }

@@ -36,14 +36,14 @@ export async function listNotes(
     .where(and(...conditions))
     .orderBy(asc(notes.date))
 
-  return rows.map((r) => ({
-    id: r.id,
-    date: r.date,
-    title: r.title,
-    body: r.body,
-    mood: r.mood,
-    motivation: r.motivation,
-    tags: r.tags,
+  return rows.map((row) => ({
+    id: row.id,
+    date: row.date,
+    title: row.title,
+    body: row.body,
+    mood: row.mood,
+    motivation: row.motivation,
+    tags: row.tags,
   }))
 }
 

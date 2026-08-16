@@ -97,17 +97,20 @@ function acquisitionCost(t: NormalizedTrade): Decimal {
 
 /** Per-year, per-frame consumption. Annual frames never restore. */
 export function annualUsage(trades: NormalizedTrade[]): AnnualFrameUsage[] {
-  const acc = new Map<string, Decimal>()
-  for (const t of trades) {
-    if (!isNewNisa(t.accountType)) continue
-    if (!OPENING_SIDES.includes(t.side)) continue
-    const k = `${yearOf(quotaDate(t))}|${t.accountType}`
-    acc.set(k, (acc.get(k) ?? ZERO).add(acquisitionCost(t)))
+  const usedByYearAndFrame = new Map<string, Decimal>()
+  for (const trade of trades) {
+    if (!isNewNisa(trade.accountType)) continue
+    if (!OPENING_SIDES.includes(trade.side)) continue
+    const key = `${yearOf(quotaDate(trade))}|${trade.accountType}`
+    usedByYearAndFrame.set(
+      key,
+      (usedByYearAndFrame.get(key) ?? ZERO).add(acquisitionCost(trade)),
+    )
   }
 
   const out: AnnualFrameUsage[] = []
-  for (const [k, used] of acc) {
-    const [yearStr, frame] = k.split('|') as [string, NisaFrame]
+  for (const [key, used] of usedByYearAndFrame) {
+    const [yearStr, frame] = key.split('|') as [string, NisaFrame]
     const limit = frame === 'NISA_GROWTH' ? ANNUAL_GROWTH_LIMIT : ANNUAL_TSUMITATE_LIMIT
     out.push({
       year: Number(yearStr),
@@ -119,7 +122,9 @@ export function annualUsage(trades: NormalizedTrade[]): AnnualFrameUsage[] {
       isMaxed: used.gte(limit),
     })
   }
-  return out.sort((a, b) => a.year - b.year || a.frame.localeCompare(b.frame))
+  return out.sort(
+    (left, right) => left.year - right.year || left.frame.localeCompare(right.frame),
+  )
 }
 
 /**
@@ -137,30 +142,30 @@ export function lifetimeUsage(
   let acquired = ZERO
   let growthAcquired = ZERO
 
-  for (const t of trades) {
-    if (!isNewNisa(t.accountType)) continue
-    if (!OPENING_SIDES.includes(t.side)) continue
-    if (yearOf(quotaDate(t)) > asOfYear) continue
-    const cost = acquisitionCost(t)
+  for (const trade of trades) {
+    if (!isNewNisa(trade.accountType)) continue
+    if (!OPENING_SIDES.includes(trade.side)) continue
+    if (yearOf(quotaDate(trade)) > asOfYear) continue
+    const cost = acquisitionCost(trade)
     acquired = acquired.add(cost)
-    if (t.accountType === 'NISA_GROWTH') growthAcquired = growthAcquired.add(cost)
+    if (trade.accountType === 'NISA_GROWTH') growthAcquired = growthAcquired.add(cost)
   }
 
   let restored = ZERO
   let growthRestored = ZERO
   let pending = ZERO
 
-  for (const e of realized) {
-    if (!isNewNisa(e.accountType)) continue
-    const soldYear = yearOf(e.tradeDate)
+  for (const close of realized) {
+    if (!isNewNisa(close.accountType)) continue
+    const soldYear = yearOf(close.tradeDate)
     if (soldYear > asOfYear) continue
     if (soldYear < asOfYear) {
       // Sold in an earlier year — the quota came back that January.
-      restored = restored.add(e.costJpy)
-      if (e.accountType === 'NISA_GROWTH') growthRestored = growthRestored.add(e.costJpy)
+      restored = restored.add(close.costJpy)
+      if (close.accountType === 'NISA_GROWTH') growthRestored = growthRestored.add(close.costJpy)
     } else {
       // Sold this year — still occupying the pool until next January.
-      pending = pending.add(e.costJpy)
+      pending = pending.add(close.costJpy)
     }
   }
 
@@ -184,19 +189,19 @@ export function lifetimeUsage(
 export function contributionsByYear(
   trades: NormalizedTrade[],
 ): { year: number; growth: Decimal; tsumitate: Decimal }[] {
-  const acc = new Map<number, { growth: Decimal; tsumitate: Decimal }>()
-  for (const t of trades) {
-    if (!isNewNisa(t.accountType)) continue
-    if (!OPENING_SIDES.includes(t.side)) continue
-    const y = yearOf(quotaDate(t))
-    const row = acc.get(y) ?? { growth: ZERO, tsumitate: ZERO }
-    if (t.accountType === 'NISA_GROWTH') row.growth = row.growth.add(acquisitionCost(t))
-    else row.tsumitate = row.tsumitate.add(acquisitionCost(t))
-    acc.set(y, row)
+  const byYear = new Map<number, { growth: Decimal; tsumitate: Decimal }>()
+  for (const trade of trades) {
+    if (!isNewNisa(trade.accountType)) continue
+    if (!OPENING_SIDES.includes(trade.side)) continue
+    const year = yearOf(quotaDate(trade))
+    const row = byYear.get(year) ?? { growth: ZERO, tsumitate: ZERO }
+    if (trade.accountType === 'NISA_GROWTH') row.growth = row.growth.add(acquisitionCost(trade))
+    else row.tsumitate = row.tsumitate.add(acquisitionCost(trade))
+    byYear.set(year, row)
   }
-  return [...acc.entries()]
-    .map(([year, v]) => ({ year, ...v }))
-    .sort((a, b) => a.year - b.year)
+  return [...byYear.entries()]
+    .map(([year, frames]) => ({ year, ...frames }))
+    .sort((left, right) => left.year - right.year)
 }
 
 export function buildNisaReport(
@@ -223,6 +228,6 @@ export function buildNisaReport(
  */
 export function legacyNisaBookValue(positions: PositionState[]): Decimal {
   return positions
-    .filter((p) => p.accountType === 'NISA_OLD')
+    .filter((position) => position.accountType === 'NISA_OLD')
     .reduce((acc, p) => acc.add(p.costBasisJpy), ZERO)
 }

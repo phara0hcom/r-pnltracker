@@ -79,13 +79,13 @@ function Dividends() {
                 </tr>
               </thead>
               <tbody>
-                {data.byYear.map((y) => (
-                  <tr key={y.year}>
-                    <td>{y.year}</td>
-                    <td data-numeric>{y.count}</td>
-                    <td data-numeric>{yen(y.gross)}</td>
-                    <td data-numeric className={styles.dim}>{yen(y.tax)}</td>
-                    <td data-numeric className={styles.profit}>{yen(y.net)}</td>
+                {data.byYear.map((year) => (
+                  <tr key={year.year}>
+                    <td>{year.year}</td>
+                    <td data-numeric>{year.count}</td>
+                    <td data-numeric>{yen(year.gross)}</td>
+                    <td data-numeric className={styles.dim}>{yen(year.tax)}</td>
+                    <td data-numeric className={styles.profit}>{yen(year.net)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -104,15 +104,15 @@ function Dividends() {
                 </tr>
               </thead>
               <tbody>
-                {data.bySymbol.map((s) => (
-                  <tr key={s.symbol}>
+                {data.bySymbol.map((summary) => (
+                  <tr key={summary.symbol}>
                     <td>
-                      <InstrumentLink symbol={s.symbol} name={s.name} assetClass={s.assetClass} />
+                      <InstrumentLink symbol={summary.symbol} name={summary.name} assetClass={summary.assetClass} />
                     </td>
-                    <td data-numeric>{s.count}</td>
-                    <td data-numeric>{yen(s.gross)}</td>
-                    <td data-numeric className={styles.profit}>{yen(s.net)}</td>
-                    <td className={styles.dim}>{s.lastPaid}</td>
+                    <td data-numeric>{summary.count}</td>
+                    <td data-numeric>{yen(summary.gross)}</td>
+                    <td data-numeric className={styles.profit}>{yen(summary.net)}</td>
+                    <td className={styles.dim}>{summary.lastPaid}</td>
                   </tr>
                 ))}
               </tbody>
@@ -138,15 +138,15 @@ function Dividends() {
                 </tr>
               </thead>
               <tbody>
-                {data.rows.map((r) => (
-                  <tr key={`${r.payDate}-${r.symbol}-${r.accountType}-${r.netAmount}`}>
-                    <td>{r.payDate}</td>
+                {data.rows.map((row) => (
+                  <tr key={`${row.payDate}-${row.symbol}-${row.accountType}-${row.netAmount}`}>
+                    <td>{row.payDate}</td>
                     <td>
-                      <InstrumentLink symbol={r.symbol} name={r.name} assetClass={r.assetClass} />
+                      <InstrumentLink symbol={row.symbol} name={row.name} assetClass={row.assetClass} />
                     </td>
                     <td>
-                      {ACCOUNT_LABEL[r.accountType] ?? r.accountType}
-                      {r.confident ? null : (
+                      {ACCOUNT_LABEL[row.accountType] ?? row.accountType}
+                      {row.confident ? null : (
                         <span
                           className={styles.inferred}
                           title="The paying account was inferred: the statement's cash ledger has no account column, and the position had already closed when this was paid."
@@ -155,21 +155,21 @@ function Dividends() {
                         </span>
                       )}
                     </td>
-                    <td className={styles.dim}>{KIND_LABEL[r.kind] ?? r.kind}</td>
-                    <td data-numeric>{yen(r.grossAmount)}</td>
+                    <td className={styles.dim}>{KIND_LABEL[row.kind] ?? row.kind}</td>
+                    <td data-numeric>{yen(row.grossAmount)}</td>
                     <td data-numeric className={styles.dim}>
-                      {Number(r.incomeTax) === 0 ? '—' : yen(r.incomeTax)}
+                      {Number(row.incomeTax) === 0 ? '—' : yen(row.incomeTax)}
                     </td>
                     <td data-numeric className={styles.dim}>
-                      {Number(r.localTax) === 0 ? '—' : yen(r.localTax)}
+                      {Number(row.localTax) === 0 ? '—' : yen(row.localTax)}
                     </td>
-                    <td data-numeric className={styles.profit}>{yen(r.netAmount)}</td>
+                    <td data-numeric className={styles.profit}>{yen(row.netAmount)}</td>
                     <td className={styles.dim}>
-                      {r.reinvestedJpy == null ? (
+                      {row.reinvestedJpy == null ? (
                         '—'
                       ) : (
                         <span title="This distribution was rolled straight back into units, so it is income and an increase in cost basis at the same time.">
-                          {qty(r.reinvestedUnits ?? '0')} 口
+                          {qty(row.reinvestedUnits ?? '0')} 口
                         </span>
                       )}
                     </td>
@@ -200,10 +200,10 @@ function Dividends() {
             <>
               {' '}
               The exceptions are{' '}
-              {us.quarterSpanning.map((q, i) => (
-                <span key={q.symbol}>
-                  {i > 0 ? (i === us.quarterSpanning.length - 1 ? ' and ' : ', ') : ''}
-                  <strong>{q.symbol}</strong> ({q.days}d)
+              {us.quarterSpanning.map((ticker, index) => (
+                <span key={ticker.symbol}>
+                  {index > 0 ? (index === us.quarterSpanning.length - 1 ? ' and ' : ', ') : ''}
+                  <strong>{ticker.symbol}</strong> ({ticker.days}d)
                 </span>
               ))}
               , held long enough to cross one.

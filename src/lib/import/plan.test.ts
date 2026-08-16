@@ -38,7 +38,7 @@ describe('first import', () => {
 
 describe('re-importing the same files', () => {
   it('adds nothing the second time', () => {
-    const stored = new Set(fresh.trades.map((t) => t.sourceRowHash))
+    const stored = new Set(fresh.trades.map((trade) => trade.sourceRowHash))
     const plan = planImport(loadAllTrades(), stored)
     expect(plan.newTrades).toHaveLength(0)
     expect(plan.duplicateTrades).toBe(315)
@@ -60,7 +60,7 @@ describe('re-importing the same files', () => {
   it('is stable per file, not just in aggregate', () => {
     for (const path of tradeHistoryFiles()) {
       const first = parseFile(path)
-      const stored = new Set(first.trades.map((t) => t.sourceRowHash))
+      const stored = new Set(first.trades.map((trade) => trade.sourceRowHash))
       const second = planImport(parseFile(path), stored)
       expect(second.newTrades).toHaveLength(0)
       expect(second.duplicateTrades).toBe(first.trades.length)
@@ -73,8 +73,8 @@ describe('overlapping exports', () => {
     // Simulates: imported everything through 2026-06-30, then exported again
     // later. The new file repeats all the old rows plus some new ones.
     const cutoff = '2026-06-30'
-    const earlier = fresh.trades.filter((t) => t.tradeDate <= cutoff)
-    const stored = new Set(earlier.map((t) => t.sourceRowHash))
+    const earlier = fresh.trades.filter((trade) => trade.tradeDate <= cutoff)
+    const stored = new Set(earlier.map((trade) => trade.sourceRowHash))
     const expectedNew = fresh.trades.length - earlier.length
     expect(expectedNew).toBeGreaterThan(0)
 
@@ -90,19 +90,19 @@ describe('overlapping exports', () => {
     // (1 share @ $85.58). A date-filtered export contains either all of a day's
     // fills or none, so their ordinals — and therefore their hashes — match
     // between a partial export and a full one.
-    const ko = fresh.trades.filter((t) => t.symbol === 'KO' && t.tradeDate === '2026-07-21')
+    const ko = fresh.trades.filter((trade) => trade.symbol === 'KO' && trade.tradeDate === '2026-07-21')
     expect(ko).toHaveLength(8)
 
-    const identical = ko.filter((t) => t.quantity.eq(1) && t.unitPrice.eq('85.58'))
+    const identical = ko.filter((trade) => trade.quantity.eq(1) && trade.unitPrice.eq('85.58'))
     expect(identical).toHaveLength(3)
 
     // Every fill must remain individually addressable.
-    expect(new Set(ko.map((t) => t.sourceRowHash)).size).toBe(8)
+    expect(new Set(ko.map((trade) => trade.sourceRowHash)).size).toBe(8)
 
     // Re-importing must not duplicate them.
-    const stored = new Set(fresh.trades.map((t) => t.sourceRowHash))
+    const stored = new Set(fresh.trades.map((trade) => trade.sourceRowHash))
     const plan = planImport(loadAllTrades(), stored)
-    expect(plan.newTrades.filter((t) => t.symbol === 'KO')).toHaveLength(0)
+    expect(plan.newTrades.filter((trade) => trade.symbol === 'KO')).toHaveLength(0)
   })
 
   it('deduplicates within a single upload of the same file twice', () => {
@@ -119,7 +119,7 @@ describe('overlapping exports', () => {
 
 describe('dividends', () => {
   it('does not re-add dividends from overlapping monthly statements', () => {
-    const stored = new Set(statements.dividends.map((d) => d.sourceRowHash))
+    const stored = new Set(statements.dividends.map((day) => day.sourceRowHash))
     const again = loadAllStatements()
     const plan = planImport(again, new Set(), stored)
     expect(plan.newDividends).toHaveLength(0)
@@ -131,8 +131,8 @@ describe('dividends', () => {
     const allButLast = files.slice(0, -1)
     const stored = new Set(
       allButLast
-        .flatMap((p) => parseTorizan(readShiftJisFile(p), basename(p)).dividends)
-        .map((d) => d.sourceRowHash),
+        .flatMap((point) => parseTorizan(readShiftJisFile(point), basename(point)).dividends)
+        .map((day) => day.sourceRowHash),
     )
     const last = parseTorizan(readShiftJisFile(files.at(-1)!), basename(files.at(-1)!))
     const plan = planImport(last, new Set(), stored)
@@ -151,18 +151,18 @@ describe('commit ordering', () => {
 
     // Worst case: the user drags the statement in first.
     const ordered = orderFilesForImport([statement, history])
-    expect(ordered.map((f) => f.filename)).toEqual([history.filename, statement.filename])
+    expect(ordered.map((file) => file.filename)).toEqual([history.filename, statement.filename])
   })
 
   it('leaves files of the same kind in the order they were given', () => {
     const histories = tradeHistoryFiles().map(load)
-    expect(orderFilesForImport(histories).map((f) => f.filename)).toEqual(
-      histories.map((f) => f.filename),
+    expect(orderFilesForImport(histories).map((file) => file.filename)).toEqual(
+      histories.map((file) => file.filename),
     )
 
     const statements = torizanFiles().map(load)
-    expect(orderFilesForImport(statements).map((f) => f.filename)).toEqual(
-      statements.map((f) => f.filename),
+    expect(orderFilesForImport(statements).map((file) => file.filename)).toEqual(
+      statements.map((file) => file.filename),
     )
   })
 })
@@ -172,7 +172,7 @@ describe('points are handled on any future import, not just the known rows', () 
     // The fix lives in the shared number parser, so it applies to every column
     // of every format — not a patch of two known values.
     const plan = planImport(loadAllTrades(), new Set())
-    const withPoints = plan.newTrades.filter((t) => t.pointsUsed)
+    const withPoints = plan.newTrades.filter((trade) => trade.pointsUsed)
     expect(withPoints).toHaveLength(2)
     for (const t of plan.newTrades) {
       expect(t.netAmountJpy.abs().lt(50_000_000)).toBe(true)

@@ -46,14 +46,14 @@ function decodeChecked(files: UploadPayload[]): { filename: string; bytes: Uint8
   if (files.length > MAX_FILES) {
     throw new Error(`Too many files at once (${String(files.length)}; limit is ${String(MAX_FILES)}).`)
   }
-  return files.map((f) => {
-    const bytes = decode(f.base64)
+  return files.map((file) => {
+    const bytes = decode(file.base64)
     if (bytes.byteLength > MAX_FILE_BYTES) {
       throw new Error(
-        `${f.filename} is ${String(Math.round(bytes.byteLength / 1024))} KB, over the ${String(MAX_FILE_BYTES / 1024 / 1024)} MB limit — that is not a Rakuten export.`,
+        `${file.filename} is ${String(Math.round(bytes.byteLength / 1024))} KB, over the ${String(MAX_FILE_BYTES / 1024 / 1024)} MB limit — that is not a Rakuten export.`,
       )
     }
-    return { filename: f.filename, bytes }
+    return { filename: file.filename, bytes }
   })
 }
 
@@ -77,23 +77,25 @@ export const previewFiles = createServerFn({ method: 'POST' })
     // than only in the browser.
     console.warn(
       `[import] preview ${String(data.files.length)} file(s): ` +
-        data.files.map((f) => `${f.filename} (${String(f.base64.length)} b64 chars)`).join(', '),
+        data.files
+          .map((file) => `${file.filename} (${String(file.base64.length)} b64 chars)`)
+          .join(', '),
     )
     const out: PreviewSummary[] = []
     // Previewed in the order they will actually be committed, so the summary
     // describes the run the user is about to approve.
-    for (const f of orderFilesForImport(decodeChecked(data.files))) {
-      const p = await previewImport(context.userId, f.filename, f.bytes)
+    for (const file of orderFilesForImport(decodeChecked(data.files))) {
+      const preview = await previewImport(context.userId, file.filename, file.bytes)
       out.push({
-        filename: p.filename,
-        format: p.format,
-        summary: p.summary,
-        newTrades: p.plan.newTrades.length,
-        newDividends: p.plan.newDividends.length,
-        duplicates: p.plan.duplicateTrades + p.plan.duplicateDividends,
-        snapshots: p.snapshotCount,
-        cash: p.cashCount,
-        errors: p.plan.errors.map((e) => ({ line: e.line, message: e.message })),
+        filename: preview.filename,
+        format: preview.format,
+        summary: preview.summary,
+        newTrades: preview.plan.newTrades.length,
+        newDividends: preview.plan.newDividends.length,
+        duplicates: preview.plan.duplicateTrades + preview.plan.duplicateDividends,
+        snapshots: preview.snapshotCount,
+        cash: preview.cashCount,
+        errors: preview.plan.errors.map((error) => ({ line: error.line, message: error.message })),
       })
     }
     return out
@@ -117,15 +119,15 @@ export const commitFiles = createServerFn({ method: 'POST' })
     // so a trade file must be committed before a statement that references it.
     // `orderFilesForImport` guarantees that order rather than assuming it.
     console.warn(`[import] commit ${String(data.files.length)} file(s)`)
-    for (const f of orderFilesForImport(decodeChecked(data.files))) {
-      const r = await commitImport(context.userId, f.filename, f.bytes)
+    for (const file of orderFilesForImport(decodeChecked(data.files))) {
+      const result = await commitImport(context.userId, file.filename, file.bytes)
       out.push({
-        filename: f.filename,
-        tradesInserted: r.tradesInserted,
-        dividendsInserted: r.dividendsInserted,
-        snapshotsInserted: r.snapshotsInserted,
-        duplicatesSkipped: r.duplicatesSkipped,
-        errors: r.errors,
+        filename: file.filename,
+        tradesInserted: result.tradesInserted,
+        dividendsInserted: result.dividendsInserted,
+        snapshotsInserted: result.snapshotsInserted,
+        duplicatesSkipped: result.duplicatesSkipped,
+        errors: result.errors,
       })
     }
     return out

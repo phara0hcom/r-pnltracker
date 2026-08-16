@@ -74,15 +74,15 @@ describe('format detection', () => {
     // Built as a map so a failure shows every file at once, and so the
     // assertion runs unconditionally.
     const detected = Object.fromEntries(
-      tradeHistoryFiles().map((p) => {
-        const name = basename(p)
+      tradeHistoryFiles().map((point) => {
+        const name = basename(point)
         const kind = name.includes('(JP)') ? 'JP' : name.includes('(US)') ? 'US' : 'INVST'
-        return [kind, detectFormat(readShiftJisFile(p))]
+        return [kind, detectFormat(readShiftJisFile(point))]
       }),
     )
     expect(detected).toEqual({ JP: 'JP', US: 'US', INVST: 'INVST' })
 
-    const statements = torizanFiles().map((p) => detectFormat(readShiftJisFile(p)))
+    const statements = torizanFiles().map((point) => detectFormat(readShiftJisFile(point)))
     expect(new Set(statements)).toEqual(new Set(['TORIZAN']))
   })
 })
@@ -96,14 +96,14 @@ describe('trade history', () => {
   })
 
   it('covers the full date range', () => {
-    const dates = result.trades.map((t) => t.tradeDate).sort()
+    const dates = result.trades.map((trade) => trade.tradeDate).sort()
     expect(dates[0]).toBe('2022-06-01')
     expect(dates.at(-1)).toBe('2026-07-29')
   })
 
   it('derives amounts for unsettled rows instead of dropping them', () => {
     // 6 JP rows dated 2026-07-29 had 受渡金額 = "-" at export time.
-    const unsettled = result.trades.filter((t) => !t.isSettled)
+    const unsettled = result.trades.filter((trade) => !trade.isSettled)
     expect(unsettled.length).toBe(6)
     for (const t of unsettled) {
       expect(t.netAmountJpy.isZero()).toBe(false)
@@ -113,7 +113,7 @@ describe('trade history', () => {
 
   it('applies fee direction correctly for JP trades', () => {
     // buy pays fees on top; sell nets them off.
-    const jp = result.trades.filter((t) => t.assetClass === 'JP_EQUITY' && t.isSettled)
+    const jp = result.trades.filter((trade) => trade.assetClass === 'JP_EQUITY' && trade.isSettled)
     for (const t of jp) {
       const costs = t.fee.add(t.feeTax).add(t.otherCost)
       const expected =
@@ -126,7 +126,7 @@ describe('trade history', () => {
   it('converts fund unit prices from the per-10,000-口 basis', () => {
     // 96,016 口 @ 20,830 → ¥200,000 (verified by hand against the raw CSV).
     const t = result.trades.find(
-      (x) => x.assetClass === 'FUND' && x.quantity.eq(96016) && x.tradeDate === '2022-06-01',
+      (item) => item.assetClass === 'FUND' && item.quantity.eq(96016) && item.tradeDate === '2022-06-01',
     )
     expect(t).toBeDefined()
     expect(t!.unitPrice.toFixed(4)).toBe('2.0830')
@@ -135,7 +135,7 @@ describe('trade history', () => {
   })
 
   it('treats fund reinvestments as cost-basis-bearing buys', () => {
-    const reinvests = result.trades.filter((t) => t.side === 'REINVEST')
+    const reinvests = result.trades.filter((trade) => trade.side === 'REINVEST')
     expect(reinvests.length).toBe(10)
     for (const t of reinvests) {
       // Real acquisition cost even though no external cash moved.
@@ -147,14 +147,14 @@ describe('trade history', () => {
   it('keeps point-funded purchases at their true cost basis', () => {
     // The two 純金ファンド buys that used points. Basis must be the full settled
     // amount — points are a payment method, not a discount.
-    const pointTrades = result.trades.filter((t) => t.pointsUsed)
+    const pointTrades = result.trades.filter((trade) => trade.pointsUsed)
     expect(pointTrades).toHaveLength(2)
 
-    const feb = pointTrades.find((t) => t.tradeDate === '2026-02-02')!
+    const feb = pointTrades.find((trade) => trade.tradeDate === '2026-02-02')!
     expect(feb.netAmountJpy.toFixed()).toBe('1000000')
     expect(feb.pointsUsed!.toFixed()).toBe('2251')
 
-    const mar = pointTrades.find((t) => t.tradeDate === '2026-03-05')!
+    const mar = pointTrades.find((trade) => trade.tradeDate === '2026-03-05')!
     expect(mar.netAmountJpy.toFixed()).toBe('861259')
     expect(mar.pointsUsed!.toFixed()).toBe('160')
   })
@@ -176,7 +176,7 @@ describe('trade history', () => {
   })
 
   it('converts US trades to JPY at the row FX rate', () => {
-    const us = result.trades.filter((t) => t.assetClass === 'US_EQUITY')
+    const us = result.trades.filter((trade) => trade.assetClass === 'US_EQUITY')
     expect(us.length).toBeGreaterThan(80)
     for (const t of us) {
       expect(t.fxRate.gt(100)).toBe(true) // USD/JPY sanity
@@ -187,15 +187,15 @@ describe('trade history', () => {
   })
 
   it('handles both JPY- and USD-settled US trades', () => {
-    const us = result.trades.filter((t) => t.assetClass === 'US_EQUITY')
+    const us = result.trades.filter((trade) => trade.assetClass === 'US_EQUITY')
     // Both settlement currencies appear; neither branch may be dead.
-    const ratios = us.map((t) => t.netAmountJpy.div(t.netAmount).toNumber())
+    const ratios = us.map((trade) => trade.netAmountJpy.div(trade.netAmount).toNumber())
     expect(Math.min(...ratios)).toBeGreaterThan(100)
     expect(Math.max(...ratios)).toBeLessThan(200)
   })
 
   it('assigns every trade to a known account type', () => {
-    const accounts = new Set(result.trades.map((t) => t.accountType))
+    const accounts = new Set(result.trades.map((trade) => trade.accountType))
     expect([...accounts].sort()).toEqual([
       'NISA_GROWTH',
       'NISA_OLD',
@@ -206,8 +206,8 @@ describe('trade history', () => {
 
   it('is idempotent — re-parsing the same files yields no new rows', () => {
     const again = loadAllTrades()
-    const a = new Set(result.trades.map((t) => t.sourceRowHash))
-    const b = new Set(again.trades.map((t) => t.sourceRowHash))
+    const a = new Set(result.trades.map((trade) => trade.sourceRowHash))
+    const b = new Set(again.trades.map((trade) => trade.sourceRowHash))
     expect(b.size).toBe(a.size)
     // Hashes must be stable across runs, not merely unique within one.
     for (const h of b) expect(a.has(h)).toBe(true)
@@ -225,15 +225,15 @@ describe('monthly statements', () => {
   })
 
   it('distinguishes equity dividends from fund distributions', () => {
-    const divs = result.dividends.filter((d) => d.kind === 'DIVIDEND')
-    const dists = result.dividends.filter((d) => d.kind === 'DISTRIBUTION')
+    const divs = result.dividends.filter((day) => day.kind === 'DIVIDEND')
+    const dists = result.dividends.filter((day) => day.kind === 'DISTRIBUTION')
     expect(divs.length).toBe(4)
     expect(dists.length).toBe(2)
   })
 
   it('finds the ¥739 distribution that the official tax XML reports', () => {
     // ¥927 gross − ¥142 income − ¥46 local = ¥739 net.
-    const d = result.dividends.find((x) => x.netAmount.eq(739))
+    const d = result.dividends.find((item) => item.netAmount.eq(739))
     expect(d).toBeDefined()
     expect(d!.payDate).toBe('2025-12-05')
     expect(d!.kind).toBe('DISTRIBUTION')
@@ -242,7 +242,7 @@ describe('monthly statements', () => {
   it('captures month-end position snapshots across all statements', () => {
     expect(result.snapshots.length).toBeGreaterThan(100)
     // 10 monthly statements: 2025-09 through 2026-06.
-    const months = new Set(result.snapshots.map((s) => s.asOf))
+    const months = new Set(result.snapshots.map((entry) => entry.asOf))
     expect(months.size).toBe(10)
     expect([...months].sort()[0]).toBe('2025-09-30')
     expect([...months].sort().at(-1)).toBe('2026-06-30')
@@ -258,14 +258,14 @@ describe('monthly statements', () => {
    * defaulting everything to FUND used to mislabel equities permanently.
    */
   it('carries each holding’s real asset class, not a single default', () => {
-    const classes = new Set(result.snapshots.map((s) => s.assetClass))
+    const classes = new Set(result.snapshots.map((entry) => entry.assetClass))
     expect(classes.size).toBeGreaterThan(1)
     expect(classes.has('JP_EQUITY')).toBe(true)
 
     // A 4-digit symbol is a JP listing and must never be recorded as a fund.
     const misfiled = result.snapshots
-      .filter((s) => /^\d{4}$/.test(s.symbol) && s.assetClass !== 'JP_EQUITY')
-      .map((s) => `${s.symbol}: ${s.assetClass}`)
+      .filter((entry) => /^\d{4}$/.test(entry.symbol) && entry.assetClass !== 'JP_EQUITY')
+      .map((entry) => `${entry.symbol}: ${entry.assetClass}`)
     expect(misfiled).toEqual([])
   })
 

@@ -35,17 +35,17 @@ export async function listTrades(userId: string): Promise<TradeRecord[]> {
     .where(and(eq(trades.userId, userId), isNull(trades.deletedAt)))
     .orderBy(asc(trades.tradeDate), asc(trades.createdAt))
 
-  return rows.map((r) => ({
-    id: r.trade.id,
-    trade: fromTradeRow(r.trade, {
-      symbol: r.instrument.symbol,
-      name: r.instrument.name,
-      assetClass: r.instrument.assetClass,
+  return rows.map((row) => ({
+    id: row.trade.id,
+    trade: fromTradeRow(row.trade, {
+      symbol: row.instrument.symbol,
+      name: row.instrument.name,
+      assetClass: row.instrument.assetClass,
     }),
-    origin: r.trade.origin,
-    isEdited: r.trade.isEdited,
-    memo: r.trade.memo,
-    motivation: r.trade.motivation,
+    origin: row.trade.origin,
+    isEdited: row.trade.isEdited,
+    memo: row.trade.memo,
+    motivation: row.trade.motivation,
   }))
 }
 

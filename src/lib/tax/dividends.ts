@@ -86,11 +86,11 @@ function holdingsAt(
   symbol: string,
   asOf: string,
 ): { accountType: AccountType; quantity: Decimal }[] {
-  const upTo = trades.filter((t) => t.settleDate <= asOf)
-  return runEngine(upTo)
-    .positions.filter((p) => p.symbol === symbol && p.quantity.gt(0))
-    .map((p) => ({ accountType: p.accountType, quantity: p.quantity }))
-    .sort((a, b) => b.quantity.cmp(a.quantity))
+  const settledByDate = trades.filter((trade) => trade.settleDate <= asOf)
+  return runEngine(settledByDate)
+    .positions.filter((position) => position.symbol === symbol && position.quantity.gt(0))
+    .map((position) => ({ accountType: position.accountType, quantity: position.quantity }))
+    .sort((larger, smaller) => smaller.quantity.cmp(larger.quantity))
 }
 
 /**
@@ -105,10 +105,11 @@ function lastKnownAccount(
   symbol: string,
   before: string,
 ): AccountType | null {
-  const prior = trades
-    .filter((t) => t.symbol === symbol && t.tradeDate <= before)
-    .sort((a, b) => (a.tradeDate < b.tradeDate ? 1 : -1))
-  return prior[0]?.accountType ?? null
+  // Newest first, so the first entry is the most recent holder.
+  const priorTrades = trades
+    .filter((trade) => trade.symbol === symbol && trade.tradeDate <= before)
+    .sort((left, right) => (left.tradeDate < right.tradeDate ? 1 : -1))
+  return priorTrades[0]?.accountType ?? null
 }
 
 /**
@@ -126,31 +127,34 @@ export function attributeDividends(
   // names. Without this bridge no dividend matches a holding.
   const resolve = createStatementResolver(trades, toHalfWidth)
 
-  const groups = new Map<string, NormalizedDividend[]>()
-  for (const d of dividends) {
-    const k = `${d.symbol}|${d.payDate}`
-    const list = groups.get(k)
-    if (list) list.push(d)
-    else groups.set(k, [d])
+  // One group per (instrument, pay date) — the payments that must be shared out
+  // between accounts.
+  const byInstrumentAndDate = new Map<string, NormalizedDividend[]>()
+  for (const payout of dividends) {
+    const key = `${payout.symbol}|${payout.payDate}`
+    const existing = byInstrumentAndDate.get(key)
+    if (existing) existing.push(payout)
+    else byInstrumentAndDate.set(key, [payout])
   }
 
-  const out: AttributedDividend[] = []
+  const attributed: AttributedDividend[] = []
 
-  for (const [, rows] of groups) {
-    const first = rows[0]!
-    const resolved = resolve(first.symbol)
-    const holdings = resolved ? holdingsAt(trades, resolved, first.payDate) : []
-    // Largest payment ↔ largest holding.
-    const sorted = [...rows].sort((a, b) => b.netAmount.cmp(a.netAmount))
+  for (const [, payouts] of byInstrumentAndDate) {
+    const first = payouts[0]!
+    const resolvedSymbol = resolve(first.symbol)
+    const holdings = resolvedSymbol ? holdingsAt(trades, resolvedSymbol, first.payDate) : []
+    // Largest payment ↔ largest holding; both lists are sorted descending, so
+    // position `rank` in one lines up with `rank` in the other.
+    const largestFirst = [...payouts].sort((left, right) => right.netAmount.cmp(left.netAmount))
 
-    sorted.forEach((d, i) => {
-      let account = holdings[i]?.accountType ?? null
+    largestFirst.forEach((payout, rank) => {
+      let account = holdings[rank]?.accountType ?? null
       let confident = account != null
 
-      if (!account && resolved) {
+      if (!account && resolvedSymbol) {
         // Paid after the position closed — a dividend's record date precedes
         // its payment date, so fall back to whoever last held it.
-        account = lastKnownAccount(trades, resolved, d.payDate)
+        account = lastKnownAccount(trades, resolvedSymbol, payout.payDate)
         confident = false
       }
 
@@ -158,12 +162,12 @@ export function attributeDividends(
       const isTaxable = !TAX_EXEMPT_ACCOUNTS.includes(accountType)
 
       const { gross, incomeTax, localTax } = isTaxable
-        ? grossUpDividend(d.netAmount)
-        : { gross: d.netAmount, incomeTax: ZERO, localTax: ZERO }
+        ? grossUpDividend(payout.netAmount)
+        : { gross: payout.netAmount, incomeTax: ZERO, localTax: ZERO }
 
-      out.push({
-        ...d,
-        symbol: resolved ?? d.symbol,
+      attributed.push({
+        ...payout,
+        symbol: resolvedSymbol ?? payout.symbol,
         accountType,
         grossAmount: gross,
         incomeTax,
@@ -174,5 +178,7 @@ export function attributeDividends(
     })
   }
 
-  return out.sort((a, b) => (a.payDate < b.payDate ? -1 : a.payDate > b.payDate ? 1 : 0))
+  return attributed.sort((left, right) =>
+    left.payDate < right.payDate ? -1 : left.payDate > right.payDate ? 1 : 0,
+  )
 }
