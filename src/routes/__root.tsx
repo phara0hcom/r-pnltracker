@@ -7,6 +7,7 @@ import {
   Scripts,
 } from '@tanstack/react-router'
 import fallback from './__root.module.scss'
+import { VercelInsights } from '~/components/VercelInsights'
 import appCss from '~/styles/globals.scss?url'
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -67,6 +68,7 @@ function RootDocument() {
           Skip to content
         </a>
         <Outlet />
+        <VercelInsights />
         <Scripts />
       </body>
     </html>
