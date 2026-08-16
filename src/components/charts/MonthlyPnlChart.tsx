@@ -193,13 +193,13 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
 
       <div className={styles.wrap}>
         <div className={styles.axis} aria-hidden="true">
-          {ticks.map((trade) => (
+          {ticks.map((tick) => (
             <span
-              key={trade.value}
+              key={tick.value}
               className={styles.axisTick}
-              style={{ top: `${String(trade.topPct)}%` }}
+              style={{ top: `${String(tick.topPct)}%` }}
             >
-              {compact(trade.value)}
+              {compact(tick.value)}
             </span>
           ))}
           <span className={styles.axisZero} style={{ top: `${String(baselinePct)}%` }}>
@@ -210,11 +210,11 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
         <div className={styles.plot}>
           {/* Gridlines sit behind the marks and share the axis tick positions,
               so a bar's height can be read off a label rather than guessed. */}
-          {ticks.map((trade) => (
+          {ticks.map((tick) => (
             <div
-              key={trade.value}
+              key={tick.value}
               className={styles.gridline}
-              style={{ top: `${String(trade.topPct)}%` }}
+              style={{ top: `${String(tick.topPct)}%` }}
               aria-hidden="true"
             />
           ))}

@@ -4,7 +4,7 @@ import { z } from 'zod'
 import styles from './tax.module.scss'
 import { ACCOUNT_LABEL, pct, tone, yen } from '~/components/format'
 import { Empty, PageHeader, Section, Stat, StatGrid, Table } from '~/components/Screen'
-import { accountScopePassthrough } from '~/lib/accountScope'
+import { accountScopeSchema } from '~/lib/accountScope'
 import { cx } from '~/lib/cx'
 import { getTax } from '~/server/screens'
 
@@ -16,7 +16,7 @@ export const Route = createFileRoute('/_authed/tax')({
     .object({
       basis: z.enum(['CALENDAR', 'FISCAL_APR_MAR']).catch('CALENDAR'),
     })
-    .extend(accountScopePassthrough.shape),
+    .extend(accountScopeSchema.shape),
   component: Tax,
 })
 

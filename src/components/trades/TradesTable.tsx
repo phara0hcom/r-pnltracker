@@ -148,8 +148,11 @@ export function TradesTable({
             Trades, sorted by {sortBy} {sortDir === 'asc' ? 'ascending' : 'descending'}
           </caption>
           <colgroup>
-            {COLUMNS.map((cell) => (
-              <col key={cell} style={{ width: `${String(widths[cell] ?? DEFAULT_WIDTHS[cell] ?? 100)}px` }} />
+            {COLUMNS.map((column) => (
+              <col
+                key={column}
+                style={{ width: `${String(widths[column] ?? DEFAULT_WIDTHS[column] ?? 100)}px` }}
+              />
             ))}
           </colgroup>
           <thead>
@@ -446,7 +449,7 @@ function EditRow({
   })
 
   const set = (key: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setDraft((day) => ({ ...day, [key]: e.target.value }))
+    setDraft((current) => ({ ...current, [key]: e.target.value }))
   }
 
   /** Enter saves, Escape cancels — expected of any inline editor. */

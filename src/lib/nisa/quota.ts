@@ -229,5 +229,5 @@ export function buildNisaReport(
 export function legacyNisaBookValue(positions: PositionState[]): Decimal {
   return positions
     .filter((position) => position.accountType === 'NISA_OLD')
-    .reduce((acc, p) => acc.add(p.costBasisJpy), ZERO)
+    .reduce((running, position) => running.add(position.costBasisJpy), ZERO)
 }

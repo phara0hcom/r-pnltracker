@@ -120,7 +120,7 @@ export const instruments = pgTable(
     isin: varchar('isin', { length: 12 }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (trade) => [uniqueIndex('instruments_symbol_uq').on(trade.symbol)],
+  (table) => [uniqueIndex('instruments_symbol_uq').on(table.symbol)],
 )
 
 // ── Trades ──────────────────────────────────────────────────────────────────
@@ -200,15 +200,15 @@ export const trades = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
-  (trade) => [
+  (table) => [
     // The idempotency guarantee: the DB, not the app, is the final arbiter.
-    uniqueIndex('trades_user_hash_uq').on(trade.userId, trade.sourceRowHash),
-    index('trades_user_trade_date_idx').on(trade.userId, trade.tradeDate),
-    index('trades_user_settle_date_idx').on(trade.userId, trade.settleDate),
+    uniqueIndex('trades_user_hash_uq').on(table.userId, table.sourceRowHash),
+    index('trades_user_trade_date_idx').on(table.userId, table.tradeDate),
+    index('trades_user_settle_date_idx').on(table.userId, table.settleDate),
     // The engine walks pools keyed by (instrument, account) in date order.
-    index('trades_pool_idx').on(trade.userId, trade.instrumentId, trade.accountType, trade.tradeDate),
+    index('trades_pool_idx').on(table.userId, table.instrumentId, table.accountType, table.tradeDate),
     // Every read path filters out tombstones.
-    index('trades_active_idx').on(trade.userId, trade.deletedAt),
+    index('trades_active_idx').on(table.userId, table.deletedAt),
   ],
 )
 
@@ -244,9 +244,9 @@ export const dividends = pgTable(
     sourceFile: text('source_file').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (trade) => [
-    uniqueIndex('dividends_user_hash_uq').on(trade.userId, trade.sourceRowHash),
-    index('dividends_user_pay_date_idx').on(trade.userId, trade.payDate),
+  (table) => [
+    uniqueIndex('dividends_user_hash_uq').on(table.userId, table.sourceRowHash),
+    index('dividends_user_pay_date_idx').on(table.userId, table.payDate),
   ],
 )
 
@@ -267,9 +267,9 @@ export const cashMovements = pgTable(
     sourceRowHash: varchar('source_row_hash', { length: 64 }).notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (trade) => [
-    uniqueIndex('cash_user_hash_uq').on(trade.userId, trade.sourceRowHash),
-    index('cash_user_date_idx').on(trade.userId, trade.date),
+  (table) => [
+    uniqueIndex('cash_user_hash_uq').on(table.userId, table.sourceRowHash),
+    index('cash_user_date_idx').on(table.userId, table.date),
   ],
 )
 
@@ -294,9 +294,9 @@ export const positionSnapshots = pgTable(
     quantity: money('quantity').notNull(),
     valuationJpy: money('valuation_jpy').notNull(),
   },
-  (trade) => [
-    uniqueIndex('snapshot_uq').on(trade.userId, trade.asOf, trade.symbol, trade.accountType),
-    index('snapshot_user_asof_idx').on(trade.userId, trade.asOf),
+  (table) => [
+    uniqueIndex('snapshot_uq').on(table.userId, table.asOf, table.symbol, table.accountType),
+    index('snapshot_user_asof_idx').on(table.userId, table.asOf),
   ],
 )
 
@@ -322,7 +322,7 @@ export const priceCache = pgTable(
     source: priceSourceEnum('source').notNull(),
     fetchedAt: timestamp('fetched_at').notNull().defaultNow(),
   },
-  (trade) => [index('price_cache_fetched_idx').on(trade.fetchedAt)],
+  (table) => [index('price_cache_fetched_idx').on(table.fetchedAt)],
 )
 
 /**
@@ -348,7 +348,7 @@ export const priceOverrides = pgTable(
     currency: currencyEnum('currency').notNull(),
     setAt: timestamp('set_at').notNull().defaultNow(),
   },
-  (trade) => [primaryKey({ columns: [trade.userId, trade.instrumentId] })],
+  (table) => [primaryKey({ columns: [table.userId, table.instrumentId] })],
 )
 
 export const fxRates = pgTable(
@@ -360,7 +360,7 @@ export const fxRates = pgTable(
     asOf: timestamp('as_of').notNull(),
     fetchedAt: timestamp('fetched_at').notNull().defaultNow(),
   },
-  (trade) => [primaryKey({ columns: [trade.base, trade.quote] })],
+  (table) => [primaryKey({ columns: [table.base, table.quote] })],
 )
 
 // ── Journal ─────────────────────────────────────────────────────────────────
@@ -385,10 +385,10 @@ export const notes = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
-  (trade) => [
+  (table) => [
     // One note per day keeps the calendar unambiguous.
-    uniqueIndex('notes_user_date_uq').on(trade.userId, trade.date),
-    index('notes_user_date_idx').on(trade.userId, trade.date),
+    uniqueIndex('notes_user_date_uq').on(table.userId, table.date),
+    index('notes_user_date_idx').on(table.userId, table.date),
   ],
 )
 

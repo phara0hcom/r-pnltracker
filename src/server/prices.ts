@@ -177,7 +177,7 @@ export const listPrices = createServerFn({ method: 'GET' })
     const ids = positions.map((position) => instrumentId(position.symbol))
     if (ids.length === 0) return []
 
-    const [cached, overrides] = await Promise.all([
+    const [cacheRows, overrideRows] = await Promise.all([
       db.select().from(priceCache).where(inArray(priceCache.instrumentId, ids)),
       db
         .select()
@@ -186,8 +186,8 @@ export const listPrices = createServerFn({ method: 'GET' })
           and(eq(priceOverrides.userId, context.userId), inArray(priceOverrides.instrumentId, ids)),
         ),
     ])
-    const byId = new Map(cached.map((row) => [row.instrumentId, row]))
-    const overrideById = new Map(overrides.map((row) => [row.instrumentId, row]))
+    const byId = new Map(cacheRows.map((row) => [row.instrumentId, row]))
+    const overrideById = new Map(overrideRows.map((row) => [row.instrumentId, row]))
 
     return positions
       .map((position) => {

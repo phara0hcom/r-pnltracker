@@ -86,11 +86,13 @@ function holdingsAt(
   symbol: string,
   asOf: string,
 ): { accountType: AccountType; quantity: Decimal }[] {
-  const settledByDate = trades.filter((trade) => trade.settleDate <= asOf)
-  return runEngine(settledByDate)
+  const settledByThen = trades.filter((trade) => trade.settleDate <= asOf)
+  return runEngine(settledByThen)
     .positions.filter((position) => position.symbol === symbol && position.quantity.gt(0))
     .map((position) => ({ accountType: position.accountType, quantity: position.quantity }))
-    .sort((larger, smaller) => smaller.quantity.cmp(larger.quantity))
+    // Largest holding first — the caller pairs this against payments sorted the
+    // same way, so the order is part of the contract, not presentation.
+    .sort((left, right) => right.quantity.cmp(left.quantity))
 }
 
 /**

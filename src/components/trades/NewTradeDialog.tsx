@@ -97,20 +97,20 @@ export function NewTradeDialog({
           memo: form.memo || undefined,
         },
       }),
-    onSuccess: (row) => {
-      if (row.ok) {
+    onSuccess: (result) => {
+      if (result.ok) {
         setForm(blank())
         setErrors({})
         onCreated()
         onOpenChange(false)
       } else {
-        setErrors(row.errors ?? { _: 'Could not save.' })
+        setErrors(result.errors ?? { _: 'Could not save.' })
       }
     },
   })
 
-  const set = <K extends keyof Form>(key: K) => (v: Form[K]) => {
-    setForm((file) => ({ ...file, [key]: v }))
+  const set = <K extends keyof Form>(key: K) => (value: Form[K]) => {
+    setForm((current) => ({ ...current, [key]: value }))
   }
 
   const isUsd = form.assetClass === 'US_EQUITY'

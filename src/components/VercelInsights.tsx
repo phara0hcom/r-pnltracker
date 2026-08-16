@@ -11,19 +11,25 @@
  * Inert rather than broken, so no environment guard is needed.
  */
 import { useRouterState } from '@tanstack/react-router'
-import { Analytics, type BeforeSendEvent } from '@vercel/analytics/react'
+import { Analytics } from '@vercel/analytics/react'
 import { SpeedInsights } from '@vercel/speed-insights/react'
 
 /**
- * Drops the query string before a page view leaves the browser.
+ * Drops the query string before any beacon leaves the browser.
  *
  * This app puts filter state in the URL: `?symbol=8411&from=2026-01-01&account=…`.
  * That is a description of what the user holds and when they traded it, and it
  * has no analytics value — the path alone answers "which screens get used".
  * The root document already sets `noindex` and `referrer: no-referrer`, so
  * shipping the same information to an analytics endpoint would undo that.
+ *
+ * Generic over the event rather than typed to one package: Speed Insights and
+ * Web Analytics each declare their own `BeforeSendEvent` (`vital` vs
+ * `pageview`/`event`) and they are not assignable to each other. Both carry
+ * `url`, which is the only field being touched — and both hooks must be wired,
+ * or the half that is left bare leaks the very thing the other one strips.
  */
-function stripQuery(event: BeforeSendEvent): BeforeSendEvent {
+function stripQuery<E extends { url: string }>(event: E): E {
   const cut = event.url.indexOf('?')
   return cut === -1 ? event : { ...event, url: event.url.slice(0, cut) }
 }
@@ -43,7 +49,7 @@ export function VercelInsights() {
 
   return (
     <>
-      <SpeedInsights route={route} />
+      <SpeedInsights route={route} beforeSend={stripQuery} />
       <Analytics route={route} path={pathname} beforeSend={stripQuery} />
     </>
   )

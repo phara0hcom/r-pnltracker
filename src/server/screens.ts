@@ -19,8 +19,8 @@ import {
   priceOverrides,
 } from '~/db/schema'
 import { listTrades } from '~/db/trades.service'
+import { accountFilterInput } from '~/lib/accountScope'
 import {
-  ACCOUNT_FILTERS,
   matchesAccountFilter,
   OPENING_SIDES,
   ZERO,
@@ -39,19 +39,8 @@ import { runEngine } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
 import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
+import { findReinvestment } from '~/lib/tax/reinvestment'
 import { buildYearOverYear, type TaxYearBasis } from '~/lib/tax/report'
-
-/**
- * Shared input for screens carrying the account switch.
- *
- * Anything unrecognised falls back to `ALL` rather than throwing, matching how
- * the routes' `validateSearch` treats a hand-edited URL: a bad parameter should
- * degrade to the default view, never error the screen.
- */
-function accountFilterInput(data?: { account?: string }): { account: AccountFilter } {
-  const raw = data?.account
-  return { account: ACCOUNT_FILTERS.includes(raw as AccountFilter) ? (raw as AccountFilter) : 'ALL' }
-}
 
 /**
  * Loads trades and runs the engine once — every screen starts here.
@@ -64,10 +53,12 @@ function accountFilterInput(data?: { account?: string }): { account: AccountFilt
  */
 async function engineFor(userId: string, account: AccountFilter = 'ALL') {
   const records = await listTrades(userId)
-  const list = records
-    .map((record) => record.trade)
-    .filter((trade) => matchesAccountFilter(trade.accountType, account))
-  return { trades: list, engine: runEngine(list) }
+  const everyTrade = records.map((record) => record.trade)
+  const list = everyTrade.filter((trade) => matchesAccountFilter(trade.accountType, account))
+  // `unfilteredTrades` is returned for the rare lookup that must see across the
+  // switch — matching a 再投資 to its dividend, where Rakuten's two rows can sit
+  // in different accounts. Everything else wants `trades`.
+  return { trades: list, unfilteredTrades: everyTrade, engine: runEngine(list) }
 }
 
 /** This user's hand-entered prices, keyed by instrument id. */
@@ -423,7 +414,7 @@ export const getDividends = createServerFn({ method: 'GET' })
   .middleware([authed])
   .validator(accountFilterInput)
   .handler(async ({ data, context }): Promise<DividendScreenData> => {
-    const [allRows, { trades: allTrades }] = await Promise.all([
+    const [allRows, { trades: scopedTrades, unfilteredTrades }] = await Promise.all([
       db
         .select({ d: dividendsTable, instrument: instruments })
         .from(dividendsTable)
@@ -437,25 +428,16 @@ export const getDividends = createServerFn({ method: 'GET' })
     // an account whose position has since been closed.
     const rows = allRows.filter((row) => matchesAccountFilter(row.d.accountType, data.account))
 
-    // Rakuten books the 再投資 a few days before the payment date and does not
-    // always file it under the account the payment was attributed to, so the
-    // match is on instrument + exact amount within a short window rather than
-    // on an id — there is no id linking the two in any export.
-    const reinvestments = allTrades.filter((trade) => trade.side === 'REINVEST')
-    const MATCH_WINDOW_MS = 7 * 86_400_000
-    const findReinvestment = (symbol: string, payDate: string, netAmount: string) =>
-      reinvestments.find(
-        (trade) =>
-          trade.symbol === symbol &&
-          trade.netAmountJpy.toFixed(0) === netAmount &&
-          Math.abs(Date.parse(trade.tradeDate) - Date.parse(payDate)) <= MATCH_WINDOW_MS,
-      ) ?? null
-
     const out: DividendRow[] = rows.map(({ d: payout, instrument }) => {
       const netAmount = ZERO.add(payout.netAmount).toFixed(0)
       const symbol = instrument?.symbol ?? ''
+      // Matched against *every* trade, deliberately not `scopedTrades`: Rakuten
+      // can file the 再投資 under a different account than the payment, and
+      // scoping the search drops one half of a real pair.
       const reinvested =
-        payout.kind === 'DISTRIBUTION' ? findReinvestment(symbol, payout.payDate, netAmount) : null
+        payout.kind === 'DISTRIBUTION'
+          ? findReinvestment(unfilteredTrades, symbol, payout.payDate, netAmount)
+          : null
 
       return {
         payDate: payout.payDate,
@@ -480,8 +462,8 @@ export const getDividends = createServerFn({ method: 'GET' })
       left.payDate === right.payDate ? 0 : left.payDate < right.payDate ? 1 : -1,
     )
 
-    const sumOf = (pick: (row: DividendRow) => string) =>
-      out.reduce((running, row) => running.add(pick(row)), ZERO)
+    const sumRows = (rows: DividendRow[], pick: (row: DividendRow) => string) =>
+      rows.reduce((running, row) => running.add(pick(row)), ZERO)
 
     /** Groups rows in place; the push form avoids rebuilding the array per row. */
     const groupBy = <K,>(keyOf: (row: DividendRow) => K) => {
@@ -498,17 +480,14 @@ export const getDividends = createServerFn({ method: 'GET' })
     const byYear = groupBy((row) => Number(row.payDate.slice(0, 4)))
     const bySymbolKey = groupBy((row) => row.symbol)
 
-    const sumRows = (rows: DividendRow[], pick: (row: DividendRow) => string) =>
-      rows.reduce((running, row) => running.add(pick(row)), ZERO)
-
     return {
       rows: out,
       totals: {
-        gross: sumOf((row) => row.grossAmount).toFixed(0),
-        tax: sumOf((row) => row.incomeTax)
-          .add(sumOf((row) => row.localTax))
+        gross: sumRows(out, (row) => row.grossAmount).toFixed(0),
+        tax: sumRows(out, (row) => row.incomeTax)
+          .add(sumRows(out, (row) => row.localTax))
           .toFixed(0),
-        net: sumOf((row) => row.netAmount).toFixed(0),
+        net: sumRows(out, (row) => row.netAmount).toFixed(0),
         taxFreeGross: sumRows(
           out.filter((row) => !row.isTaxable),
           (row) => row.grossAmount,
@@ -520,7 +499,8 @@ export const getDividends = createServerFn({ method: 'GET' })
         count: out.length,
       },
       byYear: [...byYear.entries()]
-        .sort(([earlier], [later]) => later - earlier)
+        // Newest year first, matching the row order above.
+        .sort(([left], [right]) => right - left)
         .map(([year, rows]) => ({
           year,
           gross: sumRows(rows, (row) => row.grossAmount).toFixed(0),
@@ -549,7 +529,9 @@ export const getDividends = createServerFn({ method: 'GET' })
       usHoldings: (() => {
         const longestBySymbol = longestHoldBySymbol(
           holdingWindows(
-            allTrades.filter((trade) => trade.assetClass === 'US_EQUITY'),
+            // Scoped, unlike the 再投資 lookup above: this describes how long
+            // the selected accounts held US names, so it must follow the switch.
+            scopedTrades.filter((trade) => trade.assetClass === 'US_EQUITY'),
             todayLocal(),
           ),
         )

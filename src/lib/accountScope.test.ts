@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { accountScopePassthrough, accountScopeSchema, toAccountFilter } from './accountScope'
+import { accountFilterInput, accountScopeSchema, toAccountFilter } from './accountScope'
 
 describe('toAccountFilter', () => {
   it('accepts the three buckets', () => {
@@ -46,6 +46,25 @@ describe('accountScopeSchema', () => {
   })
 })
 
+describe('accountFilterInput', () => {
+  /*
+   * The server-side half. Every screen's `.validator` is this one function, so
+   * a bad `scope` cannot mean one thing on the client and another on the
+   * server — it degrades to the full view on both sides, and never throws.
+   */
+  it('narrows a valid account', () => {
+    expect(accountFilterInput({ account: 'NISA' })).toEqual({ account: 'NISA' })
+    expect(accountFilterInput({ account: 'SPECIFIC' })).toEqual({ account: 'SPECIFIC' })
+  })
+
+  it('degrades anything else to ALL rather than throwing', () => {
+    expect(accountFilterInput({ account: 'NISA_GROWTH' })).toEqual({ account: 'ALL' })
+    expect(accountFilterInput({})).toEqual({ account: 'ALL' })
+    // Called with no argument at all — a screen loaded before the switch exists.
+    expect(accountFilterInput()).toEqual({ account: 'ALL' })
+  })
+})
+
 describe('surviving a route that does not use the switch', () => {
   /** The shape of the Trades screen's search schema, which was eating it. */
   const tradesLike = z.object({
@@ -59,7 +78,7 @@ describe('surviving a route that does not use the switch', () => {
 
   const taxLike = z
     .object({ basis: z.enum(['CALENDAR', 'FISCAL_APR_MAR']).catch('CALENDAR') })
-    .extend(accountScopePassthrough.shape)
+    .extend(accountScopeSchema.shape)
 
   it('carries scope through Trades alongside its own account filter', () => {
     expect(

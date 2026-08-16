@@ -8,12 +8,8 @@
 import { createServerFn } from '@tanstack/react-start'
 import { authed } from './middleware'
 import { listTrades } from '~/db/trades.service'
-import {
-  ACCOUNT_FILTERS,
-  matchesAccountFilter,
-  ZERO,
-  type AccountFilter,
-} from '~/lib/domain/types'
+import { accountFilterInput } from '~/lib/accountScope'
+import { matchesAccountFilter, ZERO } from '~/lib/domain/types'
 import { buildNisaReport } from '~/lib/nisa/quota'
 import { runEngine, type RealizedEvent } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
@@ -180,13 +176,7 @@ function monthlySeries(events: RealizedEvent[]): MonthlyPoint[] {
 
 export const getDashboard = createServerFn({ method: 'GET' })
   .middleware([authed])
-  .validator((data?: { account?: string }): { account: AccountFilter } => ({
-    // Unrecognised values fall back to the full view rather than throwing,
-    // matching the routes' `validateSearch` treatment of a hand-edited URL.
-    account: ACCOUNT_FILTERS.includes(data?.account as AccountFilter)
-      ? (data?.account as AccountFilter)
-      : 'ALL',
-  }))
+  .validator(accountFilterInput)
   .handler(async ({ data, context }): Promise<DashboardData> => {
     const records = await listTrades(context.userId)
     // Filtered before the engine runs: pools are keyed (symbol × accountType),

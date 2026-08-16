@@ -47,8 +47,8 @@ describe('deterministic ids', () => {
   })
 
   it('keeps ids stable across re-imports so upserts are true no-ops', () => {
-    const a = trades.map((trade) => toTradeRow({ userId: USER, trade: trade }).id)
-    const b = loadAllTrades().trades.map((trade) => toTradeRow({ userId: USER, trade: trade }).id)
+    const a = trades.map((trade) => toTradeRow({ userId: USER, trade }).id)
+    const b = loadAllTrades().trades.map((trade) => toTradeRow({ userId: USER, trade }).id)
     expect(b).toEqual(a)
     expect(new Set(a).size).toBe(trades.length)
   })
