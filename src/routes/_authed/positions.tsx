@@ -4,18 +4,25 @@ import styles from './positions.module.scss'
 import { ACCOUNT_LABEL, ASSET_LABEL, pct, qty, tone, yen, yenSigned } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { Empty, PageHeader, Stat, StatGrid, Table } from '~/components/Screen'
+import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { accountScopeSchema } from '~/lib/accountScope'
 import { getPositions } from '~/server/screens'
 
 export const Route = createFileRoute('/_authed/positions')({
-  loader: () => getPositions(),
+  validateSearch: accountScopeSchema,
+  // The filter is a loader dependency, so changing it refetches rather than
+  // re-rendering the previous account's figures.
+  loaderDeps: ({ search }) => ({ account: search.scope ?? 'ALL' }),
+  loader: ({ deps }) => getPositions({ data: { account: deps.account } }),
   component: Positions,
 })
 
 function Positions() {
   const initial = Route.useLoaderData()
+  const [account, setAccount] = useAccountFilter()
   const { data: rows } = useQuery({
-    queryKey: ['positions'],
-    queryFn: () => getPositions(),
+    queryKey: ['positions', account],
+    queryFn: () => getPositions({ data: { account } }),
     initialData: initial,
   })
 
@@ -37,7 +44,9 @@ function Positions() {
       <PageHeader
         title="Positions"
         meta={`${String(rows.length)} open · ${yen(totalCost)} cost basis`}
-      />
+      >
+        <AccountSwitch value={account} onChange={setAccount} />
+      </PageHeader>
 
       <StatGrid>
         <Stat label="Open positions" value={rows.length} />

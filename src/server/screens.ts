@@ -19,7 +19,15 @@ import {
   priceOverrides,
 } from '~/db/schema'
 import { listTrades } from '~/db/trades.service'
-import { OPENING_SIDES, ZERO, type AssetClass, type TradeSide } from '~/lib/domain/types'
+import {
+  ACCOUNT_FILTERS,
+  matchesAccountFilter,
+  OPENING_SIDES,
+  ZERO,
+  type AccountFilter,
+  type AssetClass,
+  type TradeSide,
+} from '~/lib/domain/types'
 import { todayLocal } from '~/lib/localDate'
 import {
   ANNUAL_GROWTH_LIMIT,
@@ -33,10 +41,32 @@ import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
 import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
 import { buildYearOverYear, type TaxYearBasis } from '~/lib/tax/report'
 
-/** Loads trades and runs the engine once — every screen starts here. */
-async function engineFor(userId: string) {
+/**
+ * Shared input for screens carrying the account switch.
+ *
+ * Anything unrecognised falls back to `ALL` rather than throwing, matching how
+ * the routes' `validateSearch` treats a hand-edited URL: a bad parameter should
+ * degrade to the default view, never error the screen.
+ */
+function accountFilterInput(data?: { account?: string }): { account: AccountFilter } {
+  const raw = data?.account
+  return { account: ACCOUNT_FILTERS.includes(raw as AccountFilter) ? (raw as AccountFilter) : 'ALL' }
+}
+
+/**
+ * Loads trades and runs the engine once — every screen starts here.
+ *
+ * The account filter is applied to the trades *before* the engine runs, which
+ * is exact rather than approximate: pools are keyed `(symbol × accountType)`,
+ * so dropping whole accounts cannot alter the pools that remain. Filtering the
+ * engine's *output* instead would be wrong — a 特定 sell would still have been
+ * averaged against NISA units.
+ */
+async function engineFor(userId: string, account: AccountFilter = 'ALL') {
   const records = await listTrades(userId)
-  const list = records.map((r) => r.trade)
+  const list = records
+    .map((r) => r.trade)
+    .filter((t) => matchesAccountFilter(t.accountType, account))
   return { trades: list, engine: runEngine(list) }
 }
 
@@ -95,8 +125,9 @@ export interface PositionRow {
 
 export const getPositions = createServerFn({ method: 'GET' })
   .middleware([authed])
-  .handler(async ({ context }): Promise<PositionRow[]> => {
-    const { engine } = await engineFor(context.userId)
+  .validator(accountFilterInput)
+  .handler(async ({ data, context }): Promise<PositionRow[]> => {
+    const { engine } = await engineFor(context.userId, data.account)
 
     const [priced, overrides, liveFx] = await Promise.all([
       db
@@ -387,15 +418,21 @@ export interface DividendScreenData {
 
 export const getDividends = createServerFn({ method: 'GET' })
   .middleware([authed])
-  .handler(async ({ context }): Promise<DividendScreenData> => {
-    const [rows, { trades: allTrades }] = await Promise.all([
+  .validator(accountFilterInput)
+  .handler(async ({ data, context }): Promise<DividendScreenData> => {
+    const [allRows, { trades: allTrades }] = await Promise.all([
       db
         .select({ d: dividendsTable, instrument: instruments })
         .from(dividendsTable)
         .leftJoin(instruments, eq(dividendsTable.instrumentId, instruments.id))
         .where(eq(dividendsTable.userId, context.userId)),
-      engineFor(context.userId),
+      engineFor(context.userId, data.account),
     ])
+
+    // Dividends carry their own attributed account, so they are filtered on
+    // that rather than inherited from the trade filter — a payment can land in
+    // an account whose position has since been closed.
+    const rows = allRows.filter((r) => matchesAccountFilter(r.d.accountType, data.account))
 
     // Rakuten books the 再投資 a few days before the payment date and does not
     // always file it under the account the payment was attributed to, so the
@@ -552,8 +589,9 @@ export interface StatsScreenData {
 
 export const getStats = createServerFn({ method: 'GET' })
   .middleware([authed])
-  .handler(async ({ context }): Promise<StatsScreenData> => {
-    const { engine } = await engineFor(context.userId)
+  .validator(accountFilterInput)
+  .handler(async ({ data, context }): Promise<StatsScreenData> => {
+    const { engine } = await engineFor(context.userId, data.account)
     const s = computeStats(engine.realized)
     const fx = attributeFx(engine.realized)
     const daily = dailyPnl(engine.realized)
@@ -691,7 +729,10 @@ export interface CalendarDay {
 
 export const getCalendar = createServerFn({ method: 'GET' })
   .middleware([authed])
-  .validator((data: { month: string }) => data)
+  .validator((data: { month: string; account?: string }) => ({
+    month: data.month,
+    ...accountFilterInput(data),
+  }))
   .handler(async ({ data, context }): Promise<CalendarDay[]> => {
     // `month` is YYYY-MM; build the inclusive day range for it.
     const [y, m] = data.month.split('-').map(Number)
@@ -701,7 +742,7 @@ export const getCalendar = createServerFn({ method: 'GET' })
     const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
     const last = `${String(year)}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
-    const { engine } = await engineFor(context.userId)
+    const { engine } = await engineFor(context.userId, data.account)
     const daily = dailyPnl(engine.realized)
 
     // Realized events keyed the same way the engine keys them, so a close can
@@ -732,6 +773,7 @@ export const getCalendar = createServerFn({ method: 'GET' })
     for (const r of records) {
       const t = r.trade
       if (t.tradeDate < first || t.tradeDate > last) continue
+      if (!matchesAccountFilter(t.accountType, data.account)) continue
       const isClose = t.side === 'SELL' || t.side === 'REDEEM'
       const hit = realizedByKey.get(
         `${t.tradeDate}|${t.symbol}|${t.accountType}|${t.quantity.toFixed()}`,

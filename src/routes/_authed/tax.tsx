@@ -4,13 +4,19 @@ import { z } from 'zod'
 import styles from './tax.module.scss'
 import { ACCOUNT_LABEL, pct, tone, yen } from '~/components/format'
 import { Empty, PageHeader, Section, Stat, StatGrid, Table } from '~/components/Screen'
+import { accountScopePassthrough } from '~/lib/accountScope'
 import { cx } from '~/lib/cx'
 import { getTax } from '~/server/screens'
 
 export const Route = createFileRoute('/_authed/tax')({
-  validateSearch: z.object({
-    basis: z.enum(['CALENDAR', 'FISCAL_APR_MAR']).catch('CALENDAR'),
-  }),
+  // `scope` is carried but not applied: this screen is built around the
+  // 特定-vs-NISA split it already shows. Declared so the value survives a visit
+  // here rather than being stripped as an unknown key.
+  validateSearch: z
+    .object({
+      basis: z.enum(['CALENDAR', 'FISCAL_APR_MAR']).catch('CALENDAR'),
+    })
+    .extend(accountScopePassthrough.shape),
   component: Tax,
 })
 

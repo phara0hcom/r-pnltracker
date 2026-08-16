@@ -24,6 +24,29 @@ export const TAX_EXEMPT_ACCOUNTS: readonly AccountType[] = [
   'NISA_TSUMITATE',
 ]
 
+/**
+ * The account split offered on the analysis screens.
+ *
+ * Three buckets rather than the four `AccountType`s, because the question being
+ * asked is "taxed or not". All three NISA frames — including 旧NISA, which is a
+ * separate system for *quota* purposes — are alike here: tax-free. Isolating a
+ * single NISA frame is a quota question, which the NISA screen answers.
+ */
+export type AccountFilter = 'ALL' | 'NISA' | 'SPECIFIC'
+
+export const ACCOUNT_FILTERS: readonly AccountFilter[] = ['ALL', 'NISA', 'SPECIFIC']
+
+export function matchesAccountFilter(account: AccountType, filter: AccountFilter): boolean {
+  switch (filter) {
+    case 'ALL':
+      return true
+    case 'NISA':
+      return TAX_EXEMPT_ACCOUNTS.includes(account)
+    case 'SPECIFIC':
+      return !TAX_EXEMPT_ACCOUNTS.includes(account)
+  }
+}
+
 export type AssetClass = 'JP_EQUITY' | 'US_EQUITY' | 'FUND'
 
 export type Currency = 'JPY' | 'USD'

@@ -1,0 +1,36 @@
+@use '../../styles/mixins' as m;
+
+.group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.item {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  background-color: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+
+  @include m.focus-ring;
+
+  &:hover:not([data-state='on']) {
+    color: var(--color-text);
+  }
+
+  /* Radix drives selection through `data-state`, not a class — styling the
+     attribute keeps the visual state tied to the primitive's own state rather
+     than to a second copy of it that could drift. */
+  &[data-state='on'] {
+    color: var(--color-bg);
+    background-color: var(--color-accent);
+  }
+}

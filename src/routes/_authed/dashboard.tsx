@@ -5,6 +5,8 @@ import styles from './dashboard.module.scss'
 import { MonthlyPnlChart } from '~/components/charts/MonthlyPnlChart'
 import { pct, ratio, tone, yen, yenSigned } from '~/components/format'
 import { PageHeader, Section, Stat, StatGrid } from '~/components/Screen'
+import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { accountScopeSchema } from '~/lib/accountScope'
 import { cx } from '~/lib/cx'
 import { getDashboard, type PeriodSummary } from '~/server/portfolio'
 
@@ -18,14 +20,16 @@ export const Route = createFileRoute('/_authed/dashboard')({
   // /dashboard to supply it, which typecheck caught immediately.
   validateSearch: z.object({
     back: z.number().int().min(0).catch(0).optional(),
-  }),
-  loader: () => getDashboard(),
+  }).extend(accountScopeSchema.shape),
+  loaderDeps: ({ search }) => ({ account: search.scope ?? 'ALL' }),
+  loader: ({ deps }) => getDashboard({ data: { account: deps.account } }),
   component: Dashboard,
 })
 
 function Dashboard() {
   const d = Route.useLoaderData()
   const { back = 0 } = Route.useSearch()
+  const [account, setAccount] = useAccountFilter()
   const navigate = Route.useNavigate()
 
   // The server sends the whole gap-filled history; windowing here means paging
@@ -61,7 +65,9 @@ function Dashboard() {
       <PageHeader
         title="Dashboard"
         meta={`${String(d.tradeCount)} trades · ${String(d.openPositions)} open positions`}
-      />
+      >
+        <AccountSwitch value={account} onChange={setAccount} />
+      </PageHeader>
 
       <StatGrid>
         <Stat

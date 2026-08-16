@@ -2,16 +2,21 @@ import { createFileRoute } from '@tanstack/react-router'
 import styles from './stats.module.scss'
 import { ACCOUNT_LABEL, ASSET_LABEL, days, pct, ratio, tone, yen, yenSigned } from '~/components/format'
 import { Empty, PageHeader, Section, Stat, StatGrid, Table } from '~/components/Screen'
+import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { accountScopeSchema } from '~/lib/accountScope'
 import { cx } from '~/lib/cx'
 import { getStats } from '~/server/screens'
 
 export const Route = createFileRoute('/_authed/stats')({
-  loader: () => getStats(),
+  validateSearch: accountScopeSchema,
+  loaderDeps: ({ search }) => ({ account: search.scope ?? 'ALL' }),
+  loader: ({ deps }) => getStats({ data: { account: deps.account } }),
   component: Stats,
 })
 
 function Stats() {
   const d = Route.useLoaderData()
+  const [account, setAccount] = useAccountFilter()
   const hasJournal = d.moodCorrelation.length > 0 || d.motivationCorrelation.length > 0
 
   return (
@@ -19,7 +24,9 @@ function Stats() {
       <PageHeader
         title="Stats"
         meta={`${String(d.tradeCount)} closed trades · ${String(d.winCount)}W / ${String(d.lossCount)}L`}
-      />
+      >
+        <AccountSwitch value={account} onChange={setAccount} />
+      </PageHeader>
 
       <StatGrid>
         <Stat label="Win rate" value={pct(d.winRate)} />

@@ -6,6 +6,8 @@ import styles from './calendar.module.scss'
 import { NoteDialog } from '~/components/calendar/NoteDialog'
 import { tone, yenSigned } from '~/components/format'
 import { PageHeader } from '~/components/Screen'
+import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { accountScopeSchema } from '~/lib/accountScope'
 import { cx } from '~/lib/cx'
 import { thisMonthLocal } from '~/lib/localDate'
 import { removeNote, saveNote } from '~/server/notes'
@@ -22,7 +24,7 @@ export const Route = createFileRoute('/_authed/calendar')({
       .string()
       .regex(/^\d{4}-\d{2}$/)
       .catch(() => thisMonthLocal()),
-  }),
+  }).extend(accountScopeSchema.shape),
   component: Calendar,
 })
 
@@ -31,13 +33,14 @@ const MOOD_GLYPH = ['', '😞', '🙁', '😐', '🙂', '😄']
 
 function Calendar() {
   const { month } = Route.useSearch()
+  const [account, setAccount] = useAccountFilter()
   const navigate = Route.useNavigate()
   const queryClient = useQueryClient()
   const [openDay, setOpenDay] = useState<CalendarDay | null>(null)
 
   const { data: dayList = [] } = useQuery({
-    queryKey: ['calendar', month],
-    queryFn: () => getCalendar({ data: { month } }),
+    queryKey: ['calendar', month, account],
+    queryFn: () => getCalendar({ data: { month, account } }),
   })
 
   const save = useMutation({
@@ -88,6 +91,7 @@ function Calendar() {
         }
       >
         <div className={styles.nav}>
+          <AccountSwitch value={account} onChange={setAccount} />
           <button type="button" className={styles.navButton} onClick={() => { shift(-1) }} aria-label="Previous month">
             ←
           </button>

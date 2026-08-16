@@ -5,6 +5,7 @@
  */
 import { Link } from '@tanstack/react-router'
 import styles from './AppShell.module.scss'
+import { useAccountFilter } from '~/components/ui/AccountSwitch'
 import { RouteProgress, useRouteLoading } from '~/components/ui/RouteProgress'
 import { signOut } from '~/lib/auth-client'
 import { cx } from '~/lib/cx'
@@ -38,6 +39,7 @@ export function AppShell({
   children: React.ReactNode
 }) {
   const loading = useRouteLoading()
+  const [account] = useAccountFilter()
 
   return (
     <div className={styles.shell}>
@@ -56,6 +58,14 @@ export function AppShell({
             <li key={item.to}>
               <Link
                 to={item.to}
+                /*
+                 * Carried on every link, including the screens that do not use
+                 * it. Those declare `scope` purely so it survives the trip —
+                 * dropping it on Trades meant a detour there silently reset the
+                 * switch, which is the whole reason it has its own key rather
+                 * than sharing Trades' `account`.
+                 */
+                search={account !== 'ALL' ? { scope: account } : undefined}
                 className={styles.navLink}
                 activeProps={{ className: cx(styles.navLink, styles.navLinkActive) }}
               >

@@ -4,10 +4,14 @@ import styles from './dividends.module.scss'
 import { ACCOUNT_LABEL, qty, yen } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { Empty, PageHeader, Section, Stat, StatGrid, Table } from '~/components/Screen'
+import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { accountScopeSchema } from '~/lib/accountScope'
 import { getDividends } from '~/server/screens'
 
 export const Route = createFileRoute('/_authed/dividends')({
-  loader: () => getDividends(),
+  validateSearch: accountScopeSchema,
+  loaderDeps: ({ search }) => ({ account: search.scope ?? 'ALL' }),
+  loader: ({ deps }) => getDividends({ data: { account: deps.account } }),
   component: Dividends,
 })
 
@@ -18,9 +22,10 @@ const KIND_LABEL: Record<string, string> = {
 
 function Dividends() {
   const initial = Route.useLoaderData()
+  const [account, setAccount] = useAccountFilter()
   const { data } = useQuery({
-    queryKey: ['dividends'],
-    queryFn: () => getDividends(),
+    queryKey: ['dividends', account],
+    queryFn: () => getDividends({ data: { account } }),
     initialData: initial,
   })
 
@@ -33,7 +38,9 @@ function Dividends() {
       <PageHeader
         title="Dividends"
         meta={`${String(totals.count)} payment${totals.count === 1 ? '' : 's'} · ${yen(totals.gross)} gross`}
-      />
+      >
+        <AccountSwitch value={account} onChange={setAccount} />
+      </PageHeader>
 
       <StatGrid>
         <Stat label="Gross received" value={yen(totals.gross)} />

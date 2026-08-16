@@ -52,6 +52,11 @@ const searchSchema = z.object({
   perPage: z.union([z.literal(25), z.literal(50), z.literal(100), z.literal(250)])
     .catch(50)
     .optional(),
+  // The sidebar's All/NISA/特定 switch. This screen keeps its own richer
+  // four-way `account` filter and does not apply `scope`, but must carry it:
+  // a zod object strips unknown keys, so passing through Trades would otherwise
+  // silently discard the switch and it could not come back.
+  scope: z.enum(['ALL', 'NISA', 'SPECIFIC']).catch('ALL').optional(),
 })
 
 export type TradeSearch = z.infer<typeof searchSchema>
