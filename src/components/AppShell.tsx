@@ -5,6 +5,7 @@
  */
 import { Link } from '@tanstack/react-router'
 import styles from './AppShell.module.scss'
+import { RouteProgress, useRouteLoading } from '~/components/ui/RouteProgress'
 import { signOut } from '~/lib/auth-client'
 import { cx } from '~/lib/cx'
 import type { SessionUser } from '~/lib/session'
@@ -36,8 +37,12 @@ export function AppShell({
   user: SessionUser
   children: React.ReactNode
 }) {
+  const loading = useRouteLoading()
+
   return (
     <div className={styles.shell}>
+      <RouteProgress loading={loading} />
+
       <nav className={styles.sidebar} aria-label="Main navigation">
         <div className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true">
@@ -82,7 +87,13 @@ export function AppShell({
         </div>
       </nav>
 
-      <main id="main" className={styles.content}>
+      {/* Dimmed while a navigation is in flight, so the figures on screen are
+          visibly the previous route's rather than the one being opened. */}
+      <main
+        id="main"
+        className={cx(styles.content, loading && styles.contentBusy)}
+        aria-busy={loading}
+      >
         {children}
       </main>
     </div>
