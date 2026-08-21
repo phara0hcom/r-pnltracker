@@ -3,13 +3,15 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { z } from 'zod'
 import styles from './calendar.module.scss'
-import { NoteDialog } from '~/components/calendar/NoteDialog'
+import { NoteDialog, type NotePayload } from '~/components/calendar/NoteDialog'
 import { tone, yenSigned } from '~/components/format'
 import { PageHeader } from '~/components/Screen'
 import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
 import { accountScopeSchema } from '~/lib/accountScope'
+import { withNote } from '~/lib/calendarPatch'
 import { cx } from '~/lib/cx'
 import { thisMonthLocal } from '~/lib/localDate'
+import { monthGrid, shiftMonth } from '~/lib/monthGrid'
 import { removeNote, saveNote } from '~/server/notes'
 import { getCalendar, type CalendarDay } from '~/server/screens'
 
@@ -38,78 +40,137 @@ function Calendar() {
   const queryClient = useQueryClient()
   const [openDay, setOpenDay] = useState<CalendarDay | null>(null)
 
-  const { data: dayList = [] } = useQuery({
-    queryKey: ['calendar', month, account],
+  const calendarKey = ['calendar', month, account]
+
+  const { data: dayList, isPending } = useQuery({
+    queryKey: calendarKey,
     queryFn: () => getCalendar({ data: { month, account } }),
   })
 
+  /**
+   * Apply an edit to the cached month straight away.
+   *
+   * A journal entry is the user's own text: the server can only store it, never
+   * transform it, so there is nothing to wait for before showing it. Returns the
+   * entry that was there, which is all a rollback needs — restoring a snapshot
+   * of the whole month would also undo any per-trade journal saved while this
+   * request was still in flight.
+   */
+  const patchDay = (date: string, note: CalendarDay['note']) => {
+    const previous =
+      queryClient.getQueryData<CalendarDay[]>(calendarKey)?.find((day) => day.date === date)
+        ?.note ?? null
+    queryClient.setQueryData<CalendarDay[]>(calendarKey, (days) => withNote(days, date, note))
+    return previous
+  }
+
   const save = useMutation({
     mutationFn: saveNote,
-    onSuccess: () => {
+    onMutate: async ({ data }: { data: NotePayload }) => {
+      // An in-flight refetch would otherwise land after this and overwrite it
+      // with the pre-edit month.
+      await queryClient.cancelQueries({ queryKey: calendarKey })
       setOpenDay(null)
-      void queryClient.invalidateQueries()
+      return {
+        previous: patchDay(data.date, {
+          title: data.title ?? '',
+          body: data.body ?? '',
+          mood: data.mood ?? null,
+          motivation: data.motivation ?? null,
+          tags: data.tags ?? [],
+        }),
+      }
     },
+    onError: (_error, variables, context) => {
+      patchDay(variables.data.date, context?.previous ?? null)
+    },
+    // Only the calendar reads journal entries. Invalidating everything refetched
+    // positions, prices and tax for an edit that cannot move any of them.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['calendar'] }),
   })
 
   const del = useMutation({
     mutationFn: (date: string) => removeNote({ data: { date } }),
-    onSuccess: () => {
+    onMutate: async (date: string) => {
+      await queryClient.cancelQueries({ queryKey: calendarKey })
       setOpenDay(null)
-      void queryClient.invalidateQueries()
+      return { previous: patchDay(date, null) }
     },
+    onError: (_error, date, context) => {
+      patchDay(date, context?.previous ?? null)
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['calendar'] }),
   })
 
-  const shift = (delta: number) => {
-    const [y, m] = month.split('-').map(Number)
-    const d = new Date(Date.UTC(y ?? 2026, (m ?? 1) - 1 + delta, 1))
-    void navigate({ search: { month: d.toISOString().slice(0, 7) } })
+  const goToMonth = (next: string) => {
+    // Functional form: replacing the whole search object would drop `scope`, so
+    // paging through months reset the account switch.
+    void navigate({ search: (prev) => ({ ...prev, month: next }) })
   }
 
-  // Monday-first grid: JS getUTCDay() is Sunday-based, so Sunday maps to 6.
-  const first = dayList[0]
-  const leadingBlanks = first ? (new Date(`${first.date}T00:00:00Z`).getUTCDay() + 6) % 7 : 0
+  // Drawn from the URL month, not from the response, so the squares are on
+  // screen before the engine has finished replaying the history behind them.
+  const { dates, leadingBlanks } = monthGrid(month)
+  const byDate = new Map((dayList ?? []).map((day) => [day.date, day]))
 
-  const traded = dayList.filter((day) => day.tradeCount > 0)
-  const monthPnl = dayList.reduce((a, d) => a + (d.realizedJpy ? Number(d.realizedJpy) : 0), 0)
-  const journalled = dayList.filter((day) => day.note != null).length
+  const traded = (dayList ?? []).filter((day) => day.tradeCount > 0)
+  const monthPnl = (dayList ?? []).reduce((a, d) => a + (d.realizedJpy ? Number(d.realizedJpy) : 0), 0)
+  const journalled = (dayList ?? []).filter((day) => day.note != null).length
 
   // Scale tint by the largest absolute day so a quiet month still shows contrast.
-  const peak = Math.max(1, ...dayList.map((day) => Math.abs(Number(day.realizedJpy ?? 0))))
+  const peak = Math.max(1, ...(dayList ?? []).map((day) => Math.abs(Number(day.realizedJpy ?? 0))))
+
+  const failed = save.isError || del.isError
 
   return (
     <>
       <PageHeader
         title="Calendar"
         meta={
-          <>
-            {traded.length} trading day{traded.length === 1 ? '' : 's'} ·{' '}
-            <span className={tone(monthPnl) === 'profit' ? styles.profit : tone(monthPnl) === 'loss' ? styles.loss : ''}>
-              {yenSigned(monthPnl)}
-            </span>{' '}
-            · {journalled} journalled
-          </>
+          dayList ? (
+            <>
+              {traded.length} trading day{traded.length === 1 ? '' : 's'} ·{' '}
+              <span className={tone(monthPnl) === 'profit' ? styles.profit : tone(monthPnl) === 'loss' ? styles.loss : ''}>
+                {yenSigned(monthPnl)}
+              </span>{' '}
+              · {journalled} journalled
+            </>
+          ) : (
+            'Loading…'
+          )
         }
       >
         <div className={styles.nav}>
           <AccountSwitch value={account} onChange={setAccount} />
-          <button type="button" className={styles.navButton} onClick={() => { shift(-1) }} aria-label="Previous month">
+          <button type="button" className={styles.navButton} onClick={() => { goToMonth(shiftMonth(month, -1)) }} aria-label="Previous month">
             ←
           </button>
           <span className={styles.monthLabel}>{month}</span>
-          <button type="button" className={styles.navButton} onClick={() => { shift(1) }} aria-label="Next month">
+          <button type="button" className={styles.navButton} onClick={() => { goToMonth(shiftMonth(month, 1)) }} aria-label="Next month">
             →
           </button>
           <button
             type="button"
             className={styles.navButton}
-            onClick={() => { void navigate({ search: { month: thisMonthLocal() } }) }}
+            onClick={() => { goToMonth(thisMonthLocal()) }}
           >
             Today
           </button>
         </div>
       </PageHeader>
 
-      <div className={styles.grid} role="grid" aria-label={`Trading calendar for ${month}`}>
+      {failed ? (
+        <p className={styles.error} role="alert">
+          Could not save that journal entry — the day has been put back as it was. Please try again.
+        </p>
+      ) : null}
+
+      <div
+        className={styles.grid}
+        role="grid"
+        aria-label={`Trading calendar for ${month}`}
+        aria-busy={isPending}
+      >
         {WEEKDAYS.map((weekday) => (
           <div key={weekday} className={styles.weekday} role="columnheader">
             {weekday}
@@ -120,7 +181,21 @@ function Calendar() {
           <div key={`blank-${String(i)}`} className={styles.blank} aria-hidden="true" />
         ))}
 
-        {dayList.map((day) => {
+        {dates.map((date) => {
+          const dayNum = Number(date.slice(-2))
+          const day = byDate.get(date)
+
+          // Dated but not yet filled in. Not a button: there is nothing to open
+          // until the day's trades and note have arrived.
+          if (!day) {
+            return (
+              <div key={date} className={cx(styles.day, styles.pending)} role="gridcell" aria-label={date}>
+                <span className={styles.dayNum}>{dayNum}</span>
+                <span className={styles.pendingBar} aria-hidden="true" />
+              </div>
+            )
+          }
+
           const pnl = day.realizedJpy == null ? null : Number(day.realizedJpy)
           // Opacity encodes magnitude; hue encodes direction.
           const intensity = pnl == null ? 0 : Math.min(Math.abs(pnl) / peak, 1)
@@ -141,7 +216,7 @@ function Calendar() {
               onClick={() => { setOpenDay(day) }}
               aria-label={`${day.date}${pnl != null ? `, realized ${yenSigned(pnl)}` : ''}${day.note ? ', has journal entry' : ''}`}
             >
-              <span className={styles.dayNum}>{Number(day.date.slice(-2))}</span>
+              <span className={styles.dayNum}>{dayNum}</span>
               {day.note?.mood ? (
                 <span className={styles.mood} aria-hidden="true">
                   {MOOD_GLYPH[day.note.mood]}
@@ -170,7 +245,6 @@ function Calendar() {
       {openDay ? (
         <NoteDialog
           day={openDay}
-          saving={save.isPending || del.isPending}
           onClose={() => { setOpenDay(null) }}
           onSave={(note) => { save.mutate({ data: note }) }}
           onDelete={(date) => { del.mutate(date) }}

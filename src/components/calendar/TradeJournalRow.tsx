@@ -14,9 +14,10 @@ import styles from './TradeJournalRow.module.scss'
 import { ACCOUNT_LABEL, qty, tone, yen, yenSigned } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
+import { withTradeJournal } from '~/lib/calendarPatch'
 import { cx } from '~/lib/cx'
 import { saveTradeJournal } from '~/server/notes'
-import type { CalendarTrade } from '~/server/screens'
+import type { CalendarDay, CalendarTrade } from '~/server/screens'
 
 /** Simple pen. `currentColor` so it inherits the button's state colour. */
 function PenIcon() {
@@ -59,21 +60,52 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
   const hasJournal = Boolean(savedMemo) || savedMotivation != null
   const dirty = memo.trim() !== savedMemo.trim() || motivation !== savedMotivation
 
+  /**
+   * Write this trade's journal into every cached month.
+   *
+   * Local state alone is not enough: the day dialog is re-rendered from the
+   * cached calendar query, which has a 5-minute staleTime. Reopening the day
+   * would remount this row with the pre-save memo and look like a lost edit.
+   * Every cached month is patched because the row does not know which one the
+   * open dialog was drawn from.
+   */
+  const patchCache = (journal: { memo: string | null; motivation: number | null }) => {
+    queryClient.setQueriesData<CalendarDay[]>({ queryKey: ['calendar'] }, (days) =>
+      withTradeJournal(days, trade.id, journal),
+    )
+  }
+
   const save = useMutation({
     mutationFn: (journal: { memo: string | null; motivation: number | null }) =>
       saveTradeJournal({ data: { tradeId: trade.id, ...journal } }),
-    onSuccess: (_r, v) => {
-      setSavedMemo(v.memo ?? '')
-      setSavedMotivation(v.motivation)
+    // Applied before the request, not after it: the server only stores this text
+    // back, so waiting on the round trip would show a spinner over a result that
+    // is already known.
+    onMutate: async (journal) => {
+      await queryClient.cancelQueries({ queryKey: ['calendar'] })
+      const previous = { memo: savedMemo || null, motivation: savedMotivation }
+
+      setSavedMemo(journal.memo ?? '')
+      setSavedMotivation(journal.motivation)
       setJustSaved(true)
       setTimeout(() => {
         setJustSaved(false)
       }, 1600)
-      // Local state alone is not enough: the day dialog is re-rendered from the
-      // cached calendar query, which has a 5-minute staleTime. Reopening the day
-      // would remount this row with the pre-save memo and look like a lost edit.
-      void queryClient.invalidateQueries({ queryKey: ['calendar'] })
+
+      patchCache(journal)
+      return previous
     },
+    // Re-applies the previous values rather than restoring a snapshot: a day
+    // dialog runs one of these mutations per trade, so a snapshot taken before
+    // this save would also wipe a sibling row saved while it was in flight.
+    onError: (_error, _journal, previous) => {
+      if (!previous) return
+      setSavedMemo(previous.memo ?? '')
+      setSavedMotivation(previous.motivation)
+      setJustSaved(false)
+      patchCache(previous)
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['calendar'] }),
   })
 
   const commit = () => {
@@ -251,17 +283,17 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
             <button
               type="button"
               className={cx(styles.actionButton, styles.primary)}
-              disabled={!dirty || save.isPending}
+              disabled={!dirty}
               onClick={commit}
             >
-              {save.isPending ? 'Saving…' : justSaved ? 'Saved' : 'Save'}
+              {justSaved ? 'Saved' : 'Save'}
             </button>
 
             {/* Cancel while nothing is stored; once a journal exists the same
                 slot deletes it, so the destructive action only appears when
                 there is actually something to destroy. */}
             {hasJournal ? (
-              <ConfirmButton onConfirm={clear} confirmLabel="Delete?" disabled={save.isPending}>
+              <ConfirmButton onConfirm={clear} confirmLabel="Delete?">
                 Delete
               </ConfirmButton>
             ) : (
@@ -271,7 +303,7 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
             )}
 
             <span className={styles.status} aria-live="polite">
-              {dirty && !save.isPending ? 'Unsaved' : ''}
+              {save.isError ? 'Save failed — restored' : dirty ? 'Unsaved' : ''}
             </span>
           </div>
         </div>

@@ -72,6 +72,61 @@
   }
 }
 
+/*
+ * A dated square with nothing in it yet.
+ *
+ * The number is real from the first paint — only the figures are unknown — so
+ * the placeholder is one dim bar where the day's P&L will land rather than a
+ * block that hides the date too. `cursor: default` because there is nothing to
+ * click until the data arrives.
+ */
+.pending {
+  cursor: default;
+
+  &:hover {
+    border-color: var(--color-border);
+  }
+
+  .dayNum {
+    color: var(--color-text-subtle);
+  }
+}
+
+.pendingBar {
+  width: 60%;
+  height: 0.75em;
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 25%,
+    var(--color-surface-hover) 50%,
+    var(--color-surface) 75%
+  );
+  background-size: 300% 100%;
+  border-radius: var(--radius-sm);
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+/* Travelling highlight rather than a fade: a whole grid of cells pulsing in
+   unison reads as the page flashing. */
+@keyframes sweep {
+  from {
+    background-position: 150% 0;
+  }
+
+  to {
+    background-position: -150% 0;
+  }
+}
+
+/* Motion is the point of this indicator, so with it suppressed the bar has to
+   stay legible as a placeholder on its own. */
+@media (prefers-reduced-motion: reduce) {
+  .pendingBar {
+    background: var(--color-surface-hover);
+    animation: none;
+  }
+}
+
 /* A dashed accent border marks a journalled day without competing with the
    P&L tint that fills the cell background. */
 .hasNote {
@@ -102,6 +157,15 @@
 
 .dayCount {
   color: var(--color-text-subtle);
+}
+
+.error {
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-loss);
+  border: 1px solid var(--color-loss);
+  border-radius: var(--radius-md);
 }
 
 .legend {

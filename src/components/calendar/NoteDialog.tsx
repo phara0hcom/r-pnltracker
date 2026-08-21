@@ -5,6 +5,10 @@
  * `aria-modal` — the parts of a modal that are easy to get subtly wrong by hand.
  * Mood and motivation are 1–5 radio groups rather than sliders: five discrete
  * values are faster to hit and are announced properly by screen readers.
+ *
+ * Saving closes the dialog immediately and the day square updates from the
+ * optimistic cache write, so there is no pending state to show here — the round
+ * trip stores text the user has already read back on the calendar.
  */
 import * as Dialog from '@radix-ui/react-dialog'
 import { useState } from 'react'
@@ -29,13 +33,11 @@ const MOTIVATION_LABELS = ['', 'Drained', 'Low', 'Steady', 'Driven', 'Sharp']
 
 export function NoteDialog({
   day,
-  saving,
   onClose,
   onSave,
   onDelete,
 }: {
   day: CalendarDay
-  saving: boolean
   onClose: () => void
   onSave: (note: NotePayload) => void
   onDelete: (date: string) => void
@@ -197,7 +199,6 @@ export function NoteDialog({
                   onConfirm={() => {
                     onDelete(day.date)
                   }}
-                  disabled={saving}
                 >
                   Delete
                 </ConfirmButton>
@@ -207,9 +208,8 @@ export function NoteDialog({
                 type="button"
                 className={cx(styles.button, styles.primary)}
                 onClick={submit}
-                disabled={saving}
               >
-                {saving ? 'Saving…' : 'Save entry'}
+                Save entry
               </button>
             </div>
           </div>
