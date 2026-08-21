@@ -9,10 +9,13 @@
  * Editing is explicit: an Edit button puts one row into edit mode, its cells
  * become inputs, and Save runs the same zod validation and `updateTrade` path
  * that hand-entered trades use. One validated code path, not two.
+ *
+ * The text search is the one filter that cannot be driven straight off the URL —
+ * see `useDebouncedSymbol`.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { z } from 'zod'
 import styles from './trades.module.scss'
 import { NewTradeDialog } from '~/components/trades/NewTradeDialog'
@@ -62,6 +65,87 @@ const searchSchema = z.object({
 export type TradeSearch = z.infer<typeof searchSchema>
 type PerPage = NonNullable<TradeSearch['perPage']>
 
+/** Long enough to type a word through, short enough that the URL feels current. */
+const SEARCH_DEBOUNCE_MS = 250
+
+/**
+ * The text search, held locally and written through to the URL after a pause.
+ *
+ * Every other filter can be bound straight to its search param, but this one
+ * cannot: `navigate` commits inside a React transition, so between a keystroke
+ * and the commit the input re-renders with the value from *before* that
+ * keystroke and the character is lost. Typing faster than the round trip meant
+ * losing most of a word — the field read as disabled.
+ *
+ * So the box owns its text and the URL follows. `pushed` is what this hook last
+ * sent there and `seenUrl` is the last value it reacted to; together they tell a
+ * URL change this hook caused (ignore it — the box is already ahead) from one it
+ * did not (Clear filters, the back button, a shared link — adopt it).
+ */
+function useDebouncedSymbol(urlValue: string, commit: (next: string) => void) {
+  const [text, setText] = useState(urlValue)
+  const pushed = useRef(urlValue)
+  const seenUrl = useRef(urlValue)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Held in a ref so the debounce below depends on the text alone. `commit` is a
+  // fresh closure every render, and as a dependency it would restart the timer
+  // on each one — a pause that never elapses.
+  const latestCommit = useRef(commit)
+  useEffect(() => {
+    latestCommit.current = commit
+  })
+
+  useEffect(() => {
+    if (urlValue === seenUrl.current) return
+    seenUrl.current = urlValue
+    if (urlValue === pushed.current) return
+    // `pushed` moves too: the box now matches the URL, so there is nothing left
+    // to write. Without this the debounce below sees text it has not sent and
+    // commits the value straight back — a navigation that does nothing except
+    // reset the page number.
+    pushed.current = urlValue
+    setText(urlValue)
+  }, [urlValue])
+
+  useEffect(() => {
+    if (text === pushed.current) return
+    timer.current = setTimeout(() => {
+      timer.current = null
+      pushed.current = text
+      latestCommit.current(text)
+    }, SEARCH_DEBOUNCE_MS)
+    return () => {
+      if (timer.current) clearTimeout(timer.current)
+    }
+  }, [text])
+
+  return {
+    text,
+    onType: setText,
+    /** Enter: apply now rather than waiting out the pause. */
+    flush: () => {
+      if (timer.current) clearTimeout(timer.current)
+      timer.current = null
+      if (text === pushed.current) return
+      pushed.current = text
+      latestCommit.current(text)
+    },
+    /**
+     * Empty the box and drop any pending write, for callers that clear the
+     * param themselves — otherwise the in-flight keystrokes land afterwards and
+     * put the filter straight back.
+     */
+    clear: () => {
+      if (timer.current) clearTimeout(timer.current)
+      timer.current = null
+      pushed.current = ''
+      setText('')
+    },
+  }
+}
+
+type SymbolField = ReturnType<typeof useDebouncedSymbol>
+
 export const Route = createFileRoute('/_authed/trades')({
   validateSearch: searchSchema,
   component: TradesScreen,
@@ -85,8 +169,23 @@ function TradesScreen() {
     void queryClient.invalidateQueries()
   }
 
+  const setSearch = (patch: Partial<TradeSearch>) => {
+    // Any change to filters or sorting invalidates the current page number.
+    const resetsPage = !('page' in patch)
+    void navigate({
+      search: (prev) => ({ ...prev, ...patch, ...(resetsPage ? { page: 1 } : {}) }),
+      replace: true,
+    })
+  }
+
+  const symbol = useDebouncedSymbol(search.symbol ?? '', (next) => {
+    setSearch({ symbol: next || undefined })
+  })
+
+  // Filtered off the live text, not the debounced param: the rows are already in
+  // memory, so there is nothing to wait for and results track the typing.
   const filtered = useMemo(() => {
-    const searchText = search.symbol?.trim().toLowerCase()
+    const searchText = symbol.text.trim().toLowerCase()
     const list = rows.filter((row) => {
       if (search.from && row.tradeDate < search.from) return false
       if (search.to && row.tradeDate > search.to) return false
@@ -133,16 +232,7 @@ function TradesScreen() {
       // coerce rather than assume.
       return String(leftValue).localeCompare(String(rightValue)) * direction
     })
-  }, [rows, search])
-
-  const setSearch = (patch: Partial<TradeSearch>) => {
-    // Any change to filters or sorting invalidates the current page number.
-    const resetsPage = !('page' in patch)
-    void navigate({
-      search: (prev) => ({ ...prev, ...patch, ...(resetsPage ? { page: 1 } : {}) }),
-      replace: true,
-    })
-  }
+  }, [rows, search, symbol.text])
 
   const perPage = search.perPage ?? 50
   const pageCount = Math.max(1, Math.ceil(filtered.length / perPage))
@@ -199,7 +289,7 @@ function TradesScreen() {
 
       <NewTradeDialog open={adding} onOpenChange={setAdding} onCreated={invalidate} />
 
-      <Filters search={search} onChange={setSearch} />
+      <Filters search={search} symbol={symbol} onChange={setSearch} />
 
       {isPending ? (
         <p className={styles.empty}>Loading trades…</p>
@@ -246,18 +336,22 @@ function TradesScreen() {
 
 function Filters({
   search,
+  symbol,
   onChange,
 }: {
   search: TradeSearch
+  symbol: SymbolField
   onChange: (patch: Partial<TradeSearch>) => void
 }) {
+  // The live text, not `search.symbol`: Clear filters has to appear as soon as
+  // there is something to clear, not a quarter of a second later.
   const active =
     search.from ??
     search.to ??
     search.account ??
     search.assetClass ??
     search.side ??
-    search.symbol ??
+    (symbol.text || undefined) ??
     search.outcome
 
   return (
@@ -268,9 +362,22 @@ function Filters({
           type="search"
           className={styles.input}
           placeholder="Symbol or name"
-          value={search.symbol ?? ''}
+          value={symbol.text}
           onChange={(event) => {
-            onChange({ symbol: event.target.value || undefined })
+            symbol.onType(event.target.value)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              // Nothing to submit — this only skips the remaining pause.
+              event.preventDefault()
+              symbol.flush()
+            }
+            // Guarded, so Escape on an empty box is not a navigation that
+            // quietly sends you back to page 1.
+            if (event.key === 'Escape' && (symbol.text || search.symbol != null)) {
+              symbol.clear()
+              onChange({ symbol: undefined })
+            }
           }}
         />
       </label>
@@ -369,6 +476,7 @@ function Filters({
           type="button"
           className={styles.clear}
           onClick={() => {
+            symbol.clear()
             onChange({
               from: undefined,
               to: undefined,

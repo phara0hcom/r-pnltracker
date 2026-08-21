@@ -83,7 +83,29 @@ export function RouteProgress({ loading }: { loading: boolean }) {
  * Both flags, not just `isLoading`: that covers the loader phase, while
  * `isTransitioning` covers React committing the new tree. Watching only the
  * first lets the indicator disappear while the screen is still the old one.
+ *
+ * Two things count as busy: opening a different screen, and changing `scope`.
+ * A pathname check alone would miss the second — the sidebar's All/NISA/特定
+ * switch navigates to the *same* path, and Dashboard, Positions, Stats and
+ * Dividends all declare `scope` in `loaderDeps`, so it re-runs the engine on the
+ * server and does need the indicator.
+ *
+ * `scope` is named explicitly because it is the only search param in the app
+ * that drives a loader. Every other same-path param — Trades' filters, sorting
+ * and paging — is applied to rows already in memory, so there is nothing to wait
+ * for, yet they tripped the raw router flags all the same: every keystroke in
+ * the Trades search box faded the page out from under the field being typed
+ * into. Anything added to a `loaderDeps` later has to be added here too.
  */
 export function useRouteLoading(): boolean {
-  return useRouterState({ select: (s) => s.isLoading || s.isTransitioning })
+  return useRouterState({
+    select: (s) => {
+      if (!s.isLoading && !s.isTransitioning) return false
+      const from = s.resolvedLocation
+      // Nothing resolved yet means the first load, which is a real one.
+      if (!from) return true
+      if (from.pathname !== s.location.pathname) return true
+      return from.search.scope !== s.location.search.scope
+    },
+  })
 }
