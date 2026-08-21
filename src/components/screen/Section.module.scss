@@ -1,0 +1,18 @@
+.section {
+  margin-bottom: var(--space-6);
+}
+
+.head {
+  margin-bottom: var(--space-3);
+}
+
+.title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.desc {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

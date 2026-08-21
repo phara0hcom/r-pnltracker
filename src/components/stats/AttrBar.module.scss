@@ -1,0 +1,40 @@
+@use '../../styles/mixins' as m;
+
+.row {
+  display: grid;
+  grid-template-columns: 10rem 1fr 8rem;
+  gap: var(--space-3);
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.label {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.track {
+  height: 10px;
+  overflow: hidden;
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-full);
+}
+
+.fillPos {
+  height: 100%;
+  background-color: var(--color-profit);
+  border-radius: var(--radius-full);
+}
+
+.fillNeg {
+  height: 100%;
+  background-color: var(--color-loss);
+  border-radius: var(--radius-full);
+}
+
+.value {
+  font-weight: var(--weight-medium);
+  text-align: right;
+
+  @include m.tabular-nums;
+}

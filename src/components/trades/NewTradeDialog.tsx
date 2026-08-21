@@ -8,6 +8,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
+import { FormField } from './FormField'
 import styles from './NewTradeDialog.module.scss'
 import { cx } from '~/lib/cx'
 import { todayLocal } from '~/lib/localDate'
@@ -135,7 +136,7 @@ export function NewTradeDialog({
 
           <div className={styles.body}>
             <div className={styles.row}>
-              <Field label="Asset class" error={errors.assetClass}>
+              <FormField label="Asset class" error={errors.assetClass}>
                 <select
                   className={styles.input}
                   value={form.assetClass}
@@ -147,9 +148,9 @@ export function NewTradeDialog({
                   <option value="US_EQUITY">US equity</option>
                   <option value="FUND">Fund</option>
                 </select>
-              </Field>
+              </FormField>
 
-              <Field label="Account" error={errors.accountType}>
+              <FormField label="Account" error={errors.accountType}>
                 <select
                   className={styles.input}
                   value={form.accountType}
@@ -162,9 +163,9 @@ export function NewTradeDialog({
                   <option value="NISA_TSUMITATE">NISA つみたて投資枠</option>
                   <option value="NISA_OLD">旧NISA</option>
                 </select>
-              </Field>
+              </FormField>
 
-              <Field label="Side" error={errors.side}>
+              <FormField label="Side" error={errors.side}>
                 <select
                   className={styles.input}
                   value={form.side}
@@ -177,11 +178,11 @@ export function NewTradeDialog({
                   {isFund ? <option value="REINVEST">Reinvest</option> : null}
                   {isFund ? <option value="REDEEM">Redeem</option> : null}
                 </select>
-              </Field>
+              </FormField>
             </div>
 
             <div className={styles.row}>
-              <Field
+              <FormField
                 label={isFund ? 'Fund name' : 'Symbol'}
                 error={errors.symbol}
                 hint={isFund ? 'Funds are identified by name' : 'e.g. 8411 or AAPL'}
@@ -193,8 +194,8 @@ export function NewTradeDialog({
                     set('symbol')(event.target.value)
                   }}
                 />
-              </Field>
-              <Field label="Display name" error={errors.name} hint="Optional">
+              </FormField>
+              <FormField label="Display name" error={errors.name} hint="Optional">
                 <input
                   className={cx(styles.input, styles.grow)}
                   value={form.name}
@@ -202,11 +203,11 @@ export function NewTradeDialog({
                     set('name')(event.target.value)
                   }}
                 />
-              </Field>
+              </FormField>
             </div>
 
             <div className={styles.row}>
-              <Field label="Trade date" error={errors.tradeDate}>
+              <FormField label="Trade date" error={errors.tradeDate}>
                 <input
                   type="date"
                   className={styles.input}
@@ -215,8 +216,8 @@ export function NewTradeDialog({
                     set('tradeDate')(event.target.value)
                   }}
                 />
-              </Field>
-              <Field label="Settle date" error={errors.settleDate} hint="Defaults to T+2">
+              </FormField>
+              <FormField label="Settle date" error={errors.settleDate} hint="Defaults to T+2">
                 <input
                   type="date"
                   className={styles.input}
@@ -225,11 +226,11 @@ export function NewTradeDialog({
                     set('settleDate')(event.target.value)
                   }}
                 />
-              </Field>
+              </FormField>
             </div>
 
             <div className={styles.row}>
-              <Field label="Quantity" error={errors.quantity}>
+              <FormField label="Quantity" error={errors.quantity}>
                 <input
                   inputMode="decimal"
                   className={cx(styles.input, styles.num)}
@@ -238,8 +239,8 @@ export function NewTradeDialog({
                     set('quantity')(event.target.value)
                   }}
                 />
-              </Field>
-              <Field
+              </FormField>
+              <FormField
                 label={isFund ? 'Price (per 10,000 口)' : isUsd ? 'Price (USD)' : 'Price (¥)'}
                 error={errors.unitPrice}
                 hint={isFund ? '基準価額, as Rakuten shows it' : undefined}
@@ -252,9 +253,9 @@ export function NewTradeDialog({
                     set('unitPrice')(event.target.value)
                   }}
                 />
-              </Field>
+              </FormField>
               {isUsd ? (
-                <Field label="USD/JPY" error={errors.fxRate} hint="Required for US trades">
+                <FormField label="USD/JPY" error={errors.fxRate} hint="Required for US trades">
                   <input
                     inputMode="decimal"
                     className={cx(styles.input, styles.num)}
@@ -263,12 +264,12 @@ export function NewTradeDialog({
                       set('fxRate')(event.target.value)
                     }}
                   />
-                </Field>
+                </FormField>
               ) : null}
             </div>
 
             <div className={styles.row}>
-              <Field label="Fee" error={errors.fee}>
+              <FormField label="Fee" error={errors.fee}>
                 <input
                   inputMode="decimal"
                   className={cx(styles.input, styles.num)}
@@ -277,8 +278,8 @@ export function NewTradeDialog({
                     set('fee')(event.target.value)
                   }}
                 />
-              </Field>
-              <Field label="Fee tax" error={errors.feeTax} hint="Consumption tax on commission">
+              </FormField>
+              <FormField label="Fee tax" error={errors.feeTax} hint="Consumption tax on commission">
                 <input
                   inputMode="decimal"
                   className={cx(styles.input, styles.num)}
@@ -287,10 +288,10 @@ export function NewTradeDialog({
                     set('feeTax')(event.target.value)
                   }}
                 />
-              </Field>
+              </FormField>
             </div>
 
-            <Field label="Memo" error={errors.memo}>
+            <FormField label="Memo" error={errors.memo}>
               <input
                 className={cx(styles.input, styles.grow)}
                 value={form.memo}
@@ -299,7 +300,7 @@ export function NewTradeDialog({
                 }}
                 placeholder="Rationale, thesis, mistake…"
               />
-            </Field>
+            </FormField>
 
             {errors._ ? (
               <p className={styles.formError} role="alert">
@@ -324,31 +325,5 @@ export function NewTradeDialog({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
-  )
-}
-
-function Field({
-  label,
-  error,
-  hint,
-  children,
-}: {
-  label: string
-  error?: string
-  hint?: string
-  children: React.ReactNode
-}) {
-  return (
-    <label className={styles.field}>
-      <span className={styles.label}>{label}</span>
-      {children}
-      {error ? (
-        <span className={styles.error} role="alert">
-          {error}
-        </span>
-      ) : hint ? (
-        <span className={styles.hint}>{hint}</span>
-      ) : null}
-    </label>
   )
 }

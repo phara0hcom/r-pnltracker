@@ -1,10 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
 import styles from './stats.module.scss'
 import { ACCOUNT_LABEL, ASSET_LABEL, days, pct, ratio, tone, yen, yenSigned } from '~/components/format'
-import { Empty, PageHeader, Section, Stat, StatGrid, Table } from '~/components/Screen'
+import { Empty, PageHeader, Section, Stat, StatGrid, Table } from '~/components/screen'
+import { AttrBar } from '~/components/stats/AttrBar'
+import { CorrelationTable } from '~/components/stats/CorrelationTable'
 import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
 import { accountScopeSchema } from '~/lib/accountScope'
-import { cx } from '~/lib/cx'
 import { getStats } from '~/server/screens'
 
 export const Route = createFileRoute('/_authed/stats')({
@@ -175,66 +176,5 @@ function Stats() {
         </Table>
       </Section>
     </>
-  )
-}
-
-/** Signed bar — width is share of the largest component, so sign stays readable. */
-function AttrBar({ label, value, total }: { label: string; value: string; total: string }) {
-  const v = Number(value)
-  const scale = Math.max(Math.abs(Number(total)), Math.abs(v)) || 1
-  const width = (Math.abs(v) / scale) * 100
-  return (
-    <div className={styles.attrRow}>
-      <span className={styles.attrLabel}>{label}</span>
-      <div className={styles.attrTrack}>
-        <div
-          className={v >= 0 ? styles.attrFillPos : styles.attrFillNeg}
-          style={{ width: `${String(Math.min(width, 100))}%` }}
-        />
-      </div>
-      <span
-        className={cx(
-          styles.attrValue,
-          tone(value) === 'profit' && styles.profit,
-          tone(value) === 'loss' && styles.loss,
-        )}
-      >
-        {yenSigned(value)}
-      </span>
-    </div>
-  )
-}
-
-function CorrelationTable({
-  caption,
-  rows,
-}: {
-  caption: string
-  rows: { score: number; days: number; totalPnl: string; avgPnl: string }[]
-}) {
-  return (
-    <div>
-      <h3 className={styles.corrTitle}>{caption}</h3>
-      <Table>
-        <thead>
-          <tr>
-            <th scope="col">Score</th>
-            <th scope="col" data-numeric>Days</th>
-            <th scope="col" data-numeric>Avg P&L</th>
-            <th scope="col" data-numeric>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.score}>
-              <td>{'★'.repeat(row.score)}<span className={styles.dim}>{'☆'.repeat(5 - row.score)}</span></td>
-              <td data-numeric>{row.days}</td>
-              <td data-numeric className={tone(row.avgPnl)}>{yenSigned(row.avgPnl)}</td>
-              <td data-numeric className={tone(row.totalPnl)}>{yenSigned(row.totalPnl)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-    </div>
   )
 }

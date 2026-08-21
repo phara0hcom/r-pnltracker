@@ -58,7 +58,11 @@ async function engineFor(userId: string, account: AccountFilter = 'ALL') {
   // `unfilteredTrades` is returned for the rare lookup that must see across the
   // switch — matching a 再投資 to its dividend, where Rakuten's two rows can sit
   // in different accounts. Everything else wants `trades`.
-  return { trades: list, unfilteredTrades: everyTrade, engine: runEngine(list) }
+  //
+  // `records` carries the row ids, memos and per-trade journals alongside. The
+  // calendar needs those and used to re-read them with a second `listTrades`,
+  // which fetched and re-mapped the whole history twice per month viewed.
+  return { records, trades: list, unfilteredTrades: everyTrade, engine: runEngine(list) }
 }
 
 /** This user's hand-entered prices, keyed by instrument id. */
@@ -749,7 +753,7 @@ export const getCalendar = createServerFn({ method: 'GET' })
     const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
     const last = `${String(year)}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
-    const { engine } = await engineFor(context.userId, data.account)
+    const { engine, records } = await engineFor(context.userId, data.account)
     const daily = dailyPnl(engine.realized)
 
     // Realized events keyed the same way the engine keys them, so a close can
@@ -775,7 +779,6 @@ export const getCalendar = createServerFn({ method: 'GET' })
       )
     }
 
-    const records = await listTrades(context.userId)
     const byDate = new Map<string, CalendarTrade[]>()
     for (const record of records) {
       const trade = record.trade

@@ -3,12 +3,12 @@ import { useMemo } from 'react'
 import { z } from 'zod'
 import styles from './dashboard.module.scss'
 import { MonthlyPnlChart } from '~/components/charts/MonthlyPnlChart'
+import { PeriodCard } from '~/components/dashboard/PeriodCard'
 import { pct, ratio, tone, yen, yenSigned } from '~/components/format'
-import { PageHeader, Section, Stat, StatGrid } from '~/components/Screen'
+import { PageHeader, Section, Stat, StatGrid } from '~/components/screen'
 import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
 import { accountScopeSchema } from '~/lib/accountScope'
-import { cx } from '~/lib/cx'
-import { getDashboard, type PeriodSummary } from '~/server/portfolio'
+import { getDashboard } from '~/server/portfolio'
 
 /** How many months the chart shows at once. */
 const WINDOW = 12
@@ -156,85 +156,5 @@ function Dashboard() {
         </p>
       ) : null}
     </>
-  )
-}
-
-/**
- * One period's numbers.
- *
- * Wins and losses are shown separately rather than only the net: a flat month
- * from no trading and a flat month from ¥500k of gains cancelling ¥500k of
- * losses are very different months, and the net alone hides that.
- */
-function PeriodCard({ period }: { period: PeriodSummary }) {
-  const net = Number(period.realizedJpy)
-  const quiet = period.tradeCount === 0
-
-  return (
-    <div className={styles.period}>
-      <div className={styles.periodHead}>
-        <h3 className={styles.periodTitle}>{period.label}</h3>
-        <span className={styles.periodCount}>
-          {period.tradeCount} close{period.tradeCount === 1 ? '' : 's'}
-        </span>
-      </div>
-
-      {quiet ? (
-        <p className={styles.periodEmpty}>No closed trades in this period.</p>
-      ) : (
-        <>
-          <div className={styles.periodNetRow}>
-            <span
-              className={cx(
-                styles.periodNet,
-                net > 0 ? styles.profit : net < 0 ? styles.loss : undefined,
-              )}
-            >
-              {yenSigned(net)}
-            </span>
-            {period.returnPct != null ? (
-              <span
-                className={cx(
-                  styles.periodPct,
-                  period.returnPct > 0
-                    ? styles.profit
-                    : period.returnPct < 0
-                      ? styles.loss
-                      : undefined,
-                )}
-                title={`on ${yen(period.costJpy)} of closed cost basis`}
-              >
-                {period.returnPct >= 0 ? '+' : ''}
-                {(period.returnPct * 100).toFixed(1)}%
-              </span>
-            ) : null}
-          </div>
-          <dl className={styles.periodRows}>
-            <div className={styles.periodRow}>
-              <dt>Gains</dt>
-              <dd className={styles.profit}>{yen(period.grossProfitJpy)}</dd>
-            </div>
-            <div className={styles.periodRow}>
-              <dt>Losses</dt>
-              <dd className={styles.loss}>{yen(period.grossLossJpy)}</dd>
-            </div>
-            <div className={styles.periodRow}>
-              <dt>Closed cost</dt>
-              <dd className={styles.periodDim}>{yen(period.costJpy)}</dd>
-            </div>
-            <div className={styles.periodRow}>
-              <dt>Win rate</dt>
-              <dd>
-                {pct(period.winRate, 0)}
-                <span className={styles.periodDim}>
-                  {' '}
-                  ({period.winCount}W / {period.lossCount}L)
-                </span>
-              </dd>
-            </div>
-          </dl>
-        </>
-      )}
-    </div>
   )
 }

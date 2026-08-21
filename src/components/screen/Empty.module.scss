@@ -1,0 +1,10 @@
+@use '../../styles/mixins' as m;
+
+.empty {
+  padding: var(--space-7);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+
+  @include m.card;
+}

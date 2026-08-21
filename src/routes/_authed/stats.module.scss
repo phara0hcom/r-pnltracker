@@ -6,45 +6,6 @@
   @include m.card;
 }
 
-.attrRow {
-  display: grid;
-  grid-template-columns: 10rem 1fr 8rem;
-  gap: var(--space-3);
-  align-items: center;
-  margin-bottom: var(--space-3);
-}
-
-.attrLabel {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-}
-
-.attrTrack {
-  height: 10px;
-  overflow: hidden;
-  background-color: var(--color-surface-raised);
-  border-radius: var(--radius-full);
-}
-
-.attrFillPos {
-  height: 100%;
-  background-color: var(--color-profit);
-  border-radius: var(--radius-full);
-}
-
-.attrFillNeg {
-  height: 100%;
-  background-color: var(--color-loss);
-  border-radius: var(--radius-full);
-}
-
-.attrValue {
-  font-weight: var(--weight-medium);
-  text-align: right;
-
-  @include m.tabular-nums;
-}
-
 .attrTotal {
   display: flex;
   justify-content: space-between;
@@ -64,30 +25,12 @@
   gap: var(--space-4);
 }
 
-.corrTitle {
-  margin-bottom: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-}
-
 .subName {
   max-width: 26ch;
   font-size: var(--text-xs);
   color: var(--color-text-subtle);
 
   @include m.truncate;
-}
-
-.dim {
-  color: var(--color-text-subtle);
-}
-
-.profit {
-  color: var(--color-profit);
-}
-
-.loss {
-  color: var(--color-loss);
 }
 
 .note {

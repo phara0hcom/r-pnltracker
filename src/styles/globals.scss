@@ -124,6 +124,21 @@ table {
 }
 
 /**
+ * P&L polarity, as a global utility rather than a per-module class.
+ *
+ * `tone()` in `components/format.ts` returns these names directly, and a CSS
+ * module would hash them into something that name could never match — the
+ * colour silently did not apply anywhere `className={tone(x)}` was used.
+ */
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+/**
  * Skip link — first tabbable element on the page, visible only once focused.
  * Lets keyboard users bypass the sidebar on every route.
  */

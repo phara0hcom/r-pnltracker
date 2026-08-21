@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import styles from './nisa.module.scss'
 import { pct, yen } from '~/components/format'
-import { Meter, PageHeader, Section, Stat, StatGrid, Table } from '~/components/Screen'
+import { Meter, PageHeader, Section, Stat, StatGrid, Table } from '~/components/screen'
 import { getNisa } from '~/server/screens'
 
 export const Route = createFileRoute('/_authed/nisa')({

@@ -1,0 +1,77 @@
+@use '../../styles/mixins' as m;
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-3);
+
+  @include m.card;
+}
+
+.pageInfo {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.perPage {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-right: auto;
+  margin-left: var(--space-4);
+}
+
+.perPageLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.perPageSelect {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.focus-ring;
+}
+
+.pageButtons {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.pageButton {
+  min-width: 2rem;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.35;
+
+    &:hover {
+      background-color: transparent;
+    }
+  }
+}
+
+.pageCurrent {
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+
+  @include m.tabular-nums;
+}

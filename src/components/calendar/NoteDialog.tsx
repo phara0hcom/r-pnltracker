@@ -13,6 +13,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useState } from 'react'
 import styles from './NoteDialog.module.scss'
+import { ScoreGroup } from './ScoreGroup'
 import { TradeJournalRow } from './TradeJournalRow'
 import { tone, yenSigned } from '~/components/format'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
@@ -216,54 +217,5 @@ export function NoteDialog({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
-  )
-}
-
-/**
- * 1–5 selector as a radio group.
- *
- * Clicking the selected value clears it, so "not recorded" stays reachable —
- * otherwise a mis-click could never be undone.
- */
-function ScoreGroup({
-  legend,
-  labels,
-  value,
-  onChange,
-  name,
-}: {
-  legend: string
-  labels: string[]
-  value: number | null
-  onChange: (v: number | null) => void
-  name: string
-}) {
-  return (
-    <fieldset className={styles.fieldset}>
-      <legend className={styles.label}>
-        {legend}
-        {value ? <span className={styles.scoreLabel}>{labels[value]}</span> : null}
-      </legend>
-      <div className={styles.scores}>
-        {[1, 2, 3, 4, 5].map((score) => (
-          <label key={score} className={cx(styles.score, value === score && styles.scoreActive)}>
-            <input
-              type="radio"
-              name={name}
-              className="visually-hidden"
-              checked={value === score}
-              onChange={() => {
-                onChange(score)
-              }}
-              onClick={() => {
-                if (value === score) onChange(null)
-              }}
-            />
-            <span aria-hidden="true">{score}</span>
-            <span className="visually-hidden">{labels[score]}</span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
   )
 }

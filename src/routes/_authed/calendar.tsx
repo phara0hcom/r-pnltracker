@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { z } from 'zod'
 import styles from './calendar.module.scss'
 import { NoteDialog, type NotePayload } from '~/components/calendar/NoteDialog'
 import { tone, yenSigned } from '~/components/format'
-import { PageHeader } from '~/components/Screen'
+import { PageHeader } from '~/components/screen'
 import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
 import { accountScopeSchema } from '~/lib/accountScope'
 import { withNote } from '~/lib/calendarPatch'
@@ -110,15 +110,31 @@ function Calendar() {
 
   // Drawn from the URL month, not from the response, so the squares are on
   // screen before the engine has finished replaying the history behind them.
-  const { dates, leadingBlanks } = monthGrid(month)
-  const byDate = new Map((dayList ?? []).map((day) => [day.date, day]))
+  const { dates, leadingBlanks } = useMemo(() => monthGrid(month), [month])
 
-  const traded = (dayList ?? []).filter((day) => day.tradeCount > 0)
-  const monthPnl = (dayList ?? []).reduce((a, d) => a + (d.realizedJpy ? Number(d.realizedJpy) : 0), 0)
-  const journalled = (dayList ?? []).filter((day) => day.note != null).length
+  // One pass for the lookup map and all four summary figures. Typing in the
+  // journal dialog re-renders this screen on every keystroke, and five separate
+  // walks of the month happened on each of them.
+  const { byDate, tradedDays, monthPnl, journalled, peak } = useMemo(() => {
+    const days = dayList ?? []
+    const map = new Map<string, CalendarDay>()
+    let traded = 0
+    let pnl = 0
+    let noted = 0
+    // Scale tint by the largest absolute day so a quiet month still shows contrast.
+    let largest = 1
 
-  // Scale tint by the largest absolute day so a quiet month still shows contrast.
-  const peak = Math.max(1, ...(dayList ?? []).map((day) => Math.abs(Number(day.realizedJpy ?? 0))))
+    for (const day of days) {
+      map.set(day.date, day)
+      if (day.tradeCount > 0) traded += 1
+      if (day.note != null) noted += 1
+      const realized = day.realizedJpy ? Number(day.realizedJpy) : 0
+      pnl += realized
+      largest = Math.max(largest, Math.abs(realized))
+    }
+
+    return { byDate: map, tradedDays: traded, monthPnl: pnl, journalled: noted, peak: largest }
+  }, [dayList])
 
   const failed = save.isError || del.isError
 
@@ -129,7 +145,7 @@ function Calendar() {
         meta={
           dayList ? (
             <>
-              {traded.length} trading day{traded.length === 1 ? '' : 's'} ·{' '}
+              {tradedDays} trading day{tradedDays === 1 ? '' : 's'} ·{' '}
               <span className={tone(monthPnl) === 'profit' ? styles.profit : tone(monthPnl) === 'loss' ? styles.loss : ''}>
                 {yenSigned(monthPnl)}
               </span>{' '}

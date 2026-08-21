@@ -6,7 +6,8 @@ import {
   Outlet,
   Scripts,
 } from '@tanstack/react-router'
-import fallback from './__root.module.scss'
+import { ErrorPage } from '~/components/fallback/ErrorPage'
+import { NotFound } from '~/components/fallback/NotFound'
 import { VercelInsights } from '~/components/VercelInsights'
 import appCss from '~/styles/globals.scss?url'
 
@@ -29,33 +30,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   notFoundComponent: NotFound,
   errorComponent: ErrorPage,
 })
-
-function Shell({ title, message }: { title: string; message: string }) {
-  return (
-    <div className={fallback.page}>
-      <h1 className={fallback.title}>{title}</h1>
-      <p className={fallback.message}>{message}</p>
-      <a href="/dashboard" className={fallback.link}>
-        Back to dashboard
-      </a>
-    </div>
-  )
-}
-
-function NotFound() {
-  return <Shell title="Not found" message="That page does not exist." />
-}
-
-function ErrorPage({ error }: { error: Error }) {
-  // The message is shown because this is a single-user personal app — there is
-  // no other user whose data could leak through an error string.
-  return (
-    <Shell
-      title="Something went wrong"
-      message={error.message || 'An unexpected error occurred.'}
-    />
-  )
-}
 
 function RootDocument() {
   return (

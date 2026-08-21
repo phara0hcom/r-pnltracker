@@ -12,6 +12,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import styles from './TradeJournalRow.module.scss'
 import { ACCOUNT_LABEL, qty, tone, yen, yenSigned } from '~/components/format'
+import { CloseIcon } from '~/components/icons/CloseIcon'
+import { PenIcon } from '~/components/icons/PenIcon'
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { withTradeJournal } from '~/lib/calendarPatch'
@@ -19,31 +21,9 @@ import { cx } from '~/lib/cx'
 import { saveTradeJournal } from '~/server/notes'
 import type { CalendarDay, CalendarTrade } from '~/server/screens'
 
-/** Simple pen. `currentColor` so it inherits the button's state colour. */
-function PenIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
-      <path
-        d="M11.5 1.5a1.414 1.414 0 0 1 2 2L5 12l-3 1 1-3 8.5-8.5Z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
 /** Native-currency price. Fund figures already arrive per 10,000 口. */
 const price = (amount: string, currency: string) =>
   `${currency === 'USD' ? '$' : '¥'}${Number(amount).toLocaleString('en-US', { maximumFractionDigits: 4 })}`
-
-function CloseIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
-      <path d="M3.5 3.5l9 9m0-9l-9 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  )
-}
 
 export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
   const queryClient = useQueryClient()
