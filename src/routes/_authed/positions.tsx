@@ -18,27 +18,46 @@ import { POSITION_SORTABLE, positionSearchSchema, type PositionSortKey } from '~
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
 import { getPositions, type PositionRow } from '~/server/screens'
 
+interface PositionColumn extends SortColumn<PositionRow> {
+  label: string
+  numeric?: boolean
+  /** The cell's content. */
+  cell: (row: PositionRow) => React.ReactNode
+  /** Profit/loss tint, for the columns that carry one. */
+  tone?: (row: PositionRow) => string | undefined
+}
+
 /**
- * Label, alignment and sort value for each column, keyed by its sort key.
+ * Label, alignment, sort value and cell for each column, keyed by its sort key.
  *
- * One definition drives the header row, the ordering and the caption, so a
- * column cannot end up labelled one thing and sorted by another. Render order
- * comes from `POSITION_SORTABLE`.
+ * One definition drives the header row, the body, the ordering and the caption,
+ * all rendered in `POSITION_SORTABLE` order — so a column cannot end up
+ * labelled one thing and sorted by another, and reordering the list moves the
+ * header and its figures together rather than sliding them out of step.
  *
  * Every money field arrives as an exact decimal string, hence `numeric` on all
  * of them: compared as text, "9" would sort above "10".
  */
-const COLUMNS: Record<PositionSortKey, SortColumn<PositionRow> & { label: string; numeric?: boolean }> = {
-  symbol: { label: 'Instrument', value: (row) => row.symbol },
+const COLUMNS: Record<PositionSortKey, PositionColumn> = {
+  symbol: {
+    label: 'Instrument',
+    value: (row) => row.symbol,
+    cell: (row) => <InstrumentLink symbol={row.symbol} name={row.name} assetClass={row.assetClass} />,
+  },
   accountType: {
     label: 'Account',
     // Sort by the label shown, not the raw enum, so the order matches the
     // column as read — 特定 and NISA 成長 do not collate like SPECIFIC and
     // NISA_GROWTH.
     value: (row) => ACCOUNT_LABEL[row.accountType] ?? row.accountType,
+    cell: (row) => ACCOUNT_LABEL[row.accountType] ?? row.accountType,
   },
-  assetClass: { label: 'Class', value: (row) => ASSET_LABEL[row.assetClass] ?? row.assetClass },
-  quantity: { label: 'Qty', numeric: true, value: (row) => row.quantity },
+  assetClass: {
+    label: 'Class',
+    value: (row) => ASSET_LABEL[row.assetClass] ?? row.assetClass,
+    cell: (row) => ASSET_LABEL[row.assetClass] ?? row.assetClass,
+  },
+  quantity: { label: 'Qty', numeric: true, value: (row) => row.quantity, cell: (row) => qty(row.quantity) },
   /*
    * Avg cost and Price render the native figure — $150 sits in the same column
    * as ¥3,000 — and sort on exactly that. The alternative, sorting a USD row by
@@ -51,12 +70,48 @@ const COLUMNS: Record<PositionSortKey, SortColumn<PositionRow> & { label: string
     label: 'Avg cost',
     numeric: true,
     value: (row) => (row.currency === 'USD' ? row.avgPriceNative : row.avgCostPerUnit),
+    cell: (row) =>
+      row.currency === 'USD' ? `$${Number(row.avgPriceNative).toFixed(2)}` : yen(row.avgCostPerUnit),
   },
-  costBasisJpy: { label: 'Cost basis', numeric: true, value: (row) => row.costBasisJpy },
-  price: { label: 'Price', numeric: true, value: (row) => row.currentPrice },
-  marketValueJpy: { label: 'Value', numeric: true, value: (row) => row.marketValueJpy },
-  unrealizedJpy: { label: 'Unrealized', numeric: true, value: (row) => row.unrealizedJpy },
-  unrealizedPct: { label: '%', numeric: true, value: (row) => row.unrealizedPct },
+  costBasisJpy: {
+    label: 'Cost basis',
+    numeric: true,
+    value: (row) => row.costBasisJpy,
+    cell: (row) => yen(row.costBasisJpy),
+  },
+  price: {
+    label: 'Price',
+    numeric: true,
+    value: (row) => row.currentPrice,
+    cell: (row) =>
+      row.currentPrice == null
+        ? '—'
+        : row.currency === 'USD'
+          ? `$${Number(row.currentPrice).toFixed(2)}`
+          : yen(row.currentPrice),
+  },
+  marketValueJpy: {
+    label: 'Value',
+    numeric: true,
+    value: (row) => row.marketValueJpy,
+    cell: (row) => yen(row.marketValueJpy),
+  },
+  unrealizedJpy: {
+    label: 'Unrealized',
+    numeric: true,
+    value: (row) => row.unrealizedJpy,
+    cell: (row) => (row.unrealizedJpy == null ? '—' : yenSigned(row.unrealizedJpy)),
+    tone: (row) => tone(row.unrealizedJpy),
+  },
+  unrealizedPct: {
+    label: '%',
+    numeric: true,
+    value: (row) => row.unrealizedPct,
+    cell: (row) => pct(row.unrealizedPct),
+    // Tinted off the yen figure, not the percentage, so the two cells always
+    // agree — `pct` shows a dash where `unrealizedPct` is null.
+    tone: (row) => tone(row.unrealizedJpy),
+  },
 }
 
 export const Route = createFileRoute('/_authed/positions')({
@@ -167,30 +222,18 @@ function Positions() {
           <tbody>
             {sorted.map((row) => (
               <tr key={`${row.symbol}-${row.accountType}`}>
-                <td>
-                  <InstrumentLink symbol={row.symbol} name={row.name} assetClass={row.assetClass} />
-                </td>
-                <td>{ACCOUNT_LABEL[row.accountType] ?? row.accountType}</td>
-                <td>{ASSET_LABEL[row.assetClass]}</td>
-                <td data-numeric>{qty(row.quantity)}</td>
-                <td data-numeric>
-                  {row.currency === 'USD' ? `$${Number(row.avgPriceNative).toFixed(2)}` : yen(row.avgCostPerUnit)}
-                </td>
-                <td data-numeric>{yen(row.costBasisJpy)}</td>
-                <td data-numeric>
-                  {row.currentPrice == null
-                    ? '—'
-                    : row.currency === 'USD'
-                      ? `$${Number(row.currentPrice).toFixed(2)}`
-                      : yen(row.currentPrice)}
-                </td>
-                <td data-numeric>{yen(row.marketValueJpy)}</td>
-                <td data-numeric className={tone(row.unrealizedJpy)}>
-                  {row.unrealizedJpy == null ? '—' : yenSigned(row.unrealizedJpy)}
-                </td>
-                <td data-numeric className={tone(row.unrealizedJpy)}>
-                  {pct(row.unrealizedPct)}
-                </td>
+                {POSITION_SORTABLE.map((key) => {
+                  const column = COLUMNS[key]
+                  return (
+                    <td
+                      key={key}
+                      data-numeric={column.numeric ? '' : undefined}
+                      className={column.tone?.(row)}
+                    >
+                      {column.cell(row)}
+                    </td>
+                  )
+                })}
               </tr>
             ))}
           </tbody>

@@ -135,16 +135,19 @@
 }
 
 .dayNum {
-  font-weight: var(--weight-medium);
-  color: var(--color-text);
-  background: var(--color-bg);
-  padding: var(--space-1);
-  border-radius: var(--radius-full);
-  width: 1.8rem;
-  height: 1.8rem;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: var(--space-1);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border-radius: var(--radius-full);
+  /* Height is the main axis in the cell's column flex, so without this the
+     circle squashes to an ellipse once a day's content fills the box. */
+  flex-shrink: 0;
 
   @include m.tabular-nums;
 }
@@ -157,12 +160,14 @@
   line-height: 1;
 }
 
+/* Only rendered when there is something to put in it — an empty box of
+   --color-bg would otherwise sit under the date on every quiet day. */
 .dayText {
   display: flex;
   flex-direction: column;
-      gap: 2px;
-  background: var(--color-bg);
+  gap: 2px;
   padding: var(--space-1);
+  background: var(--color-bg);
 }
 
 .dayPnl {
@@ -172,7 +177,7 @@
 }
 
 .dayCount {
-  color: var(--color-tex);
+  color: var(--color-text-subtle);
 }
 
 .error {

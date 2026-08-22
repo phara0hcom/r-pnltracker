@@ -22,8 +22,29 @@ import { Pagination } from '~/components/trades/Pagination'
 import { TradeFilters } from '~/components/trades/TradeFilters'
 import { TradesTable } from '~/components/trades/TradesTable'
 import { useDebouncedSymbol } from '~/components/trades/useDebouncedSymbol'
-import { tradeSearchSchema, type TradeSearch } from '~/lib/tradeSearch'
-import { listTradeRows } from '~/server/trades'
+import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
+import { tradeSearchSchema, type TradeSearch, type TradeSortKey } from '~/lib/tradeSearch'
+import { listTradeRows, type TradeRow } from '~/server/trades'
+
+/**
+ * How each sortable column reads its own value, keyed by its sort key.
+ *
+ * Return % is a number; the rest of the numeric columns are decimal strings.
+ * Either way `numeric` is what keeps them off `localeCompare`, where "9" would
+ * sort above "10".
+ */
+const COLUMNS: Record<TradeSortKey, SortColumn<TradeRow>> = {
+  tradeDate: { value: (row) => row.tradeDate },
+  settleDate: { value: (row) => row.settleDate },
+  symbol: { value: (row) => row.symbol },
+  quantity: { numeric: true, value: (row) => row.quantity },
+  displayPrice: { numeric: true, value: (row) => row.displayPrice },
+  netAmountJpy: { numeric: true, value: (row) => row.netAmountJpy },
+  // Null on an open position, which sorts last either way — an unclosed trade
+  // is unmeasured, not a loss.
+  realizedJpy: { numeric: true, value: (row) => row.realizedJpy },
+  returnPct: { numeric: true, value: (row) => row.returnPct },
+}
 
 export const Route = createFileRoute('/_authed/trades')({
   validateSearch: tradeSearchSchema,
@@ -96,30 +117,7 @@ function TradesScreen() {
       return true
     })
 
-    const direction = search.sortDir === 'asc' ? 1 : -1
-    const key = search.sortBy
-    // Return % is a number; the rest of the numeric columns are decimal strings.
-    // Either way they must compare numerically, never lexically — otherwise
-    // "9" sorts above "10".
-    const numeric =
-      key === 'quantity' ||
-      key === 'displayPrice' ||
-      key === 'netAmountJpy' ||
-      key === 'realizedJpy' ||
-      key === 'returnPct'
-
-    return [...list].sort((left, right) => {
-      const leftValue = left[key]
-      const rightValue = right[key]
-      // Rows without a realized figure sort last regardless of direction —
-      // an open position is not "worse" than a loss.
-      if (leftValue == null) return 1
-      if (rightValue == null) return -1
-      if (numeric) return (Number(leftValue) - Number(rightValue)) * direction
-      // Remaining columns are strings, but the union still includes number, so
-      // coerce rather than assume.
-      return String(leftValue).localeCompare(String(rightValue)) * direction
-    })
+    return sortRows(list, COLUMNS, search.sortBy, search.sortDir)
   }, [rows, search, symbol.text])
 
   const perPage = search.perPage ?? 50
@@ -151,11 +149,8 @@ function TradesScreen() {
   }, [filtered])
 
   const onSort = useCallback(
-    (col: TradeSearch['sortBy']) => {
-      setSearch({
-        sortBy: col,
-        sortDir: search.sortBy === col && search.sortDir === 'desc' ? 'asc' : 'desc',
-      })
+    (col: TradeSortKey) => {
+      setSearch(nextSort(col, search.sortBy, search.sortDir))
     },
     [setSearch, search.sortBy, search.sortDir],
   )

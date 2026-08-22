@@ -238,18 +238,24 @@ function Calendar() {
                   {MOOD_GLYPH[day.note.mood]}
                 </span>
               ) : null}
-              <span className={styles.dayText}>
-              {pnl != null ? (
-                <span className={cx(styles.dayPnl, pnl >= 0 ? styles.profit : styles.loss)}>
-                  {yenSigned(pnl)}
+              {/* Gated on the same condition as its contents. `getCalendar`
+                  returns every day of the month, so most cells have neither
+                  figure — an unconditional wrapper put a padded, filled box
+                  under the date on every quiet day. */}
+              {pnl != null || day.tradeCount > 0 ? (
+                <span className={styles.dayText}>
+                  {pnl != null ? (
+                    <span className={cx(styles.dayPnl, pnl >= 0 ? styles.profit : styles.loss)}>
+                      {yenSigned(pnl)}
+                    </span>
+                  ) : null}
+                  {day.tradeCount > 0 ? (
+                    <span className={styles.dayCount}>
+                      {day.tradeCount} trade{day.tradeCount === 1 ? '' : 's'}
+                    </span>
+                  ) : null}
                 </span>
               ) : null}
-              {day.tradeCount > 0 ? (
-                <span className={styles.dayCount}>
-                  {day.tradeCount} trade{day.tradeCount === 1 ? '' : 's'}
-                </span>
-              ) : null}
-              </span>
             </button>
           )
         })}
