@@ -238,6 +238,7 @@ function Calendar() {
                   {MOOD_GLYPH[day.note.mood]}
                 </span>
               ) : null}
+              <span className={styles.dayText}>
               {pnl != null ? (
                 <span className={cx(styles.dayPnl, pnl >= 0 ? styles.profit : styles.loss)}>
                   {yenSigned(pnl)}
@@ -248,6 +249,7 @@ function Calendar() {
                   {day.tradeCount} trade{day.tradeCount === 1 ? '' : 's'}
                 </span>
               ) : null}
+              </span>
             </button>
           )
         })}

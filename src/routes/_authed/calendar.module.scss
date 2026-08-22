@@ -48,7 +48,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 12px;
   align-items: flex-start;
   padding: var(--space-2);
   overflow: hidden;
@@ -137,6 +137,14 @@
 .dayNum {
   font-weight: var(--weight-medium);
   color: var(--color-text);
+  background: var(--color-bg);
+  padding: var(--space-1);
+  border-radius: var(--radius-full);
+  width: 1.8rem;
+  height: 1.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 
   @include m.tabular-nums;
 }
@@ -149,6 +157,14 @@
   line-height: 1;
 }
 
+.dayText {
+  display: flex;
+  flex-direction: column;
+      gap: 2px;
+  background: var(--color-bg);
+  padding: var(--space-1);
+}
+
 .dayPnl {
   font-weight: var(--weight-medium);
 
@@ -156,7 +172,7 @@
 }
 
 .dayCount {
-  color: var(--color-text-subtle);
+  color: var(--color-tex);
 }
 
 .error {
