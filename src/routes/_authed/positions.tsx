@@ -1,17 +1,69 @@
+/**
+ * Open positions.
+ *
+ * Sorting is client-side over rows already in memory: the account filter is a
+ * loader dependency and sorting deliberately is not, so clicking a header
+ * reorders instantly rather than making a round trip for the same rows back in
+ * a different order.
+ */
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
+import { useCallback, useMemo } from 'react'
 import styles from './positions.module.scss'
 import { ACCOUNT_LABEL, ASSET_LABEL, pct, qty, tone, yen, yenSigned } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
-import { Empty, PageHeader, Stat, StatGrid, Table } from '~/components/screen'
+import { Empty, PageHeader, SortHeader, Stat, StatGrid, Table } from '~/components/screen'
 import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
-import { accountScopeSchema } from '~/lib/accountScope'
-import { getPositions } from '~/server/screens'
+import { POSITION_SORTABLE, positionSearchSchema, type PositionSortKey } from '~/lib/positionSearch'
+import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
+import { getPositions, type PositionRow } from '~/server/screens'
+
+/**
+ * Label, alignment and sort value for each column, keyed by its sort key.
+ *
+ * One definition drives the header row, the ordering and the caption, so a
+ * column cannot end up labelled one thing and sorted by another. Render order
+ * comes from `POSITION_SORTABLE`.
+ *
+ * Every money field arrives as an exact decimal string, hence `numeric` on all
+ * of them: compared as text, "9" would sort above "10".
+ */
+const COLUMNS: Record<PositionSortKey, SortColumn<PositionRow> & { label: string; numeric?: boolean }> = {
+  symbol: { label: 'Instrument', value: (row) => row.symbol },
+  accountType: {
+    label: 'Account',
+    // Sort by the label shown, not the raw enum, so the order matches the
+    // column as read — 特定 and NISA 成長 do not collate like SPECIFIC and
+    // NISA_GROWTH.
+    value: (row) => ACCOUNT_LABEL[row.accountType] ?? row.accountType,
+  },
+  assetClass: { label: 'Class', value: (row) => ASSET_LABEL[row.assetClass] ?? row.assetClass },
+  quantity: { label: 'Qty', numeric: true, value: (row) => row.quantity },
+  /*
+   * Avg cost and Price render the native figure — $150 sits in the same column
+   * as ¥3,000 — and sort on exactly that. The alternative, sorting a USD row by
+   * a hidden JPY equivalent, would order the table by numbers it does not show.
+   * So USD and JPY rows interleave by raw magnitude; the JPY columns beside
+   * them (Cost basis, Value, Unrealized) are the ones that compare across the
+   * whole book.
+   */
+  avgCost: {
+    label: 'Avg cost',
+    numeric: true,
+    value: (row) => (row.currency === 'USD' ? row.avgPriceNative : row.avgCostPerUnit),
+  },
+  costBasisJpy: { label: 'Cost basis', numeric: true, value: (row) => row.costBasisJpy },
+  price: { label: 'Price', numeric: true, value: (row) => row.currentPrice },
+  marketValueJpy: { label: 'Value', numeric: true, value: (row) => row.marketValueJpy },
+  unrealizedJpy: { label: 'Unrealized', numeric: true, value: (row) => row.unrealizedJpy },
+  unrealizedPct: { label: '%', numeric: true, value: (row) => row.unrealizedPct },
+}
 
 export const Route = createFileRoute('/_authed/positions')({
-  validateSearch: accountScopeSchema,
-  // The filter is a loader dependency, so changing it refetches rather than
-  // re-rendering the previous account's figures.
+  validateSearch: positionSearchSchema,
+  // The account filter is a loader dependency, so changing it refetches rather
+  // than re-rendering the previous account's figures. Sort is pointedly absent:
+  // it reorders rows the client already has.
   loaderDeps: ({ search }) => ({ account: search.scope ?? 'ALL' }),
   loader: ({ deps }) => getPositions({ data: { account: deps.account } }),
   component: Positions,
@@ -19,12 +71,29 @@ export const Route = createFileRoute('/_authed/positions')({
 
 function Positions() {
   const initial = Route.useLoaderData()
+  const { sortBy, sortDir } = Route.useSearch()
+  const navigate = Route.useNavigate()
   const [account, setAccount] = useAccountFilter()
   const { data: rows } = useQuery({
     queryKey: ['positions', account],
     queryFn: () => getPositions({ data: { account } }),
     initialData: initial,
   })
+
+  // `replace: true` — re-sorting is refining one view, not a new destination, so
+  // Back should leave the screen rather than walk back through every column you
+  // tried.
+  const onSort = useCallback(
+    (col: PositionSortKey) => {
+      void navigate({
+        search: (prev) => ({ ...prev, ...nextSort(col, sortBy, sortDir) }),
+        replace: true,
+      })
+    },
+    [navigate, sortBy, sortDir],
+  )
+
+  const sorted = useMemo(() => sortRows(rows, COLUMNS, sortBy, sortDir), [rows, sortBy, sortDir])
 
   // TODO(nit): these totals reconstruct floats from the exact decimal strings
   // the server deliberately sent as strings, which is the one place the UI does
@@ -68,30 +137,35 @@ function Positions() {
         <p className={styles.note}>
           {unpriced} position{unpriced === 1 ? '' : 's'} have no cached price, so no valuation is
           shown for them. Prices are fetched on visit for US tickers; JP equities and funds need a
-          manual entry in Settings.
+          manual entry in Settings. Sorting by a priced column leaves them at the bottom either way.
         </p>
       ) : null}
 
       {rows.length === 0 ? (
         <Empty>No open positions.</Empty>
       ) : (
-        <Table>
+        <Table
+          caption={`Positions, sorted by ${COLUMNS[sortBy].label} ${
+            sortDir === 'asc' ? 'ascending' : 'descending'
+          }`}
+        >
           <thead>
             <tr>
-              <th scope="col">Instrument</th>
-              <th scope="col">Account</th>
-              <th scope="col">Class</th>
-              <th scope="col" data-numeric>Qty</th>
-              <th scope="col" data-numeric>Avg cost</th>
-              <th scope="col" data-numeric>Cost basis</th>
-              <th scope="col" data-numeric>Price</th>
-              <th scope="col" data-numeric>Value</th>
-              <th scope="col" data-numeric>Unrealized</th>
-              <th scope="col" data-numeric>%</th>
+              {POSITION_SORTABLE.map((key) => (
+                <SortHeader
+                  key={key}
+                  col={key}
+                  label={COLUMNS[key].label}
+                  numeric={COLUMNS[key].numeric}
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={onSort}
+                />
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {sorted.map((row) => (
               <tr key={`${row.symbol}-${row.accountType}`}>
                 <td>
                   <InstrumentLink symbol={row.symbol} name={row.name} assetClass={row.assetClass} />

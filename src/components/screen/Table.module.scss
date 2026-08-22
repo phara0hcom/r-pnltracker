@@ -40,3 +40,46 @@
     @include m.tabular-nums;
   }
 }
+
+/**
+ * Sortable header button — see `SortHeader`.
+ *
+ * Fills the cell rather than sitting inside it, so the whole header is the hit
+ * target rather than just the few characters of the label.
+ */
+.sortButton {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  width: 100%;
+  /* The global reset drops a button's background and border but not its UA
+     padding, which would inset the label from the cell edge and pull a numeric
+     header out of line with the figures under it. */
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+
+  @include m.focus-ring-inset;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+/* The cell's `text-align: right` does not reach a flex child, so a numeric
+   column's label and arrow are pushed to the edge explicitly — otherwise the
+   header floats left of the figures it labels. */
+[data-numeric] > .sortButton {
+  justify-content: flex-end;
+}
+
+.sortActive {
+  color: var(--color-text);
+}
+
+.sortArrow {
+  width: 0.7em;
+  font-size: var(--text-xs);
+}
