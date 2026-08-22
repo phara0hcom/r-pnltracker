@@ -6,7 +6,7 @@
  */
 import { createServerFn } from '@tanstack/react-start'
 import { getRequest } from '@tanstack/react-start/server'
-import { auth, isAllowedEmail } from './auth'
+import { isAllowedEmail, sessionForRequest } from './auth'
 
 export interface SessionUser {
   id: string
@@ -18,7 +18,9 @@ export interface SessionUser {
 export const getSessionUser = createServerFn({ method: 'GET' }).handler(
   async (): Promise<SessionUser | null> => {
     const request = getRequest()
-    const session = await auth.api.getSession({ headers: request.headers })
+    // Memoised per request: this runs in `_authed.beforeLoad`, and the `authed`
+    // middleware asks for the same session again a moment later.
+    const session = await sessionForRequest(request)
     if (!session?.user) return null
 
     // Re-check the allowlist on every request, not just at signup: revoking

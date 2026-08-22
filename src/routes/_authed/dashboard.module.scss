@@ -1,7 +1,80 @@
+@use '../../styles/mixins' as m;
+
 .periods {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: var(--space-3);
+}
+
+/* ── Pending state ────────────────────────────────────────────────────────── */
+
+/**
+ * Placeholder for a figure that has not arrived yet.
+ *
+ * Sized in `em` so one rule serves the stat values (--text-lg) and the hints
+ * (--text-xs) alike, and margined so the bar occupies exactly the 1.5em line box
+ * of the text it replaces — otherwise every tile grows when the numbers land,
+ * which trades a blank first paint for a layout shift.
+ */
+.pendingBar {
+  display: block;
+  height: 0.75em;
+  margin: 0.375em 0;
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 25%,
+    var(--color-surface-hover) 50%,
+    var(--color-surface) 75%
+  );
+  background-size: 300% 100%;
+  border-radius: var(--radius-sm);
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+/* Travelling highlight rather than a fade: a whole grid of tiles pulsing in
+   unison reads as the page flashing. Matches the Calendar screen. */
+@keyframes sweep {
+  from {
+    background-position: 150% 0;
+  }
+
+  to {
+    background-position: -150% 0;
+  }
+}
+
+/* Motion is the point of this indicator, so with it suppressed the bar has to
+   stay legible as a placeholder on its own. */
+@media (prefers-reduced-motion: reduce) {
+  .pendingBar {
+    background: var(--color-surface-hover);
+    animation: none;
+  }
+}
+
+.pendingCard {
+  padding: var(--space-4);
+
+  @include m.card;
+}
+
+/* The net figure is the one oversized line in a PeriodCard; matching its scale
+   keeps the placeholder the same height as the card it stands in for. */
+.pendingNet {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xl);
+}
+
+/*
+ * Height of the real chart card: 240px plot, plus its window nav, value row and
+ * tick labels. Approximate by design — a few pixels of drift here is invisible,
+ * whereas a collapsed box would shift everything below it.
+ */
+.pendingChart {
+  height: 380px;
+
+  @include m.card;
 }
 
 .callout {

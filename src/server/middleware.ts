@@ -8,7 +8,7 @@
  */
 import { createMiddleware } from '@tanstack/react-start'
 import { getRequest } from '@tanstack/react-start/server'
-import { auth, isAllowedEmail } from '~/lib/auth'
+import { isAllowedEmail, sessionForRequest } from '~/lib/auth'
 
 export interface AuthedContext {
   userId: string
@@ -62,7 +62,9 @@ export const authed = createMiddleware({ type: 'function' })
   .middleware([sameOrigin])
   .server(async ({ next }) => {
     const request = getRequest()
-    const session = await auth.api.getSession({ headers: request.headers })
+    // Shared with the `_authed` guard, which has already resolved this session
+    // earlier in the same request — see `sessionForRequest`.
+    const session = await sessionForRequest(request)
 
     if (!session?.user || !isAllowedEmail(session.user.email)) {
       // TODO(nit): `session?.user.email` optional-chains on `session` but then

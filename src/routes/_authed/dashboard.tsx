@@ -23,8 +23,86 @@ export const Route = createFileRoute('/_authed/dashboard')({
   }).extend(accountScopeSchema.shape),
   loaderDeps: ({ search }) => ({ account: search.scope ?? 'ALL' }),
   loader: ({ deps }) => getDashboard({ data: { account: deps.account } }),
+  // Declaring this puts a Suspense boundary around *this* match rather than
+  // letting the suspended loader propagate up and take `AppShell` with it. That
+  // is what lets the sidebar and this screen's chrome stream out in the first
+  // flush instead of the browser holding an empty document until the engine has
+  // run — the whole reason a Lighthouse run could report a 0.4s LCP against a
+  // page that was visibly blank for 2.7s.
+  pendingComponent: DashboardPending,
   component: Dashboard,
 })
+
+/** One value or hint placeholder, sized to the text it stands in for. */
+function Bar({ width }: { width: string }) {
+  return <span className={styles.pendingBar} style={{ width }} aria-hidden="true" />
+}
+
+/**
+ * The tiles carry their real labels while the figures load.
+ *
+ * Labels and static hints are known without any data, so they are rendered
+ * rather than blanked: it makes the wait informative, and it keeps each tile the
+ * height it will be once the numbers land. Only the hints that interpolate a
+ * figure become bars.
+ */
+const PENDING_STATS: { label: string; hint?: React.ReactNode }[] = [
+  { label: 'Realized P&L', hint: 'all time, closed trades' },
+  { label: 'Total losses', hint: <Bar width="70%" /> },
+  { label: 'Invested (at cost)', hint: <Bar width="80%" /> },
+  { label: 'Win rate' },
+  { label: 'Profit factor', hint: '¥ earned per ¥1 lost · above 1.0 is profitable' },
+  { label: 'Max drawdown', hint: 'deepest peak-to-trough fall' },
+  { label: 'NISA headroom', hint: <Bar width="65%" /> },
+  { label: 'US currency effect', hint: <Bar width="60%" /> },
+]
+
+function DashboardPending() {
+  const [account, setAccount] = useAccountFilter()
+
+  return (
+    <div aria-busy="true">
+      {/* `Loading…` rather than a bar, matching the Calendar screen. */}
+      <PageHeader title="Dashboard" meta="Loading…">
+        <AccountSwitch value={account} onChange={setAccount} />
+      </PageHeader>
+
+      <StatGrid>
+        {PENDING_STATS.map((stat) => (
+          <Stat key={stat.label} label={stat.label} value={<Bar width="55%" />} hint={stat.hint} />
+        ))}
+      </StatGrid>
+
+      <Section title="Recent activity">
+        <div className={styles.periods}>
+          <PendingPeriodCard />
+          <PendingPeriodCard />
+        </div>
+      </Section>
+
+      <Section
+        title="Monthly realized P&L"
+        description="Bars rise above the zero line in profitable months and fall below it in losing ones."
+      >
+        <div className={styles.pendingChart} aria-hidden="true" />
+      </Section>
+    </div>
+  )
+}
+
+function PendingPeriodCard() {
+  return (
+    <div className={styles.pendingCard} aria-hidden="true">
+      <Bar width="35%" />
+      <span className={styles.pendingNet}>
+        <Bar width="55%" />
+      </span>
+      {[0, 1, 2, 3].map((row) => (
+        <Bar key={row} width="100%" />
+      ))}
+    </div>
+  )
+}
 
 function Dashboard() {
   const d = Route.useLoaderData()

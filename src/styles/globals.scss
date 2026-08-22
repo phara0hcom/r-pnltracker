@@ -159,12 +159,3 @@ table {
   }
 }
 
-/* Recharts reads token variables so charts match the surrounding UI. */
-.recharts-cartesian-grid line {
-  stroke: var(--chart-grid);
-}
-
-.recharts-text {
-  font-size: var(--text-xs);
-  fill: var(--color-text-muted);
-}
