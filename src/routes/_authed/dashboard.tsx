@@ -134,8 +134,14 @@ function Dashboard() {
     }
   }, [d.monthly, back])
 
+  // Merge onto `prev` rather than passing a bare object: the object form replaces
+  // the whole search record, which silently dropped `scope` every time you paged
+  // the chart and reset the screen to All accounts.
   const shift = (delta: number) => {
-    void navigate({ search: { back: Math.max(0, view.offset + delta) }, replace: true })
+    void navigate({
+      search: (prev) => ({ ...prev, back: Math.max(0, view.offset + delta) }),
+      replace: true,
+    })
   }
 
   return (
@@ -214,7 +220,7 @@ function Dashboard() {
               shift(-WINDOW)
             },
             onLatest: () => {
-              void navigate({ search: { back: 0 }, replace: true })
+              void navigate({ search: (prev) => ({ ...prev, back: 0 }), replace: true })
             },
           }}
         />

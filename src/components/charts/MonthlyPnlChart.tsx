@@ -110,12 +110,13 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
   const values = data.map((datum) => Number(datum.realizedJpy))
   const maxPos = Math.max(0, ...values)
   const maxNeg = Math.min(0, ...values)
-  // Scale both directions off the same magnitude so a ¥100k gain and a ¥100k
-  // loss draw the same length — otherwise the chart misrepresents symmetry.
-  const scale = Math.max(Math.abs(maxPos), Math.abs(maxNeg)) || 1
+  const negSpan = Math.abs(maxNeg)
 
-  // Baseline sits proportionally, so the zero line is where the data says.
-  const posShare = maxPos / (Math.abs(maxPos) + Math.abs(maxNeg) || 1)
+  // Baseline sits proportionally, so the zero line is where the data says: the
+  // region above it is maxPos tall and the region below it negSpan tall. That
+  // split is what makes a ¥100k gain and a ¥100k loss draw the same length —
+  // yen-per-pixel is already equal on both sides of the line.
+  const posShare = maxPos / (maxPos + negSpan || 1)
   const baselinePct = maxNeg === 0 ? 100 : maxPos === 0 ? 0 : posShare * 100
 
   const ticks = buildTicks(maxPos, maxNeg, baselinePct)
@@ -224,8 +225,13 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
             {data.map((datum, index) => {
               const realized = Number(datum.realizedJpy)
               const positive = realized >= 0
-              const heightPct =
-                (Math.abs(realized) / scale) * (positive ? baselinePct : 100 - baselinePct)
+              // Measured against its own side's extent, and as a percentage of the
+              // column it lives in — not of the plot. The column is already only
+              // baselinePct tall, so folding that share in here would apply it
+              // twice and pull every bar back towards zero.
+              const heightPct = positive
+                ? (realized / (maxPos || 1)) * 100
+                : (Math.abs(realized) / (negSpan || 1)) * 100
               const label = monthLabel(datum.month)
 
               return (
