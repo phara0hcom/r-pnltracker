@@ -35,3 +35,7 @@ coverage
 # Cache
 .cache
 .turbo
+
+# Playwright / MCP browser artefacts
+.playwright-mcp/
+test-results/

@@ -138,6 +138,27 @@
   white-space: nowrap;
 }
 
+/**
+ * The floating panel a long press opens to show a truncated string in full.
+ *
+ * Shared because there are two implementations of the behaviour and only one
+ * should own the look: `RevealableText` renders one popover per instance, while
+ * `TradesTable` shares a single one across its rows for weight. Same surface
+ * either way — a reader cannot tell which mechanism drew it, and should not be
+ * able to.
+ */
+@mixin reveal-popover {
+  z-index: 60;
+  max-width: min(80vw, 320px);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
 /** Hidden visually but still announced by screen readers. */
 @mixin visually-hidden {
   position: absolute;

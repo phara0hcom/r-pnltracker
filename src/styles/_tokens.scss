@@ -109,6 +109,9 @@
 
   /* ── Layout ───────────────────────────────────────────────────────────── */
   --sidebar-width: 216px;
+  /* The SP header. Read in JS too — `PageHeader` offsets its scroll observer by
+     this so the title counts as gone the moment the header covers it. */
+  --topbar-height: 60px;
   --content-max: 1440px;
   --focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
 }

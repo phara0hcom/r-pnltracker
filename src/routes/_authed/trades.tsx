@@ -17,12 +17,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useCallback, useMemo, useState } from 'react'
 import styles from './trades.module.scss'
+import { PageHeader } from '~/components/screen'
 import { NewTradeDialog } from '~/components/trades/NewTradeDialog'
 import { Pagination } from '~/components/trades/Pagination'
 import { TradeFilters } from '~/components/trades/TradeFilters'
 import { TradesTable } from '~/components/trades/TradesTable'
 import { useDebouncedSymbol } from '~/components/trades/useDebouncedSymbol'
 import { ExportButton } from '~/components/ui/ExportButton'
+import { useIsMobile } from '~/components/ui/useIsMobile'
 import { tradesCsv, tradesCsvFilename } from '~/lib/export/tradesCsv'
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
 import { tradeSearchSchema, type TradeSearch, type TradeSortKey } from '~/lib/tradeSearch'
@@ -159,6 +161,46 @@ function TradesScreen() {
     }
   }, [filtered])
 
+  /*
+   * Columns the active filter has pinned to one value.
+   *
+   * Filtering to sells makes Side read SELL on every row, and the filter bar
+   * above already says so — the column is then a word repeated down the page.
+   * `assetClass` and `outcome` pin nothing: this table has no class column, and
+   * a win/loss filter narrows a range rather than fixing a value.
+   */
+  const isMobile = useIsMobile()
+
+  /*
+   * How many filters are set. The live search text, not `search.symbol`, so the
+   * badge appears as you type rather than a quarter of a second later — the
+   * same reason `TradeFilters` reads it for its Clear button.
+   */
+  const activeFilters = useMemo(
+    () =>
+      [
+        search.from,
+        search.to,
+        search.account,
+        search.assetClass,
+        search.side,
+        search.outcome,
+        symbol.text || undefined,
+      ].filter(Boolean).length,
+    [search, symbol.text],
+  )
+
+  const filters = (
+    <TradeFilters search={search} symbol={symbol} onChange={setSearch} bare={isMobile} />
+  )
+
+  const redundant = useMemo(() => {
+    const keys: string[] = []
+    if (search.side) keys.push('side')
+    if (search.account) keys.push('account')
+    return keys
+  }, [search.side, search.account])
+
   const onSort = useCallback(
     (col: TradeSortKey) => {
       setSearch(nextSort(col, search.sortBy, search.sortDir))
@@ -190,10 +232,10 @@ function TradesScreen() {
 
   return (
     <>
-      <header className={styles.header}>
-        <div>
-          <h1 className={styles.title}>Trades</h1>
-          <p className={styles.meta}>
+      <PageHeader
+        title="Trades"
+        meta={
+          <>
             {totals.count} of {rows.length} shown
             {totals.realized !== 0 ? (
               <>
@@ -204,30 +246,29 @@ function TradesScreen() {
               </>
             ) : null}
             {totals.winRate != null ? ` · ${(totals.winRate * 100).toFixed(0)}% win` : null}
-          </p>
-        </div>
-        <div className={styles.actions}>
-          {/* "all" is load-bearing: the file ignores the filters above it. */}
-          {/* Held disabled until the ledger lands: exporting without it would
-              silently omit every deposit, withdrawal and dividend. */}
-          <ExportButton file={exportFile} disabled={rows.length === 0 || ledger == null}>
-            Export all for TradingView
-          </ExportButton>
-          <button
-            type="button"
-            className={styles.addButton}
-            onClick={() => {
-              setAdding(true)
-            }}
-          >
-            + Add trade
-          </button>
-        </div>
-      </header>
+          </>
+        }
+      >
+        {/* "all" is load-bearing: the file ignores the filters above it.
+            Held disabled until the ledger lands: exporting without it would
+            silently omit every deposit, withdrawal and dividend. */}
+        <ExportButton file={exportFile} disabled={rows.length === 0 || ledger == null}>
+          Export all for TradingView
+        </ExportButton>
+        <button
+          type="button"
+          className={styles.addButton}
+          onClick={() => {
+            setAdding(true)
+          }}
+        >
+          + Add trade
+        </button>
+      </PageHeader>
 
       <NewTradeDialog open={adding} onOpenChange={setAdding} onCreated={invalidate} />
 
-      <TradeFilters search={search} symbol={symbol} onChange={setSearch} />
+      {isMobile ? null : filters}
 
       {isPending ? (
         <p className={styles.empty}>Loading trades…</p>
@@ -236,6 +277,9 @@ function TradesScreen() {
       ) : (
         <TradesTable
           rows={pageRows}
+          redundant={redundant}
+          filters={isMobile ? filters : null}
+          activeFilters={activeFilters}
           sortBy={search.sortBy}
           sortDir={search.sortDir}
           onSort={onSort}

@@ -12,17 +12,27 @@ import { useCallback, useMemo } from 'react'
 import styles from './positions.module.scss'
 import { ACCOUNT_LABEL, ASSET_LABEL, pct, qty, tone, yen, yenSigned } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
-import { Empty, PageHeader, SortHeader, Stat, StatGrid, Table } from '~/components/screen'
-import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { Empty, PageHeader, SortHeader, Stat, StatGrid, Table, TableToolbar } from '~/components/screen'
+import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
+import { useAccountFilter } from '~/components/ui/AccountSwitch'
+import { ColumnMenu } from '~/components/ui/ColumnMenu'
 import { ExportButton } from '~/components/ui/ExportButton'
+import { useColumnVisibility } from '~/components/ui/useColumnVisibility'
 import { positionsCsv, positionsCsvFilename } from '~/lib/export/positionsCsv'
 import { POSITION_SORTABLE, positionSearchSchema, type PositionSortKey } from '~/lib/positionSearch'
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
+import type { TableColumn } from '~/lib/table/columns'
 import { getPositions, type PositionRow } from '~/server/screens'
 
 interface PositionColumn extends SortColumn<PositionRow> {
   label: string
   numeric?: boolean
+  /**
+   * Always shown. Symbol names the row, and quantity and price are what make it
+   * a holding rather than a watchlist entry — a row missing any of the three
+   * cannot be read.
+   */
+  locked?: boolean
   /** The cell's content. */
   cell: (row: PositionRow) => React.ReactNode
   /** Profit/loss tint, for the columns that carry one. */
@@ -43,6 +53,7 @@ interface PositionColumn extends SortColumn<PositionRow> {
 const COLUMNS: Record<PositionSortKey, PositionColumn> = {
   symbol: {
     label: 'Instrument',
+    locked: true,
     value: (row) => row.symbol,
     cell: (row) => <InstrumentLink symbol={row.symbol} name={row.name} assetClass={row.assetClass} />,
   },
@@ -59,7 +70,13 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
     value: (row) => ASSET_LABEL[row.assetClass] ?? row.assetClass,
     cell: (row) => ASSET_LABEL[row.assetClass] ?? row.assetClass,
   },
-  quantity: { label: 'Qty', numeric: true, value: (row) => row.quantity, cell: (row) => qty(row.quantity) },
+  quantity: {
+    label: 'Qty',
+    numeric: true,
+    locked: true,
+    value: (row) => row.quantity,
+    cell: (row) => qty(row.quantity),
+  },
   /*
    * Avg cost and Price render the native figure — $150 sits in the same column
    * as ¥3,000 — and sort on exactly that. The alternative, sorting a USD row by
@@ -84,6 +101,7 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
   price: {
     label: 'Price',
     numeric: true,
+    locked: true,
     value: (row) => row.currentPrice,
     cell: (row) =>
       row.currentPrice == null
@@ -115,6 +133,16 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
     tone: (row) => tone(row.unrealizedJpy),
   },
 }
+
+/**
+ * The picker's list, derived from `COLUMNS` rather than written again beside
+ * it — a second list is a second thing to update when a column is renamed.
+ */
+const PICKER: TableColumn<PositionSortKey>[] = POSITION_SORTABLE.map((key) => ({
+  key,
+  label: COLUMNS[key].label,
+  locked: COLUMNS[key].locked,
+}))
 
 export const Route = createFileRoute('/_authed/positions')({
   validateSearch: positionSearchSchema,
@@ -150,6 +178,24 @@ function Positions() {
     [navigate, sortBy, sortDir],
   )
 
+  /*
+   * `scope=SPECIFIC` narrows to the one taxable account, so the Account column
+   * reads 特定 on every row and says nothing.
+   *
+   * `scope=NISA` deliberately does not: it keeps three frames — 旧NISA, 成長投資枠
+   * and つみたて投資枠 — and which one a row sits in is exactly the distinction
+   * that matters there.
+   */
+  const redundant = useMemo(() => (account === 'SPECIFIC' ? ['accountType'] : []), [account])
+
+  const columns = useColumnVisibility('positions', PICKER, redundant)
+  // The rendered order stays `POSITION_SORTABLE`'s, filtered — so re-showing a
+  // column puts it back where it was rather than appending it.
+  const shown = useMemo(
+    () => POSITION_SORTABLE.filter((key) => columns.visible.has(key)),
+    [columns.visible],
+  )
+
   const sorted = useMemo(() => sortRows(rows, COLUMNS, sortBy, sortDir), [rows, sortBy, sortDir])
 
   // Exports `sorted`, not `rows` — the file is the table as it stands, account
@@ -181,12 +227,7 @@ function Positions() {
       <PageHeader
         title="Positions"
         meta={`${String(rows.length)} open · ${yen(totalCost)} cost basis`}
-      >
-        <AccountSwitch value={account} onChange={setAccount} />
-        <ExportButton file={exportFile} disabled={rows.length === 0}>
-          Export CSV
-        </ExportButton>
-      </PageHeader>
+      />
 
       <StatGrid>
         <Stat label="Open positions" value={rows.length} />
@@ -212,6 +253,24 @@ function Positions() {
         </p>
       ) : null}
 
+      {/* Outside the empty check on purpose: these are how you get rows back.
+          Rendered inside it, filtering down to nothing would take the filter
+          away with the table and strand you on an empty screen. */}
+      <TableToolbar>
+        <AccountFilterControl value={account} onChange={setAccount} />
+        <ExportButton file={exportFile} disabled={rows.length === 0}>
+          Export CSV
+        </ExportButton>
+        <ColumnMenu
+          columns={PICKER}
+          hidden={columns.hidden}
+          redundant={redundant}
+          hiddenCount={columns.hiddenCount}
+          onToggle={columns.toggle}
+          onReset={columns.reset}
+        />
+      </TableToolbar>
+
       {rows.length === 0 ? (
         <Empty>No open positions.</Empty>
       ) : (
@@ -222,7 +281,7 @@ function Positions() {
         >
           <thead>
             <tr>
-              {POSITION_SORTABLE.map((key) => (
+              {shown.map((key) => (
                 <SortHeader
                   key={key}
                   col={key}
@@ -238,7 +297,7 @@ function Positions() {
           <tbody>
             {sorted.map((row) => (
               <tr key={`${row.symbol}-${row.accountType}`}>
-                {POSITION_SORTABLE.map((key) => {
+                {shown.map((key) => {
                   const column = COLUMNS[key]
                   return (
                     <td

@@ -51,7 +51,7 @@ export function SortHeader<K extends string>({
           onSort(col)
         }}
       >
-        <span>{label}</span>
+        <span className={styles.sortLabel}>{label}</span>
         {/* Reserves its width whether or not it is showing an arrow, so
             re-sorting does not shift the header labels sideways. */}
         <span aria-hidden="true" className={styles.sortArrow}>

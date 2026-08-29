@@ -6,7 +6,8 @@ import { MonthlyPnlChart } from '~/components/charts/MonthlyPnlChart'
 import { PeriodCard } from '~/components/dashboard/PeriodCard'
 import { pct, ratio, tone, yen, yenSigned } from '~/components/format'
 import { PageHeader, Section, Stat, StatGrid } from '~/components/screen'
-import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
+import { useAccountFilter } from '~/components/ui/AccountSwitch'
 import { accountScopeSchema } from '~/lib/accountScope'
 import { getDashboard } from '~/server/portfolio'
 
@@ -64,7 +65,7 @@ function DashboardPending() {
     <div aria-busy="true">
       {/* `Loading…` rather than a bar, matching the Calendar screen. */}
       <PageHeader title="Dashboard" meta="Loading…">
-        <AccountSwitch value={account} onChange={setAccount} />
+        <AccountFilterControl value={account} onChange={setAccount} />
       </PageHeader>
 
       <StatGrid>
@@ -150,7 +151,7 @@ function Dashboard() {
         title="Dashboard"
         meta={`${String(d.tradeCount)} trades · ${String(d.openPositions)} open positions`}
       >
-        <AccountSwitch value={account} onChange={setAccount} />
+        <AccountFilterControl value={account} onChange={setAccount} />
       </PageHeader>
 
       <StatGrid>

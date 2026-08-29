@@ -4,7 +4,9 @@ import { ACCOUNT_LABEL, ASSET_LABEL, days, pct, ratio, tone, yen, yenSigned } fr
 import { Empty, PageHeader, Section, Stat, StatGrid, Table } from '~/components/screen'
 import { AttrBar } from '~/components/stats/AttrBar'
 import { CorrelationTable } from '~/components/stats/CorrelationTable'
-import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
+import { useAccountFilter } from '~/components/ui/AccountSwitch'
+import { RevealableText } from '~/components/ui/RevealableText'
 import { accountScopeSchema } from '~/lib/accountScope'
 import { getStats } from '~/server/screens'
 
@@ -26,7 +28,7 @@ function Stats() {
         title="Stats"
         meta={`${String(d.tradeCount)} closed trades · ${String(d.winCount)}W / ${String(d.lossCount)}L`}
       >
-        <AccountSwitch value={account} onChange={setAccount} />
+        <AccountFilterControl value={account} onChange={setAccount} />
       </PageHeader>
 
       <StatGrid>
@@ -164,8 +166,17 @@ function Stats() {
             {d.symbols.map((row) => (
               <tr key={row.symbol}>
                 <td>
-                  <strong>{row.symbol}</strong>
-                  <div className={styles.subName}>{row.name}</div>
+                  {/* A fund's symbol is its name, so the second line would
+                      repeat the first, truncated identically — and the reveal
+                      moves up to whichever line carries the name. */}
+                  {row.name === row.symbol ? (
+                    <RevealableText as="strong" text={row.symbol} className={styles.instrument} />
+                  ) : (
+                    <>
+                      <strong className={styles.instrument}>{row.symbol}</strong>
+                      <RevealableText as="div" text={row.name} className={styles.subName} />
+                    </>
+                  )}
                 </td>
                 <td data-numeric>{row.tradeCount}</td>
                 <td data-numeric>{pct(row.winRate, 0)}</td>

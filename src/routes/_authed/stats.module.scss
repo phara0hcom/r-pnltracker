@@ -25,12 +25,45 @@
   gap: var(--space-4);
 }
 
+/**
+ * The symbol line of the instrument cell.
+ *
+ * Capped, and `display: block` so the cap applies at all — a bare `<strong>` is
+ * inline, where `max-width` does nothing. Funds carry no ticker, so this line
+ * holds a 45-character fund name rather than `8411`; uncapped it set the width
+ * of the whole column.
+ */
+.instrument {
+  display: block;
+  max-width: 280px;
+
+  @include m.truncate;
+
+  @include m.mobile {
+    max-width: 100px;
+
+    /* Long-pressed to reveal the full name; without this iOS raises its own
+       selection callout on top of the popover. */
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+}
+
 .subName {
-  max-width: 26ch;
+  max-width: 280px;
   font-size: var(--text-xs);
   color: var(--color-text-subtle);
 
   @include m.truncate;
+
+  @include m.mobile {
+    max-width: 100px;
+
+    /* Long-pressed to reveal the full name; without this iOS raises its own
+       selection callout on top of the popover. */
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
 }
 
 .note {

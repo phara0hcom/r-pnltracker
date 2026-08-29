@@ -6,7 +6,8 @@ import styles from './calendar.module.scss'
 import { NoteDialog, type NotePayload } from '~/components/calendar/NoteDialog'
 import { tone, yenSigned } from '~/components/format'
 import { PageHeader } from '~/components/screen'
-import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
+import { useAccountFilter } from '~/components/ui/AccountSwitch'
 import { accountScopeSchema } from '~/lib/accountScope'
 import { withNote } from '~/lib/calendarPatch'
 import { cx } from '~/lib/cx'
@@ -157,7 +158,7 @@ function Calendar() {
         }
       >
         <div className={styles.nav}>
-          <AccountSwitch value={account} onChange={setAccount} />
+          <AccountFilterControl value={account} onChange={setAccount} />
           <button type="button" className={styles.navButton} onClick={() => { goToMonth(shiftMonth(month, -1)) }} aria-label="Previous month">
             ←
           </button>

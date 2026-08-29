@@ -1,12 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
+import { useMemo } from 'react'
 import styles from './dividends.module.scss'
 import { ACCOUNT_LABEL, qty, yen } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { Empty, PageHeader, Section, Stat, StatGrid, Table } from '~/components/screen'
-import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
+import { useAccountFilter } from '~/components/ui/AccountSwitch'
+import { ColumnMenu } from '~/components/ui/ColumnMenu'
+import { useColumnVisibility } from '~/components/ui/useColumnVisibility'
 import { accountScopeSchema } from '~/lib/accountScope'
-import { getDividends } from '~/server/screens'
+import type { TableColumn } from '~/lib/table/columns'
+import { getDividends, type DividendRow } from '~/server/screens'
 
 export const Route = createFileRoute('/_authed/dividends')({
   validateSearch: accountScopeSchema,
@@ -20,6 +25,99 @@ const KIND_LABEL: Record<string, string> = {
   DISTRIBUTION: '分配金',
 }
 
+/**
+ * The "All payments" table, one definition per column.
+ *
+ * Header, cell and the ⋯ picker all read from here, so a column cannot end up
+ * labelled one thing in the menu and another in the table.
+ *
+ * Three are locked: the instrument names the row, the pay date places it, and
+ * net is the figure that actually reached the account — with all four money
+ * columns hidden a payment row would say nothing at all.
+ */
+interface PayoutColumn extends TableColumn<PayoutKey> {
+  numeric?: boolean
+  cell: (row: DividendRow, styles: Record<string, string | undefined>) => React.ReactNode
+  className?: string
+}
+
+type PayoutKey =
+  | 'payDate'
+  | 'instrument'
+  | 'account'
+  | 'kind'
+  | 'gross'
+  | 'incomeTax'
+  | 'localTax'
+  | 'net'
+  | 'reinvested'
+
+const PAYOUT_COLUMNS: PayoutColumn[] = [
+  { key: 'payDate', label: 'Paid', locked: true, cell: (row) => row.payDate },
+  {
+    key: 'instrument',
+    label: 'Instrument',
+    locked: true,
+    cell: (row) => (
+      <InstrumentLink symbol={row.symbol} name={row.name} assetClass={row.assetClass} />
+    ),
+  },
+  {
+    key: 'account',
+    label: 'Account',
+    cell: (row, css) => (
+      <>
+        {ACCOUNT_LABEL[row.accountType] ?? row.accountType}
+        {row.confident ? null : (
+          <span
+            className={css.inferred}
+            title="The paying account was inferred: the statement's cash ledger has no account column, and the position had already closed when this was paid."
+          >
+            inferred
+          </span>
+        )}
+      </>
+    ),
+  },
+  { key: 'kind', label: 'Type', className: 'dim', cell: (row) => KIND_LABEL[row.kind] ?? row.kind },
+  { key: 'gross', label: 'Gross', numeric: true, cell: (row) => yen(row.grossAmount) },
+  {
+    key: 'incomeTax',
+    label: 'Income tax',
+    numeric: true,
+    className: 'dim',
+    cell: (row) => (Number(row.incomeTax) === 0 ? '—' : yen(row.incomeTax)),
+  },
+  {
+    key: 'localTax',
+    label: 'Local tax',
+    numeric: true,
+    className: 'dim',
+    cell: (row) => (Number(row.localTax) === 0 ? '—' : yen(row.localTax)),
+  },
+  {
+    key: 'net',
+    label: 'Net',
+    numeric: true,
+    locked: true,
+    className: 'profit',
+    cell: (row) => yen(row.netAmount),
+  },
+  {
+    key: 'reinvested',
+    label: 'Reinvested',
+    className: 'dim',
+    cell: (row) =>
+      row.reinvestedJpy == null ? (
+        '—'
+      ) : (
+        <span title="This distribution was rolled straight back into units, so it is income and an increase in cost basis at the same time.">
+          {qty(row.reinvestedUnits ?? '0')} 口
+        </span>
+      ),
+  },
+]
+
 function Dividends() {
   const initial = Route.useLoaderData()
   const [account, setAccount] = useAccountFilter()
@@ -28,6 +126,20 @@ function Dividends() {
     queryFn: () => getDividends({ data: { account } }),
     initialData: initial,
   })
+
+  /*
+   * `scope=SPECIFIC` narrows to the one taxable account, so the Account column
+   * reads 特定 on every row and says nothing.
+   *
+   * `scope=NISA` deliberately does not: it keeps three frames — 旧NISA, 成長投資枠
+   * and つみたて投資枠 — and which one a row sits in is exactly the distinction
+   * that matters there.
+   */
+  const redundant = useMemo(() => (account === 'SPECIFIC' ? ['account'] : []), [account])
+
+  const columns = useColumnVisibility('dividends', PAYOUT_COLUMNS, redundant)
+  // Declaration order, filtered — so re-showing a column returns it to its place.
+  const shown = PAYOUT_COLUMNS.filter((column) => columns.visible.has(column.key))
 
   const { totals, usHoldings: us } = data
   const taxFreeShare =
@@ -39,7 +151,7 @@ function Dividends() {
         title="Dividends"
         meta={`${String(totals.count)} payment${totals.count === 1 ? '' : 's'} · ${yen(totals.gross)} gross`}
       >
-        <AccountSwitch value={account} onChange={setAccount} />
+        <AccountFilterControl value={account} onChange={setAccount} />
       </PageHeader>
 
       <StatGrid>
@@ -122,62 +234,46 @@ function Dividends() {
           <Section
             title="All payments"
             description="Gross is reconstructed from the credited amount — Rakuten's statement reports only what it paid out, never the pre-tax figure."
+            actions={
+              <ColumnMenu
+                columns={PAYOUT_COLUMNS}
+                hidden={columns.hidden}
+                redundant={redundant}
+                hiddenCount={columns.hiddenCount}
+                onToggle={columns.toggle}
+                onReset={columns.reset}
+                label="Choose payment columns"
+              />
+            }
           >
             <Table>
               <thead>
                 <tr>
-                  <th scope="col">Paid</th>
-                  <th scope="col">Instrument</th>
-                  <th scope="col">Account</th>
-                  <th scope="col">Type</th>
-                  <th scope="col" data-numeric>Gross</th>
-                  <th scope="col" data-numeric>Income tax</th>
-                  <th scope="col" data-numeric>Local tax</th>
-                  <th scope="col" data-numeric>Net</th>
-                  <th scope="col">Reinvested</th>
+                  {shown.map((column) => (
+                    <th key={column.key} scope="col" data-numeric={column.numeric ? '' : undefined}>
+                      {column.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {data.rows.map((row) => (
                   <tr key={`${row.payDate}-${row.symbol}-${row.accountType}-${row.netAmount}`}>
-                    <td>{row.payDate}</td>
-                    <td>
-                      <InstrumentLink symbol={row.symbol} name={row.name} assetClass={row.assetClass} />
-                    </td>
-                    <td>
-                      {ACCOUNT_LABEL[row.accountType] ?? row.accountType}
-                      {row.confident ? null : (
-                        <span
-                          className={styles.inferred}
-                          title="The paying account was inferred: the statement's cash ledger has no account column, and the position had already closed when this was paid."
-                        >
-                          inferred
-                        </span>
-                      )}
-                    </td>
-                    <td className={styles.dim}>{KIND_LABEL[row.kind] ?? row.kind}</td>
-                    <td data-numeric>{yen(row.grossAmount)}</td>
-                    <td data-numeric className={styles.dim}>
-                      {Number(row.incomeTax) === 0 ? '—' : yen(row.incomeTax)}
-                    </td>
-                    <td data-numeric className={styles.dim}>
-                      {Number(row.localTax) === 0 ? '—' : yen(row.localTax)}
-                    </td>
-                    <td data-numeric className={styles.profit}>{yen(row.netAmount)}</td>
-                    <td className={styles.dim}>
-                      {row.reinvestedJpy == null ? (
-                        '—'
-                      ) : (
-                        <span title="This distribution was rolled straight back into units, so it is income and an increase in cost basis at the same time.">
-                          {qty(row.reinvestedUnits ?? '0')} 口
-                        </span>
-                      )}
-                    </td>
+                    {shown.map((column) => (
+                      <td
+                        key={column.key}
+                        data-numeric={column.numeric ? '' : undefined}
+                        className={column.className ? styles[column.className] : undefined}
+                      >
+                        {column.cell(row, styles)}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>
             </Table>
           </Section>
+
         </>
       )}
 

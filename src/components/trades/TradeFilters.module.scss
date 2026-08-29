@@ -11,6 +11,30 @@
   @include m.card;
 }
 
+/**
+ * Inside the SP filter sheet: no card of its own, and one field per row.
+ *
+ * Wrapping a row of seven controls into a 320px-wide sheet leaves orphaned
+ * half-width selects; stacking them is both legible and thumb-sized.
+ */
+.bare {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0;
+  margin-bottom: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+
+  .input {
+    width: 100%;
+  }
+
+  .clear {
+    margin-top: var(--space-2);
+  }
+}
+
 .field {
   display: flex;
   flex-direction: column;

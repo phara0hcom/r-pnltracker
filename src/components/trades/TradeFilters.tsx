@@ -7,16 +7,23 @@
  */
 import styles from './TradeFilters.module.scss'
 import type { SymbolField } from './useDebouncedSymbol'
+import { cx } from '~/lib/cx'
 import type { TradeSearch } from '~/lib/tradeSearch'
 
 export function TradeFilters({
   search,
   symbol,
   onChange,
+  bare,
 }: {
   search: TradeSearch
   symbol: SymbolField
   onChange: (patch: Partial<TradeSearch>) => void
+  /**
+   * Drop the card and stack the fields, for when this is already inside one —
+   * the filter sheet on SP supplies its own surface and padding.
+   */
+  bare?: boolean
 }) {
   // The live text, not `search.symbol`: Clear filters has to appear as soon as
   // there is something to clear, not a quarter of a second later.
@@ -30,7 +37,7 @@ export function TradeFilters({
     search.outcome
 
   return (
-    <div className={styles.filters}>
+    <div className={cx(styles.filters, bare && styles.bare)}>
       <label className={styles.field}>
         <span className={styles.fieldLabel}>Search</span>
         <input

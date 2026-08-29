@@ -28,10 +28,13 @@ interface Draft {
 
 export function TradeEditRow({
   row,
+  visible,
   onCancel,
   onSaved,
 }: {
   row: TradeRow
+  /** Which columns to render — the same set the header and read rows use. */
+  visible: ReadonlySet<string>
   onCancel: () => void
   onSaved: () => void
 }) {
@@ -107,114 +110,140 @@ export function TradeEditRow({
   return (
     <>
       <tr className={styles.editing} onKeyDown={onKeyDown}>
-        <td>
-          <input
-            ref={firstField}
-            type="date"
-            className={cx(styles.cellInput, err('tradeDate') && styles.inputError)}
-            value={draft.tradeDate}
-            onChange={set('tradeDate')}
-            aria-label="Trade date"
-          />
-        </td>
-        <td>
-          <input
-            type="date"
-            className={cx(styles.cellInput, err('settleDate') && styles.inputError)}
-            value={draft.settleDate}
-            onChange={set('settleDate')}
-            aria-label="Settlement date"
-          />
-        </td>
-        <td>
-          <input
-            type="text"
-            className={cx(styles.cellInput, styles.wide, err('symbol') && styles.inputError)}
-            value={draft.symbol}
-            onChange={set('symbol')}
-            aria-label="Symbol"
-          />
-        </td>
-        <td>
-          <span className={styles.readonlyCell}>{ACCOUNT_LABEL[row.accountType]}</span>
-        </td>
-        <td>
-          <span className={styles.readonlyCell}>{row.side}</span>
-        </td>
-        <td>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={cx(styles.cellInput, styles.num, err('quantity') && styles.inputError)}
-            value={draft.quantity}
-            onChange={set('quantity')}
-            aria-label="Quantity"
-          />
-        </td>
-        <td>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={cx(styles.cellInput, styles.num, err('unitPrice') && styles.inputError)}
-            value={draft.unitPrice}
-            onChange={set('unitPrice')}
-            aria-label={row.assetClass === 'FUND' ? 'Price per 10,000 units' : 'Unit price'}
-          />
-        </td>
-        <td>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={cx(styles.cellInput, styles.num, err('fee') && styles.inputError)}
-            value={draft.fee}
-            onChange={set('fee')}
-            aria-label="Fee"
-          />
-        </td>
-        <td>
-          {row.currency === 'USD' ? (
+        {visible.has('tradeDate') && (
+          <td>
+            <input
+              ref={firstField}
+              type="date"
+              className={cx(styles.cellInput, err('tradeDate') && styles.inputError)}
+              value={draft.tradeDate}
+              onChange={set('tradeDate')}
+              aria-label="Trade date"
+            />
+          </td>
+        )}
+        {visible.has('settleDate') && (
+          <td>
+            <input
+              type="date"
+              className={cx(styles.cellInput, err('settleDate') && styles.inputError)}
+              value={draft.settleDate}
+              onChange={set('settleDate')}
+              aria-label="Settlement date"
+            />
+          </td>
+        )}
+        {visible.has('symbol') && (
+          <td>
+            <input
+              type="text"
+              className={cx(styles.cellInput, styles.wide, err('symbol') && styles.inputError)}
+              value={draft.symbol}
+              onChange={set('symbol')}
+              aria-label="Symbol"
+            />
+          </td>
+        )}
+        {visible.has('account') && (
+          <td>
+            <span className={styles.readonlyCell}>{ACCOUNT_LABEL[row.accountType]}</span>
+          </td>
+        )}
+        {visible.has('side') && (
+          <td>
+            <span className={styles.readonlyCell}>{row.side}</span>
+          </td>
+        )}
+        {visible.has('quantity') && (
+          <td>
             <input
               type="text"
               inputMode="decimal"
-              className={cx(styles.cellInput, styles.num, err('fxRate') && styles.inputError)}
-              value={draft.fxRate}
-              onChange={set('fxRate')}
-              aria-label="USD/JPY rate"
+              className={cx(styles.cellInput, styles.num, err('quantity') && styles.inputError)}
+              value={draft.quantity}
+              onChange={set('quantity')}
+              aria-label="Quantity"
             />
-          ) : (
-            <span className={styles.readonlyCell}>—</span>
-          )}
-        </td>
-        <td className={styles.numeric}>
-          <span className={styles.recalcHint}>recalc</span>
-        </td>
-        <td className={styles.numeric}>
-          <span className={styles.recalcHint}>recalc</span>
-        </td>
-        <td className={styles.numeric}>
-          <span className={styles.recalcHint}>recalc</span>
-        </td>
-        <td className={styles.actions}>
-          <div className={styles.actions}>
-            <button
-              type="button"
-              className={cx(styles.action, styles.primary)}
-              onClick={() => {
-                save.mutate()
-              }}
-              disabled={save.isPending}
-            >
-              {save.isPending ? 'Saving…' : 'Save'}
-            </button>
-            <button type="button" className={styles.action} onClick={onCancel}>
-              Cancel
-            </button>
-          </div>
-        </td>
+          </td>
+        )}
+        {visible.has('price') && (
+          <td>
+            <input
+              type="text"
+              inputMode="decimal"
+              className={cx(styles.cellInput, styles.num, err('unitPrice') && styles.inputError)}
+              value={draft.unitPrice}
+              onChange={set('unitPrice')}
+              aria-label={row.assetClass === 'FUND' ? 'Price per 10,000 units' : 'Unit price'}
+            />
+          </td>
+        )}
+        {visible.has('fee') && (
+          <td>
+            <input
+              type="text"
+              inputMode="decimal"
+              className={cx(styles.cellInput, styles.num, err('fee') && styles.inputError)}
+              value={draft.fee}
+              onChange={set('fee')}
+              aria-label="Fee"
+            />
+          </td>
+        )}
+        {visible.has('fx') && (
+          <td>
+            {row.currency === 'USD' ? (
+              <input
+                type="text"
+                inputMode="decimal"
+                className={cx(styles.cellInput, styles.num, err('fxRate') && styles.inputError)}
+                value={draft.fxRate}
+                onChange={set('fxRate')}
+                aria-label="USD/JPY rate"
+              />
+            ) : (
+              <span className={styles.readonlyCell}>—</span>
+            )}
+          </td>
+        )}
+        {visible.has('amount') && (
+          <td className={styles.numeric}>
+            <span className={styles.recalcHint}>recalc</span>
+          </td>
+        )}
+        {visible.has('realized') && (
+          <td className={styles.numeric}>
+            <span className={styles.recalcHint}>recalc</span>
+          </td>
+        )}
+        {visible.has('returnPct') && (
+          <td className={styles.numeric}>
+            <span className={styles.recalcHint}>recalc</span>
+          </td>
+        )}
+        {visible.has('actions') && (
+          <td className={styles.actions}>
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className={cx(styles.action, styles.primary)}
+                onClick={() => {
+                  save.mutate()
+                }}
+                disabled={save.isPending}
+              >
+                {save.isPending ? 'Saving…' : 'Save'}
+              </button>
+              <button type="button" className={styles.action} onClick={onCancel}>
+                Cancel
+              </button>
+            </div>
+          </td>
+        )}
       </tr>
 
       <tr className={styles.editingAux}>
-        <td colSpan={13}>
+        <td colSpan={visible.size}>
           <div className={styles.auxRow}>
             <label className={styles.memoField}>
               <span className={styles.memoLabel}>Memo</span>
