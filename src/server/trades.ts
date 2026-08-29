@@ -6,7 +6,10 @@
  * separate, laxer one for inline editing.
  */
 import { createServerFn } from '@tanstack/react-start'
+import { eq } from 'drizzle-orm'
 import { authed } from './middleware'
+import { db } from '~/db'
+import { cashMovements, dividends, instruments } from '~/db/schema'
 import {
   createManualTrade,
   deleteTrade,
@@ -14,6 +17,7 @@ import {
   restoreTrade,
   updateTrade,
 } from '~/db/trades.service'
+import type { AssetClass } from '~/lib/domain/types'
 import { runEngine } from '~/lib/pnl/engine'
 import { validateManualTrade, type ManualTradeInput } from '~/lib/trades/manual'
 
@@ -163,4 +167,66 @@ export const undoRemoveTrade = createServerFn({ method: 'POST' })
   .handler(async ({ data, context }): Promise<MutationResult> => {
     await restoreTrade(context.userId, data.id)
     return { ok: true, id: data.id }
+  })
+
+// ── Cash ledger ─────────────────────────────────────────────────────────────
+
+/**
+ * Everything that moves cash without being a trade.
+ *
+ * Only the TradingView export reads this. It is one round trip rather than two
+ * because the two halves are useless apart: a cash balance that counts deposits
+ * but not the dividends credited alongside them is wrong in a way that is
+ * harder to spot than having neither.
+ *
+ * Trade settlements are deliberately absent — `parseTorizan` drops them,
+ * because `tradehistory` is authoritative for trades and the importer would
+ * otherwise book every purchase twice.
+ */
+export interface CashLedger {
+  cash: {
+    date: string
+    /** Signed as the statement reports it: money in is positive, out negative. */
+    amount: string
+    currency: 'JPY' | 'USD'
+    /** 摘要 — the only thing separating tax withholding from a bank transfer. */
+    description: string
+  }[]
+  dividends: {
+    payDate: string
+    symbol: string
+    assetClass: AssetClass
+    /** As credited, after withholding — the figure that actually reached cash. */
+    netAmount: string
+  }[]
+}
+
+export const listCashLedger = createServerFn({ method: 'GET' })
+  .middleware([authed])
+  .handler(async ({ context }): Promise<CashLedger> => {
+    const [cash, payouts] = await Promise.all([
+      db
+        .select({
+          date: cashMovements.date,
+          amount: cashMovements.amount,
+          currency: cashMovements.currency,
+          description: cashMovements.description,
+        })
+        .from(cashMovements)
+        .where(eq(cashMovements.userId, context.userId)),
+      // Joined, not left-joined: a payout whose instrument never resolved has no
+      // symbol to chart and could not be exported anyway.
+      db
+        .select({
+          payDate: dividends.payDate,
+          netAmount: dividends.netAmount,
+          symbol: instruments.symbol,
+          assetClass: instruments.assetClass,
+        })
+        .from(dividends)
+        .innerJoin(instruments, eq(dividends.instrumentId, instruments.id))
+        .where(eq(dividends.userId, context.userId)),
+    ])
+
+    return { cash, dividends: payouts }
   })

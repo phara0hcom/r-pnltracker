@@ -26,7 +26,7 @@ import { ExportButton } from '~/components/ui/ExportButton'
 import { tradesCsv, tradesCsvFilename } from '~/lib/export/tradesCsv'
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
 import { tradeSearchSchema, type TradeSearch, type TradeSortKey } from '~/lib/tradeSearch'
-import { listTradeRows, type TradeRow } from '~/server/trades'
+import { listCashLedger, listTradeRows, type TradeRow } from '~/server/trades'
 
 /**
  * How each sortable column reads its own value, keyed by its sort key.
@@ -63,6 +63,15 @@ function TradesScreen() {
   const { data: rows = [], isPending } = useQuery({
     queryKey: ['trades'],
     queryFn: () => listTradeRows(),
+  })
+
+  // Deposits, withdrawals, 譲渡益税 and dividends — everything that moves cash
+  // without being a trade. Only the export uses it, but it is fetched with the
+  // screen rather than on click: `ExportButton` builds its file synchronously,
+  // so the data has to be here already.
+  const { data: ledger } = useQuery({
+    queryKey: ['cash-ledger'],
+    queryFn: () => listCashLedger(),
   })
 
   // Stable identities: `TradesTable` memoises its body against these, so a
@@ -170,8 +179,8 @@ function TradesScreen() {
   // The Positions export does follow its screen, and correctly: a snapshot
   // stays true when you take a subset of it. A replay does not.
   const exportFile = useCallback(
-    () => ({ filename: tradesCsvFilename(), body: tradesCsv(rows) }),
-    [rows],
+    () => ({ filename: tradesCsvFilename(), body: tradesCsv(rows, ledger ?? {}) }),
+    [rows, ledger],
   )
 
   const onSaved = useCallback(() => {
@@ -199,7 +208,9 @@ function TradesScreen() {
         </div>
         <div className={styles.actions}>
           {/* "all" is load-bearing: the file ignores the filters above it. */}
-          <ExportButton file={exportFile} disabled={rows.length === 0}>
+          {/* Held disabled until the ledger lands: exporting without it would
+              silently omit every deposit, withdrawal and dividend. */}
+          <ExportButton file={exportFile} disabled={rows.length === 0 || ledger == null}>
             Export all for TradingView
           </ExportButton>
           <button

@@ -129,3 +129,109 @@ describe('tradesCsvFilename', () => {
     expect(tradesCsvFilename()).toBe(`trades-tradingview-${todayLocal()}.csv`)
   })
 })
+
+describe('tradesCsv cash ledger', () => {
+  const cash = (over = {}) => ({
+    date: '2026-02-02',
+    amount: '499979',
+    currency: 'JPY' as const,
+    description: '',
+    ...over,
+  })
+
+  it('writes money in against the $CASH pseudo-instrument', () => {
+    const [, row = ''] = lines(tradesCsv([], { cash: [cash()] }))
+    expect(row).toBe('$CASH,Deposit,499979,,,2026-02-02 0:00:00')
+  })
+
+  it('strips the sign from an outflow, since the side already carries direction', () => {
+    // The ledger signs a withdrawal negative; TradingView wants a bare amount.
+    const [, row = ''] = lines(tradesCsv([], { cash: [cash({ amount: '-102901' })] }))
+    expect(row).toBe('$CASH,Withdrawal,102901,,,2026-02-02 0:00:00')
+  })
+
+  it('books 譲渡益税 withheld at source as Taxes and fees, not a withdrawal', () => {
+    const [, row = ''] = lines(
+      tradesCsv([], { cash: [cash({ amount: '-695', description: '特定譲渡益税徴収　国税' })] }),
+    )
+    expect(row).toBe('$CASH,Taxes and fees,695,,,2026-02-02 0:00:00')
+  })
+
+  it('books a 譲渡益税 refund as money in', () => {
+    // 還付 is positive — a later loss offset an earlier gain and the withholding
+    // came back. It never reaches the tax branch, and Deposit is honest for it.
+    const [, row = ''] = lines(
+      tradesCsv([], { cash: [cash({ amount: '1204', description: '特定譲渡益税還付　国税' })] }),
+    )
+    expect(row).toContain(',Deposit,1204,')
+  })
+
+  it('books a katakana fee as Taxes and fees', () => {
+    const [, row = ''] = lines(
+      tradesCsv([], {
+        cash: [cash({ amount: '-1100', description: 'ショウメイショトウハッコウテスウリョウ' })],
+      }),
+    )
+    expect(row).toContain(',Taxes and fees,1100,')
+  })
+
+  it('drops a non-JPY leg rather than counting dollars as yen', () => {
+    // $CASH has no currency of its own. The USD rows in the ledger are one half
+    // of an FX conversion whose JPY half is recorded separately, so keeping both
+    // would invent money.
+    const csv = tradesCsv([], {
+      cash: [cash({ amount: '-5.82', currency: 'USD', description: '振替' })],
+    })
+    expect(lines(csv)).toHaveLength(1)
+  })
+
+  it('ignores a zero-amount line', () => {
+    expect(lines(tradesCsv([], { cash: [cash({ amount: '0' })] }))).toHaveLength(1)
+  })
+})
+
+describe('tradesCsv dividends', () => {
+  const payout = (over = {}) => ({
+    payDate: '2026-06-28',
+    symbol: '8411',
+    assetClass: 'JP_EQUITY' as const,
+    netAmount: '9963',
+    ...over,
+  })
+
+  it('credits the payout to its instrument, net of withholding', () => {
+    // Gross would credit cash that never arrived.
+    const [, row = ''] = lines(tradesCsv([], { dividends: [payout()] }))
+    expect(row).toBe('TSE:8411,Dividend,9963,,,2026-06-28 0:00:00')
+  })
+
+  it('drops a fund distribution, whose 再投資 buy is dropped too', () => {
+    // Both halves leave together, so the cash balance stays consistent.
+    const csv = tradesCsv(
+      [trade({ assetClass: 'FUND', side: 'REINVEST', symbol: 'eMAXIS Slim 米国株式(S&P500)' })],
+      { dividends: [payout({ symbol: 'eMAXIS Slim 米国株式(S&P500)', assetClass: 'FUND' })] },
+    )
+    expect(lines(csv)).toHaveLength(1)
+  })
+})
+
+describe('tradesCsv ordering across sources', () => {
+  it('lands cash before the fills it funds and after the ones it settles', () => {
+    // Everything shares one date, so only the rank separates them. An importer
+    // replaying in file order must never see a balance dip negative.
+    const output = lines(
+      tradesCsv([trade({ tradeDate: '2026-04-10', side: 'SELL' }), trade({ tradeDate: '2026-04-10', side: 'BUY' })], {
+        cash: [
+          { date: '2026-04-10', amount: '500000', currency: 'JPY', description: '' },
+          { date: '2026-04-10', amount: '-200000', currency: 'JPY', description: '' },
+        ],
+        dividends: [{ payDate: '2026-04-10', symbol: '8411', assetClass: 'JP_EQUITY', netAmount: '900' }],
+      }),
+    )
+    expect(output[1]).toContain(',Deposit,')
+    expect(output[2]).toContain(',Dividend,')
+    expect(output[3]).toContain(',Buy,')
+    expect(output[4]).toContain(',Sell,')
+    expect(output[5]).toContain(',Withdrawal,')
+  })
+})
