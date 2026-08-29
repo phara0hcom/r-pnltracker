@@ -42,6 +42,23 @@
   }
 }
 
+/**
+ * Collapsed: the icon centred in the rail, and larger.
+ *
+ * Bigger because it is now the only thing identifying the link — at 16px in a
+ * 64px column it reads as an afterthought rather than a target.
+ */
+.navLinkRail {
+  justify-content: center;
+  padding-inline: 0;
+
+  .navIcon {
+    width: 22px;
+    height: 22px;
+    opacity: 0.9;
+  }
+}
+
 .navLinkActive {
   color: var(--color-text);
   background-color: var(--color-surface-raised);
@@ -50,11 +67,14 @@
   box-shadow: inset 2px 0 0 var(--color-accent);
 }
 
-.navGlyph {
-  width: 1.1em;
-  font-size: var(--text-md);
-  line-height: 1;
-  text-align: center;
+/**
+ * Sized here rather than on the `<svg>`, which carries no width — one rule
+ * moves every icon, and the rail can enlarge them without touching the markup.
+ */
+.navIcon {
+  flex: none;
+  width: 16px;
+  height: 16px;
   opacity: 0.75;
 }
 
@@ -85,6 +105,9 @@
 }
 
 .signOut {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
   width: 100%;
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-sm);
@@ -97,4 +120,26 @@
   &:hover {
     color: var(--color-text);
   }
+}
+
+.signOutRail {
+  justify-content: center;
+  padding-inline: 0;
+
+  .navIcon {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/** Matches the reveal popover's surface — one look for floating panels. */
+.tooltip {
+  z-index: 60;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
 }

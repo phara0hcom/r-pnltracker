@@ -109,6 +109,8 @@
 
   /* ── Layout ───────────────────────────────────────────────────────────── */
   --sidebar-width: 216px;
+  /* The sidebar collapsed to an icon rail. */
+  --sidebar-rail-width: 64px;
   /* The SP header. Read in JS too — `PageHeader` offsets its scroll observer by
      this so the title counts as gone the moment the header covers it. */
   --topbar-height: 60px;

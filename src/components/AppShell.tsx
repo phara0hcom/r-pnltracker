@@ -8,6 +8,7 @@
  * Rendered inside the `_authed` guard, so a user is always present here.
  */
 import * as Dialog from '@radix-ui/react-dialog'
+import * as Tooltip from '@radix-ui/react-tooltip'
 import { useRouter } from '@tanstack/react-router'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import styles from './AppShell.module.scss'
@@ -18,16 +19,18 @@ import {
   subscribePageTitle,
 } from '~/components/screen/pageTitle'
 import { RouteProgress, useRouteLoading } from '~/components/ui/RouteProgress'
+import { useSidebarCollapsed } from '~/components/ui/useSidebarCollapsed'
 import { cx } from '~/lib/cx'
 import type { SessionUser } from '~/lib/session'
 
-function Brand() {
+/** The mark alone on the collapsed rail, where there is no room for the name. */
+function Brand({ wordmark = true }: { wordmark?: boolean }) {
   return (
     <div className={styles.brand}>
       <span className={styles.brandMark} aria-hidden="true">
         ¥
       </span>
-      <span className={styles.brandText}>PnL Tracker</span>
+      {wordmark ? <span className={styles.brandText}>PnL Tracker</span> : null}
     </div>
   )
 }
@@ -41,6 +44,7 @@ export function AppShell({
 }) {
   const loading = useRouteLoading()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [collapsed, toggleCollapsed] = useSidebarCollapsed()
   const router = useRouter()
 
   /*
@@ -69,7 +73,9 @@ export function AppShell({
   )
 
   return (
-    <div className={styles.shell}>
+    // Delay 0: on an icon rail the tooltip is the label, not a hint.
+    <Tooltip.Provider delayDuration={0}>
+    <div className={cx(styles.shell, collapsed && styles.shellCollapsed)}>
       <RouteProgress loading={loading} />
 
       {/* Below the sidebar's breakpoint only — see the stylesheet. */}
@@ -114,9 +120,27 @@ export function AppShell({
         </span>
       </header>
 
-      <nav className={styles.sidebar} aria-label="Main navigation">
-        <Brand />
-        <SidebarNav user={user} />
+      <nav
+        className={cx(styles.sidebar, collapsed && styles.sidebarCollapsed)}
+        aria-label="Main navigation"
+      >
+        <Brand wordmark={!collapsed} />
+        <SidebarNav user={user} collapsed={collapsed} />
+
+        <button
+          type="button"
+          className={styles.collapseToggle}
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          // The rail is a persisted preference, so the control is a switch
+          // rather than a plain button — its state is worth announcing.
+          aria-pressed={collapsed}
+        >
+          <span className={styles.collapseChevron} aria-hidden="true">
+            {collapsed ? '»' : '«'}
+          </span>
+          {collapsed ? null : 'Collapse'}
+        </button>
       </nav>
 
       {/* Dimmed while a navigation is in flight, so the figures on screen are
@@ -129,5 +153,6 @@ export function AppShell({
         {children}
       </main>
     </div>
+    </Tooltip.Provider>
   )
 }

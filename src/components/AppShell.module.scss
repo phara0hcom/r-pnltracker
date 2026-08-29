@@ -4,12 +4,19 @@
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
   min-height: 100dvh;
+  transition: grid-template-columns var(--duration) var(--ease);
 
   @include m.tablet {
     /* The sidebar is gone below this width; the header takes its own row. */
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
   }
+}
+
+/** Collapsed to the icon rail. Desktop only — below the breakpoint the sidebar
+    is gone entirely and the width is irrelevant. */
+.shellCollapsed {
+  grid-template-columns: var(--sidebar-rail-width) 1fr;
 }
 
 /* ── Mobile header ────────────────────────────────────────────────────────── */
@@ -154,6 +161,50 @@
   @include m.tablet {
     display: none;
   }
+}
+
+/** Everything centres, and nothing may push the rail wider than its column. */
+.sidebarCollapsed {
+  padding-inline: var(--space-2);
+  overflow: hidden;
+
+  .brand {
+    justify-content: center;
+    padding-inline: 0;
+  }
+}
+
+/**
+ * Sits below the nav's own footer, so it is the last thing in the column and
+ * stays in the same place whichever state the rail is in.
+ */
+.collapseToggle {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-subtle);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.sidebarCollapsed .collapseToggle {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.collapseChevron {
+  width: 1.1em;
+  font-size: var(--text-md);
+  line-height: 1;
+  text-align: center;
 }
 
 /* ── Brand ────────────────────────────────────────────────────────────────── */
