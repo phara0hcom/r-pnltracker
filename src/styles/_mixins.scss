@@ -139,24 +139,30 @@
 }
 
 /**
- * The floating panel a long press opens to show a truncated string in full.
+ * The surface shared by every floating panel — long-press popovers and the
+ * collapsed sidebar's tooltips.
  *
- * Shared because there are two implementations of the behaviour and only one
- * should own the look: `RevealableText` renders one popover per instance, while
- * `TradesTable` shares a single one across its rows for weight. Same surface
- * either way — a reader cannot tell which mechanism drew it, and should not be
- * able to.
+ * Colour, border and shadow only. Size is the caller's: a tooltip holding one
+ * word wants tighter padding and a smaller radius than a popover holding a
+ * 45-character fund name, and forcing them to match would make one of the two
+ * wrong.
  */
-@mixin reveal-popover {
+@mixin floating-surface {
   z-index: 60;
-  max-width: min(80vw, 320px);
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--text-sm);
   color: var(--color-text);
   background-color: var(--color-surface-raised);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
+}
+
+/** A long-press popover: the surface, sized for a full instrument name. */
+@mixin reveal-popover {
+  @include floating-surface;
+
+  max-width: min(80vw, 320px);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-md);
 }
 
 /** Hidden visually but still announced by screen readers. */

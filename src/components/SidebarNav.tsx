@@ -72,7 +72,15 @@ export function SidebarNav({
   const [account] = useAccountFilter()
 
   return (
-    <>
+    /*
+     * The provider lives here rather than in `AppShell`: this component owns
+     * the only tooltips in the nav, and depending on an ancestor to supply the
+     * context made it unrenderable anywhere else — which its own test found
+     * immediately.
+     *
+     * Delay 0: on an icon rail the tooltip is the label, not a hint.
+     */
+    <Tooltip.Provider delayDuration={0}>
       <ul className={styles.navList}>
         {NAV.map((item) => {
           const Icon = NAV_ICONS[item.to]
@@ -146,6 +154,6 @@ export function SidebarNav({
           </button>
         </RailLabel>
       </div>
-    </>
+    </Tooltip.Provider>
   )
 }

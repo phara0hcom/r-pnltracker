@@ -8,7 +8,6 @@
  * Rendered inside the `_authed` guard, so a user is always present here.
  */
 import * as Dialog from '@radix-ui/react-dialog'
-import * as Tooltip from '@radix-ui/react-tooltip'
 import { useRouter } from '@tanstack/react-router'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import styles from './AppShell.module.scss'
@@ -73,8 +72,6 @@ export function AppShell({
   )
 
   return (
-    // Delay 0: on an icon rail the tooltip is the label, not a hint.
-    <Tooltip.Provider delayDuration={0}>
     <div className={cx(styles.shell, collapsed && styles.shellCollapsed)}>
       <RouteProgress loading={loading} />
 
@@ -153,6 +150,5 @@ export function AppShell({
         {children}
       </main>
     </div>
-    </Tooltip.Provider>
   )
 }
