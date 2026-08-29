@@ -14,6 +14,8 @@ import { ACCOUNT_LABEL, ASSET_LABEL, pct, qty, tone, yen, yenSigned } from '~/co
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { Empty, PageHeader, SortHeader, Stat, StatGrid, Table } from '~/components/screen'
 import { AccountSwitch, useAccountFilter } from '~/components/ui/AccountSwitch'
+import { ExportButton } from '~/components/ui/ExportButton'
+import { positionsCsv, positionsCsvFilename } from '~/lib/export/positionsCsv'
 import { POSITION_SORTABLE, positionSearchSchema, type PositionSortKey } from '~/lib/positionSearch'
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
 import { getPositions, type PositionRow } from '~/server/screens'
@@ -150,6 +152,17 @@ function Positions() {
 
   const sorted = useMemo(() => sortRows(rows, COLUMNS, sortBy, sortDir), [rows, sortBy, sortDir])
 
+  // Exports `sorted`, not `rows` — the file is the table as it stands, account
+  // filter and sort column included, so a spreadsheet opened beside the screen
+  // is not in a different order.
+  const exportFile = useCallback(
+    () => ({
+      filename: positionsCsvFilename(account),
+      body: positionsCsv(sorted, { account: ACCOUNT_LABEL, assetClass: ASSET_LABEL }),
+    }),
+    [sorted, account],
+  )
+
   // TODO(nit): these totals reconstruct floats from the exact decimal strings
   // the server deliberately sent as strings, which is the one place the UI does
   // financial arithmetic — the thing `components/format.ts` and the server-side
@@ -170,6 +183,9 @@ function Positions() {
         meta={`${String(rows.length)} open · ${yen(totalCost)} cost basis`}
       >
         <AccountSwitch value={account} onChange={setAccount} />
+        <ExportButton file={exportFile} disabled={rows.length === 0}>
+          Export CSV
+        </ExportButton>
       </PageHeader>
 
       <StatGrid>

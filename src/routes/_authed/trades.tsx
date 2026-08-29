@@ -22,6 +22,8 @@ import { Pagination } from '~/components/trades/Pagination'
 import { TradeFilters } from '~/components/trades/TradeFilters'
 import { TradesTable } from '~/components/trades/TradesTable'
 import { useDebouncedSymbol } from '~/components/trades/useDebouncedSymbol'
+import { ExportButton } from '~/components/ui/ExportButton'
+import { tradesCsv, tradesCsvFilename } from '~/lib/export/tradesCsv'
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
 import { tradeSearchSchema, type TradeSearch, type TradeSortKey } from '~/lib/tradeSearch'
 import { listTradeRows, type TradeRow } from '~/server/trades'
@@ -155,6 +157,23 @@ function TradesScreen() {
     [setSearch, search.sortBy, search.sortDir],
   )
 
+  // Exports `rows`, deliberately ignoring the screen's filters and sort.
+  //
+  // A TradingView portfolio is rebuilt by replaying these fills in order, so it
+  // needs a coherent history rather than a slice of one. Several of this
+  // screen's filters cut a history mid-stream — `outcome` and a SELL-only
+  // `side` keep closes while dropping every open (realized P&L is null on an
+  // open), and a `from` date can land between a buy and its sell. Each of those
+  // exports an unpaired Sell, which TradingView reads as opening a short that
+  // never happened.
+  //
+  // The Positions export does follow its screen, and correctly: a snapshot
+  // stays true when you take a subset of it. A replay does not.
+  const exportFile = useCallback(
+    () => ({ filename: tradesCsvFilename(), body: tradesCsv(rows) }),
+    [rows],
+  )
+
   const onSaved = useCallback(() => {
     setEditingId(null)
     invalidate()
@@ -178,15 +197,21 @@ function TradesScreen() {
             {totals.winRate != null ? ` · ${(totals.winRate * 100).toFixed(0)}% win` : null}
           </p>
         </div>
-        <button
-          type="button"
-          className={styles.addButton}
-          onClick={() => {
-            setAdding(true)
-          }}
-        >
-          + Add trade
-        </button>
+        <div className={styles.actions}>
+          {/* "all" is load-bearing: the file ignores the filters above it. */}
+          <ExportButton file={exportFile} disabled={rows.length === 0}>
+            Export all for TradingView
+          </ExportButton>
+          <button
+            type="button"
+            className={styles.addButton}
+            onClick={() => {
+              setAdding(true)
+            }}
+          >
+            + Add trade
+          </button>
+        </div>
       </header>
 
       <NewTradeDialog open={adding} onOpenChange={setAdding} onCreated={invalidate} />

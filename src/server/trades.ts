@@ -32,6 +32,13 @@ export interface TradeRow {
   displayPrice: string
   fee: string
   feeTax: string
+  /**
+   * Every cost of the transaction: commission, its consumption tax, and 諸費用
+   * (SEC fee on US sells). Summed here rather than in the client because
+   * `otherCost` is not otherwise on this row, and because adding money is
+   * `Decimal` work — the client would be doing it in floats.
+   */
+  commission: string
   fxRate: string
   currency: 'JPY' | 'USD'
   netAmountJpy: string
@@ -97,6 +104,7 @@ export const listTradeRows = createServerFn({ method: 'GET' })
         displayPrice,
         fee: trade.fee.toFixed(),
         feeTax: trade.feeTax.toFixed(),
+        commission: trade.fee.add(trade.feeTax).add(trade.otherCost).toFixed(),
         fxRate: trade.fxRate.toFixed(),
         currency: trade.currency,
         netAmountJpy: trade.netAmountJpy.toFixed(),
