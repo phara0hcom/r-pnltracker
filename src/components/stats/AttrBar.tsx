@@ -1,9 +1,12 @@
 /**
  * One component of the US currency attribution, as a signed bar.
  *
- * Width is the share of the largest component rather than of the signed total:
- * the three parts can offset each other, so scaling by the total would make a
- * large component look tiny whenever the net happens to be near zero.
+ * `scale` is the largest magnitude *among all the components being compared*,
+ * computed once by the caller and shared by every bar — not derived from this
+ * bar's own value and the signed total. The three parts can offset each
+ * other, so a component larger than the total (common when two components
+ * partly cancel) would otherwise draw past 100% or, worse, make the actually
+ * largest component look smaller than a partner it is being compared against.
  */
 import styles from './AttrBar.module.scss'
 import { tone, yenSigned } from '~/components/format'
@@ -12,15 +15,14 @@ import { cx } from '~/lib/cx'
 export function AttrBar({
   label,
   value,
-  total,
+  scale,
 }: {
   label: string
   value: string
-  total: string
+  scale: number
 }) {
   const v = Number(value)
-  const scale = Math.max(Math.abs(Number(total)), Math.abs(v)) || 1
-  const width = (Math.abs(v) / scale) * 100
+  const width = scale > 0 ? (Math.abs(v) / scale) * 100 : 0
 
   return (
     <div className={styles.row}>

@@ -1,0 +1,40 @@
+.track {
+  position: relative;
+  height: 16px;
+}
+
+/* Table-cell density: a 16px bar reads oversized beside a row of text sized
+   for the rest of the table. */
+.compact {
+  height: 12px;
+
+  .pos,
+  .neg {
+    top: 2px;
+    bottom: 2px;
+  }
+}
+
+.zero {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--color-border-strong);
+}
+
+.pos {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  background-color: var(--chart-profit);
+  border-radius: 0 2px 2px 0;
+}
+
+.neg {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  background-color: var(--chart-loss);
+  border-radius: 2px 0 0 2px;
+}

@@ -1,0 +1,20 @@
+@use '../../styles/mixins' as m;
+
+.strip {
+  display: grid;
+  flex: 1;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  align-items: center;
+  padding: var(--space-2) 0;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+
+  /* A single row of 5–6 cells has no room on a 390px screen — wrap to two
+     columns instead. Rows, not columns, so cells still read left-to-right. */
+  @include m.mobile {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

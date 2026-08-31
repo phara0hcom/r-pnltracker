@@ -1,0 +1,117 @@
+@use '../../styles/mixins' as m;
+
+.card {
+  padding: var(--space-4);
+
+  @include m.card;
+}
+
+/* ── Card + window navigation — matches `MonthlyPnlChart` so swapping between
+   them at the same call site doesn't shift the surrounding chrome. ────────── */
+
+.nav {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.navLabel {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.navButtons {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.navButton {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.35;
+
+    &:hover {
+      background-color: transparent;
+    }
+  }
+}
+
+/* ── Rows ─────────────────────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  gap: var(--space-2);
+  padding-bottom: 4px;
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.headerMid {
+  flex: 1;
+  text-align: center;
+}
+
+.row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 5px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.month {
+  flex: none;
+  width: 44px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.track {
+  flex: 1;
+  min-width: 0;
+}
+
+.net {
+  flex: none;
+  width: 62px;
+  font-size: 0.6875rem;
+  text-align: right;
+  white-space: nowrap;
+
+  @include m.tabular-nums;
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+.muted {
+  color: var(--color-text-subtle);
+}
+
+.empty {
+  padding: var(--space-6);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}

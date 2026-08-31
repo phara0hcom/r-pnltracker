@@ -3,13 +3,16 @@ import { useMemo } from 'react'
 import { z } from 'zod'
 import styles from './dashboard.module.scss'
 import { MonthlyPnlChart } from '~/components/charts/MonthlyPnlChart'
-import { PeriodCard } from '~/components/dashboard/PeriodCard'
+import { MonthlyZeroBars } from '~/components/charts/MonthlyZeroBars'
+import { EquitySparkline } from '~/components/dashboard/EquitySparkline'
 import { pct, ratio, tone, yen, yenSigned } from '~/components/format'
-import { PageHeader, Section, Stat, StatGrid } from '~/components/screen'
+import { HeroStat, PageHeader, Section, Stat, StatStrip, StripCell } from '~/components/screen'
 import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
+import { useIsMobile } from '~/components/ui/useIsMobile'
 import { accountScopeSchema } from '~/lib/accountScope'
-import { getDashboard } from '~/server/portfolio'
+import { cx } from '~/lib/cx'
+import { getDashboard, type PeriodSummary } from '~/server/portfolio'
 
 /** How many months the chart shows at once. */
 const WINDOW = 12
@@ -39,24 +42,8 @@ function Bar({ width }: { width: string }) {
   return <span className={styles.pendingBar} style={{ width }} aria-hidden="true" />
 }
 
-/**
- * The tiles carry their real labels while the figures load.
- *
- * Labels and static hints are known without any data, so they are rendered
- * rather than blanked: it makes the wait informative, and it keeps each tile the
- * height it will be once the numbers land. Only the hints that interpolate a
- * figure become bars.
- */
-const PENDING_STATS: { label: string; hint?: React.ReactNode }[] = [
-  { label: 'Realized P&L', hint: 'all time, closed trades' },
-  { label: 'Total losses', hint: <Bar width="70%" /> },
-  { label: 'Invested (at cost)', hint: <Bar width="80%" /> },
-  { label: 'Win rate' },
-  { label: 'Profit factor', hint: '¥ earned per ¥1 lost · above 1.0 is profitable' },
-  { label: 'Max drawdown', hint: 'deepest peak-to-trough fall' },
-  { label: 'NISA headroom', hint: <Bar width="65%" /> },
-  { label: 'US currency effect', hint: <Bar width="60%" /> },
-]
+const PENDING_TILES = ['Profit factor', 'Max drawdown', 'NISA headroom', 'US currency effect']
+const PENDING_STRIP = ['Win rate', 'Total losses', 'Invested at cost', 'Open positions', 'NISA restoring']
 
 function DashboardPending() {
   const [account, setAccount] = useAccountFilter()
@@ -68,18 +55,35 @@ function DashboardPending() {
         <AccountFilterControl value={account} onChange={setAccount} />
       </PageHeader>
 
-      <StatGrid>
-        {PENDING_STATS.map((stat) => (
-          <Stat key={stat.label} label={stat.label} value={<Bar width="55%" />} hint={stat.hint} />
-        ))}
-      </StatGrid>
-
-      <Section title="Recent activity">
-        <div className={styles.periods}>
-          <PendingPeriodCard />
-          <PendingPeriodCard />
+      <div className={styles.heroBlock}>
+        <HeroStat
+          label="Realized P&L · all time"
+          value={<Bar width="55%" />}
+          context={<Bar width="70%" />}
+        />
+        <div className={styles.recentGrid}>
+          {[0, 1].map((row) => (
+            <div key={row} className={styles.pendingRecentCard} aria-hidden="true">
+              <Bar width="40%" />
+              <Bar width="60%" />
+            </div>
+          ))}
         </div>
-      </Section>
+      </div>
+
+      <div className={styles.tiles}>
+        {PENDING_TILES.map((label) => (
+          <Stat key={label} label={label} value={<Bar width="50%" />} hint={<Bar width="70%" />} />
+        ))}
+      </div>
+
+      <div className={styles.stripSpacing}>
+        <StatStrip>
+          {PENDING_STRIP.map((label) => (
+            <StripCell key={label} label={label} value={<Bar width="60%" />} />
+          ))}
+        </StatStrip>
+      </div>
 
       <Section
         title="Monthly realized P&L"
@@ -91,16 +95,58 @@ function DashboardPending() {
   )
 }
 
-function PendingPeriodCard() {
+/** One period's numbers, condensed to a single line each — the full breakdown lives on Stats. */
+function RecentCard({ period }: { period: PeriodSummary }) {
+  const net = Number(period.realizedJpy)
+  const netTone = tone(net)
+
   return (
-    <div className={styles.pendingCard} aria-hidden="true">
-      <Bar width="35%" />
-      <span className={styles.pendingNet}>
-        <Bar width="55%" />
-      </span>
-      {[0, 1, 2, 3].map((row) => (
-        <Bar key={row} width="100%" />
-      ))}
+    <div className={styles.recentCard}>
+      <div className={styles.recentHead}>
+        <span className={styles.recentLabel}>{period.label}</span>
+        <span className={styles.recentCount}>
+          {period.tradeCount} close{period.tradeCount === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {period.tradeCount === 0 ? (
+        <p className={styles.recentEmpty}>No closes</p>
+      ) : (
+        <>
+          <div className={styles.recentNetRow}>
+            <span
+              className={cx(
+                styles.recentNet,
+                netTone === 'profit' && styles.profit,
+                netTone === 'loss' && styles.loss,
+              )}
+            >
+              {yenSigned(net)}
+            </span>
+            {period.returnPct != null ? (
+              <span
+                className={cx(
+                  styles.recentPct,
+                  netTone === 'profit' && styles.profit,
+                  netTone === 'loss' && styles.loss,
+                )}
+              >
+                {period.returnPct >= 0 ? '+' : ''}
+                {(period.returnPct * 100).toFixed(1)}%
+              </span>
+            ) : null}
+          </div>
+          <div className={styles.recentDetail}>
+            <span className={styles.profit}>{yen(period.grossProfitJpy)}</span>
+            <span className={styles.recentDim}>/</span>
+            <span className={styles.loss}>{yen(period.grossLossJpy)}</span>
+            <span className={styles.recentDim}>
+              {' '}
+              · {period.winCount}W / {period.lossCount}L
+            </span>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -110,6 +156,7 @@ function Dashboard() {
   const { back = 0 } = Route.useSearch()
   const [account, setAccount] = useAccountFilter()
   const navigate = Route.useNavigate()
+  const isMobile = useIsMobile()
 
   // The server sends the whole gap-filled history; windowing here means paging
   // back costs no round-trip.
@@ -145,6 +192,28 @@ function Dashboard() {
     })
   }
 
+  const nav = {
+    label: view.label,
+    canGoBack: view.canGoBack,
+    canGoForward: view.canGoForward,
+    onBack: () => {
+      shift(WINDOW)
+    },
+    onForward: () => {
+      shift(-WINDOW)
+    },
+    onLatest: () => {
+      void navigate({ search: (prev) => ({ ...prev, back: 0 }), replace: true })
+    },
+  }
+
+  const realized = Number(d.realizedJpy)
+  const grossProfit = Number(d.grossProfitJpy)
+  const profitFactorMeter = d.profitFactor == null ? undefined : Math.min(d.profitFactor / 5, 1)
+  const maxDrawdownMeter =
+    grossProfit > 0 ? Math.min(Number(d.maxDrawdownJpy) / grossProfit, 1) : undefined
+  const nisaHeadroomMeter = Math.min(Number(d.nisaLifetimeUsed) / 18_000_000, 1)
+
   return (
     <>
       <PageHeader
@@ -154,77 +223,80 @@ function Dashboard() {
         <AccountFilterControl value={account} onChange={setAccount} />
       </PageHeader>
 
-      <StatGrid>
-        <Stat
-          label="Realized P&L"
+      <div className={styles.heroBlock}>
+        <HeroStat
+          label="Realized P&L · all time"
           value={yen(d.realizedJpy)}
-          tone={tone(d.realizedJpy)}
-          hint="all time, closed trades"
+          tone={tone(realized)}
+          context={`${yen(d.grossProfitJpy)} gains · ${yen(d.grossLossJpy)} losses`}
+          aside={
+            d.equityCurve.length >= 2 ? (
+              <EquitySparkline points={d.equityCurve} tone={tone(realized)} />
+            ) : undefined
+          }
         />
-        <Stat
-          label="Total losses"
-          value={yen(d.grossLossJpy)}
-          tone="loss"
-          hint={`against ${yen(d.grossProfitJpy)} of gains`}
-        />
-        <Stat
-          label="Invested (at cost)"
-          value={yen(d.investedAtCostJpy)}
-          hint={`${String(d.openPositions)} open positions, at purchase price`}
-        />
-        <Stat label="Win rate" value={pct(d.winRate)} />
+        <div className={styles.recentGrid}>
+          <RecentCard period={d.week} />
+          <RecentCard period={d.month} />
+        </div>
+      </div>
+
+      <div className={styles.tiles}>
         <Stat
           label="Profit factor"
           value={d.profitFactor == null ? '—' : `${ratio(d.profitFactor)}×`}
           hint="¥ earned per ¥1 lost · above 1.0 is profitable"
+          meter={profitFactorMeter}
         />
         <Stat
           label="Max drawdown"
           value={yen(d.maxDrawdownJpy)}
           tone="loss"
           hint="deepest peak-to-trough fall"
+          meter={maxDrawdownMeter}
         />
         <Stat
           label="NISA headroom"
           value={yen(d.nisaLifetimeRemaining)}
           hint={`${yen(d.nisaLifetimeUsed)} of ¥18,000,000 used`}
+          meter={nisaHeadroomMeter}
         />
         <Stat
           label="US currency effect"
           value={yenSigned(d.fxEffectJpy)}
           tone={tone(d.fxEffectJpy)}
           hint={`vs ${yenSigned(d.stockEffectJpy)} from share prices`}
+          meter={d.fxShare ?? undefined}
         />
-      </StatGrid>
+      </div>
 
-      <Section title="Recent activity">
-        <div className={styles.periods}>
-          <PeriodCard period={d.week} />
-          <PeriodCard period={d.month} />
-        </div>
-      </Section>
+      <div className={styles.stripSpacing}>
+        <StatStrip>
+          <StripCell label="Win rate" value={pct(d.winRate)} />
+          <StripCell label="Total losses" value={yen(d.grossLossJpy)} tone="loss" />
+          <StripCell label="Invested at cost" value={yen(d.investedAtCostJpy)} />
+          <StripCell label="Open positions" value={String(d.openPositions)} />
+          <StripCell
+            label="NISA restoring"
+            value={yen(d.nisaPendingRestoration)}
+            hint={d.nisaRestorationDate}
+          />
+        </StatStrip>
+      </div>
 
       <Section
         title="Monthly realized P&L"
-        description="Bars rise above the zero line in profitable months and fall below it in losing ones."
+        description={
+          isMobile
+            ? 'Rows grow right of zero in profitable months, left in losing ones.'
+            : 'Bars rise above the zero line in profitable months and fall below it in losing ones.'
+        }
       >
-        <MonthlyPnlChart
-          data={view.slice}
-          nav={{
-            label: view.label,
-            canGoBack: view.canGoBack,
-            canGoForward: view.canGoForward,
-            onBack: () => {
-              shift(WINDOW)
-            },
-            onForward: () => {
-              shift(-WINDOW)
-            },
-            onLatest: () => {
-              void navigate({ search: (prev) => ({ ...prev, back: 0 }), replace: true })
-            },
-          }}
-        />
+        {isMobile ? (
+          <MonthlyZeroBars data={view.slice} nav={nav} />
+        ) : (
+          <MonthlyPnlChart data={view.slice} nav={nav} />
+        )}
       </Section>
 
       {d.nisaGrowthMaxedYear != null ? (

@@ -1,5 +1,28 @@
 @use '../../styles/mixins' as m;
 
+.heroRow {
+  margin-bottom: var(--space-5);
+
+  @include m.hero-row;
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+/* ── PC two-column sections ───────────────────────────────────────────────── */
+
+.twoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
 .attribution {
   padding: var(--space-4);
 
@@ -23,6 +46,19 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--space-4);
+}
+
+.dotCell {
+  display: inline-flex;
+  align-items: center;
+}
+
+.classDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: var(--space-2);
+  border-radius: 50%;
 }
 
 /**
@@ -70,6 +106,166 @@
   margin-top: var(--space-3);
   font-size: var(--text-xs);
   color: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}
+
+/* ── SP ───────────────────────────────────────────────────────────────────── */
+
+.spStats {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-3);
+}
+
+.spRow {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+
+  dd {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--color-text);
+    white-space: nowrap;
+
+    @include m.tabular-nums;
+  }
+}
+
+.spHint {
+  color: var(--color-text-subtle);
+}
+
+.spSectionTitle {
+  margin: var(--space-5) 0 var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.spSectionDesc {
+  margin-bottom: var(--space-3);
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+}
+
+.spAttr {
+  display: flex;
+  flex-direction: column;
+}
+
+.spAttrRow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 0;
+}
+
+.spAttrHead {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+}
+
+.spAttrLabel {
+  color: var(--color-text-muted);
+}
+
+.spAttrValue {
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.spAttrTrack {
+  height: 8px;
+  overflow: hidden;
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-full);
+}
+
+.spAttrFillPos {
+  height: 100%;
+  background-color: var(--color-profit);
+  border-radius: var(--radius-full);
+}
+
+.spAttrFillNeg {
+  height: 100%;
+  background-color: var(--color-loss);
+  border-radius: var(--radius-full);
+}
+
+.spSymbols {
+  display: flex;
+  flex-direction: column;
+}
+
+.spSymbolRow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.spSymbolHead {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.spSymbolName {
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.truncate;
+}
+
+.spSymbolNet {
+  flex: none;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.spSymbolBar {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.spSymbolCloses {
+  flex: none;
+  width: 74px;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.spSymbolTrack {
+  flex: 1;
+  min-width: 0;
+}
+
+.spSymbolWin {
+  flex: none;
+  width: 34px;
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+  text-align: right;
 
   @include m.tabular-nums;
 }

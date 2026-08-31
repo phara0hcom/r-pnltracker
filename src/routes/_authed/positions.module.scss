@@ -1,3 +1,118 @@
+@use '../../styles/mixins' as m;
+
+.heroRow {
+  margin-bottom: var(--space-4);
+
+  @include m.hero-row;
+}
+
+.heroContext {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+.dim {
+  color: var(--color-text-subtle);
+}
+
+/* ── Table cells ──────────────────────────────────────────────────────────── */
+
+.accountCell {
+  display: inline-flex;
+  align-items: center;
+}
+
+.unrealCell {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.unrealTrack {
+  flex: 1;
+  min-width: 0;
+}
+
+.unrealValue {
+  flex: none;
+  width: 74px;
+  font-weight: var(--weight-medium);
+  text-align: right;
+
+  @include m.tabular-nums;
+}
+
+.unrealPct {
+  flex: none;
+  width: 48px;
+  font-size: var(--text-xs);
+  text-align: right;
+
+  @include m.tabular-nums;
+}
+
+/* ── Allocation ───────────────────────────────────────────────────────────── */
+
+.allocation {
+  margin-bottom: var(--space-4);
+}
+
+.allocationTrack {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.allocationSegment {
+  border-radius: 2px;
+}
+
+.allocationLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+
+  /* Supplementary to the bar, which already shows the shape — dropped on SP
+     for room, where the same bar sits inside the hero card. */
+  @include m.mobile {
+    display: none;
+  }
+}
+
+.allocationItem {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.allocationSwatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.allocationValue {
+  color: var(--color-text);
+
+  @include m.tabular-nums;
+}
+
 .note {
   padding: var(--space-3);
   margin-bottom: var(--space-4);
@@ -6,4 +121,76 @@
   background-color: var(--color-surface);
   border-left: 2px solid var(--color-warn);
   border-radius: var(--radius-sm);
+}
+
+/* ── SP card list ─────────────────────────────────────────────────────────── */
+
+.sortControl {
+  margin-bottom: var(--space-3);
+}
+
+.cardList {
+  display: flex;
+  flex-direction: column;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.cardRow {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.cardSymbol {
+  min-width: 0;
+  font-weight: var(--weight-medium);
+
+  @include m.truncate;
+}
+
+.cardValue {
+  flex: none;
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.cardMeta {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.cardMetaText {
+  min-width: 0;
+
+  @include m.tabular-nums;
+  @include m.truncate;
+}
+
+.cardUnreal {
+  flex: none;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.cardDim {
+  color: var(--color-text-subtle);
+}
+
+.cardTrack {
+  margin-top: 2px;
 }

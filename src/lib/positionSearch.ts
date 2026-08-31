@@ -17,6 +17,11 @@ import { accountScopeSchema } from './accountScope'
  * Two keys are not row fields. `avgCost` and `price` are rendered from a
  * different field depending on currency, so the route supplies an accessor for
  * each; naming them after the column keeps the header and the ordering in step.
+ *
+ * `unrealizedPct` stays its own column rather than being folded into
+ * `unrealizedJpy`: sorting by return and sorting by yen answer different
+ * questions — a ¥40k position up 50% and a ¥2M position up 5% rank opposite
+ * ways — so collapsing them would take a real capability away.
  */
 export const POSITION_SORTABLE = [
   'symbol',

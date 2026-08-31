@@ -178,6 +178,30 @@
   border: 0;
 }
 
+/* ── Redesign layout ──────────────────────────────────────────────────────── */
+
+/**
+ * Hero card beside its strip of demoted figures.
+ *
+ * `align-items: flex-end` rather than `stretch` — the hero sizes to its own
+ * content (it never wraps to the strip's height), so the two bottoms line up
+ * instead of the shorter one stretching to match.
+ *
+ * Stacks on mobile: at 390px there is no room for the hero and a 5–6 cell
+ * strip side by side, so the row becomes a column and each child stretches to
+ * full width — `StatStrip` has its own mobile reflow for the cells within it.
+ */
+@mixin hero-row {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-end;
+
+  @include mobile {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 /* ── Breakpoints ──────────────────────────────────────────────────────────── */
 
 @mixin mobile {

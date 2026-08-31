@@ -78,6 +78,8 @@ export interface DashboardData {
   nisaGrowthMaxedYear: number | null
   stockEffectJpy: string
   fxEffectJpy: string
+  /** FX effect as a share of stock + FX effect combined. Null when both are zero. */
+  fxShare: number | null
   equityCurve: { date: string; value: string }[]
 }
 
@@ -221,6 +223,7 @@ export const getDashboard = createServerFn({ method: 'GET' })
       nisaGrowthMaxedYear: maxedGrowth?.year ?? null,
       stockEffectJpy: fx.stockEffectJpy.toFixed(0),
       fxEffectJpy: fx.fxEffectJpy.toFixed(0),
+      fxShare: fx.fxShare,
       equityCurve: stats.equityCurve.map((point) => ({
         date: point.date,
         value: point.value.toFixed(0),

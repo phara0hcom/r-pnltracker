@@ -1,10 +1,12 @@
 csv/*
+design_handoff_content_redesign/*
 node_modules
 .env
 .env.local
 .output
 .vinxi
 .tanstack
+*.zip
 drizzle/meta
 
 # Build output

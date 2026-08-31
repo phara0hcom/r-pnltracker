@@ -1,0 +1,39 @@
+.bar {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+}
+
+.growth {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background-color: var(--color-nisa-growth);
+}
+
+.tsumitate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background-color: var(--color-nisa-tsumitate);
+}
+
+/* Diagonal hatch over the pending-restoration slice — a texture rather than a
+   fifth colour, so it reads as "the same money, about to change state"
+   instead of a new category. */
+.hatch {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background-image: repeating-linear-gradient(135deg, rgb(11 13 16 / 55%) 0 3px, transparent 3px 6px);
+}
+
+.tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--color-border-strong);
+}

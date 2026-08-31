@@ -29,6 +29,7 @@ import {
   type TradeSide,
 } from '~/lib/domain/types'
 import { todayLocal } from '~/lib/localDate'
+import { daysUntilYearEnd } from '~/lib/nisa/daysLeft'
 import {
   ANNUAL_GROWTH_LIMIT,
   ANNUAL_TSUMITATE_LIMIT,
@@ -196,9 +197,12 @@ export interface NisaScreenData {
   growthUsed: string
   growthSubCap: string
   growthRemaining: string
+  tsumitateUsed: string
   pendingRestoration: string
   restorationDate: string
   legacyBookValue: string
+  /** Days from today to 31 December — the current year's annual frames expire then. */
+  daysLeftInYear: number
   annual: {
     year: number
     frame: 'NISA_GROWTH' | 'NISA_TSUMITATE'
@@ -227,9 +231,11 @@ export const getNisa = createServerFn({ method: 'GET' })
       growthUsed: report.lifetime.growthUsed.toFixed(0),
       growthSubCap: report.lifetime.growthSubCap.toFixed(0),
       growthRemaining: report.lifetime.growthRemaining.toFixed(0),
+      tsumitateUsed: report.lifetime.tsumitateUsed.toFixed(0),
       pendingRestoration: report.lifetime.pendingRestoration.toFixed(0),
       restorationDate: report.lifetime.restorationDate,
       legacyBookValue: legacyNisaBookValue(engine.positions).toFixed(0),
+      daysLeftInYear: daysUntilYearEnd(todayLocal()),
       annual: report.annual.map((frame) => ({
         year: frame.year,
         frame: frame.frame,
@@ -272,6 +278,8 @@ export interface TaxScreenData {
     tradeCount: number
     winRate: number | null
     netAfterTax: string
+    /** `estimatedTax / taxableGains`, as a share of *gross* gains. Null when there were none. */
+    effectiveRate: number | null
   }[]
   totals: {
     taxableGains: string
@@ -319,6 +327,9 @@ export const getTax = createServerFn({ method: 'GET' })
         tradeCount: summary.tradeCount,
         winRate: summary.winRate,
         netAfterTax: summary.netAfterTax.toFixed(0),
+        effectiveRate: summary.taxableGains.gt(0)
+          ? summary.estimatedCapitalGainsTax.div(summary.taxableGains).toNumber()
+          : null,
       })),
       totals: {
         taxableGains: yoy.totals.taxableGains.toFixed(0),
