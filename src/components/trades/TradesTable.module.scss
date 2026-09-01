@@ -82,17 +82,42 @@
 
 .symbol {
   display: block;
+  /* A fund's symbol is its full name, so this needs the same cap as the name
+     line — the colgroup alone would let a widened column stretch it. */
+  max-width: 280px;
   font-weight: var(--weight-medium);
 
   @include m.truncate;
+
+  @include m.mobile {
+    max-width: 100px;
+
+    /* A fund's symbol line long-presses like a name; without this iOS raises
+       its own selection callout on top of the popover. */
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
 }
 
 .name {
   display: block;
+  /* Capped like every other instrument name, rather than left to the column
+     width alone. Widening the column past this stops widening the name — the
+     `title` carries the rest. */
+  max-width: 280px;
   font-size: var(--text-xs);
   color: var(--color-text-subtle);
 
   @include m.truncate;
+
+  @include m.mobile {
+    max-width: 100px;
+
+    /* Long-pressing opens the full name; without this iOS raises its own
+       selection callout on top of it. */
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
 }
 
 .badge {
@@ -338,9 +363,16 @@
 }
 
 .thLabel {
+  /* The same cap the instrument cell carries, so a header cannot be the widest
+     thing in its column. */
+  max-width: 280px;
   min-width: 0;
 
   @include m.truncate;
+
+  @include m.mobile {
+    max-width: 100px;
+  }
 }
 
 /**
@@ -378,17 +410,14 @@
   position: relative;
 }
 
-.toolbar {
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
-  justify-content: flex-end;
-  margin-bottom: var(--space-2);
-}
-
 .hint {
   font-size: var(--text-xs);
   color: var(--color-text-subtle);
+
+  /* Advice about dragging a column edge, on a device with nothing to drag with. */
+  @include m.mobile {
+    display: none;
+  }
 }
 
 .resetButton {
@@ -399,4 +428,9 @@
   border-radius: var(--radius-sm);
 
   @include m.interactive-surface;
+}
+
+/** The whole instrument name — one popover shared by every row. */
+.fullName {
+  @include m.reveal-popover;
 }

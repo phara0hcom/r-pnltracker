@@ -1,32 +1,41 @@
 /**
- * Page controls for the Trades table.
+ * Page controls for a long table.
  *
  * Shows the row range rather than only page numbers — "51–100 of 315" answers
  * "where am I" better than "page 2 of 7".
+ *
+ * The row-count options come from the caller rather than being fixed here: what
+ * counts as a sensible page differs by screen, and the type parameter carries
+ * whichever literal union that screen's search schema accepts, so a size the
+ * URL could not hold fails to compile at the call site.
  */
 import styles from './Pagination.module.scss'
-import { PER_PAGE_OPTIONS, type PerPage } from '~/lib/tradeSearch'
 
-export function Pagination({
+export function Pagination<Size extends number>({
+  label,
   page,
   pageCount,
   perPage,
+  perPageOptions,
   total,
   onPage,
   onPerPage,
 }: {
+  /** Names the nav for screen readers — one page may hold more than one. */
+  label: string
   page: number
   pageCount: number
   perPage: number
+  perPageOptions: readonly Size[]
   total: number
   onPage: (page: number) => void
-  onPerPage: (perPage: PerPage) => void
+  onPerPage: (perPage: Size) => void
 }) {
   const first = (page - 1) * perPage + 1
   const last = Math.min(page * perPage, total)
 
   return (
-    <nav className={styles.pagination} aria-label="Trades pagination">
+    <nav className={styles.pagination} aria-label={label}>
       <span className={styles.pageInfo}>
         {first}–{last} of {total}
       </span>
@@ -37,10 +46,14 @@ export function Pagination({
           className={styles.perPageSelect}
           value={perPage}
           onChange={(event) => {
-            onPerPage(Number(event.target.value) as PerPage)
+            // Matched back against the options rather than cast from the
+            // element's string value: the cast would assert a literal type the
+            // DOM cannot actually guarantee.
+            const size = perPageOptions.find((option) => String(option) === event.target.value)
+            if (size !== undefined) onPerPage(size)
           }}
         >
-          {PER_PAGE_OPTIONS.map((size) => (
+          {perPageOptions.map((size) => (
             <option key={size} value={size}>
               {size}
             </option>

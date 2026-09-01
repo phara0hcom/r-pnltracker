@@ -1,0 +1,100 @@
+@use '../../styles/mixins' as m;
+
+.trigger {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+
+  @include m.radix-open {
+    color: var(--color-text);
+    background-color: var(--color-surface-hover);
+  }
+}
+
+/** How many filters are set, so a narrowed table is not mistaken for an empty one. */
+.count {
+  min-width: 17px;
+  padding: 0 4px;
+  font-size: 0.6875rem;
+  font-weight: var(--weight-medium);
+  line-height: 17px;
+  color: var(--color-bg);
+  text-align: center;
+  background-color: var(--color-accent);
+  border-radius: var(--radius-full);
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background-color: rgb(0 0 0 / 55%);
+}
+
+/**
+ * A sheet rising from the bottom, not a centred box: it puts the controls
+ * within thumb reach and leaves the table visible above, so you can see what
+ * you are filtering.
+ */
+.content {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  max-height: 85dvh;
+  padding: var(--space-4);
+  overflow-y: auto;
+  background-color: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lg);
+}
+
+.head {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+}
+
+/** Confirms the sheet can be dismissed — the overlay is not obviously tappable. */
+.done {
+  width: 100%;
+  padding: var(--space-3);
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-bg);
+  background-color: var(--color-profit);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+}

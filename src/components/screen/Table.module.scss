@@ -18,10 +18,20 @@
   }
 
   thead th {
+    /* Capped like the cells beneath it. This table is auto-layout, so without
+       it a long header is free to set the column width that the body cells are
+       capped precisely to avoid setting. */
+    max-width: 280px;
     font-size: var(--text-xs);
     font-weight: var(--weight-medium);
     color: var(--color-text-muted);
     background-color: var(--color-surface-raised);
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    @include m.mobile {
+      max-width: 100px;
+    }
   }
 
   tbody tr:last-child td {
@@ -73,6 +83,12 @@
    header floats left of the figures it labels. */
 [data-numeric] > .sortButton {
   justify-content: flex-end;
+}
+
+.sortLabel {
+  min-width: 0;
+
+  @include m.truncate;
 }
 
 .sortActive {

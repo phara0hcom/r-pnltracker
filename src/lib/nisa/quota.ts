@@ -56,6 +56,14 @@ export interface LifetimeUsage {
   growthUsed: Decimal
   growthSubCap: Decimal
   growthRemaining: Decimal
+  /**
+   * Portion of `used` held in つみたて投資枠, which has no sub-cap of its own.
+   *
+   * Returned rather than left to the caller as `used - growthUsed`: the two
+   * figures are clamped at zero independently, so that subtraction is only
+   * incidentally right and would silently go negative if they ever diverged.
+   */
+  tsumitateUsed: Decimal
   /** Acquisition cost of units sold this year — returns to the pool next January. */
   pendingRestoration: Decimal
   /** The January in which `pendingRestoration` lands. */
@@ -141,6 +149,7 @@ export function lifetimeUsage(
 ): LifetimeUsage {
   let acquired = ZERO
   let growthAcquired = ZERO
+  let tsumitateAcquired = ZERO
 
   for (const trade of trades) {
     if (!isNewNisa(trade.accountType)) continue
@@ -149,10 +158,12 @@ export function lifetimeUsage(
     const cost = acquisitionCost(trade)
     acquired = acquired.add(cost)
     if (trade.accountType === 'NISA_GROWTH') growthAcquired = growthAcquired.add(cost)
+    else tsumitateAcquired = tsumitateAcquired.add(cost)
   }
 
   let restored = ZERO
   let growthRestored = ZERO
+  let tsumitateRestored = ZERO
   let pending = ZERO
 
   for (const close of realized) {
@@ -163,6 +174,7 @@ export function lifetimeUsage(
       // Sold in an earlier year — the quota came back that January.
       restored = restored.add(close.costJpy)
       if (close.accountType === 'NISA_GROWTH') growthRestored = growthRestored.add(close.costJpy)
+      else tsumitateRestored = tsumitateRestored.add(close.costJpy)
     } else {
       // Sold this year — still occupying the pool until next January.
       pending = pending.add(close.costJpy)
@@ -171,6 +183,7 @@ export function lifetimeUsage(
 
   const used = Decimal.max(ZERO, acquired.sub(restored))
   const growthUsed = Decimal.max(ZERO, growthAcquired.sub(growthRestored))
+  const tsumitateUsed = Decimal.max(ZERO, tsumitateAcquired.sub(tsumitateRestored))
 
   return {
     used,
@@ -179,6 +192,7 @@ export function lifetimeUsage(
     growthUsed,
     growthSubCap: LIFETIME_GROWTH_SUBCAP,
     growthRemaining: Decimal.max(ZERO, LIFETIME_GROWTH_SUBCAP.sub(growthUsed)),
+    tsumitateUsed,
     pendingRestoration: pending,
     restorationDate: `${asOfYear + 1}-01`,
     utilization: used.div(LIFETIME_LIMIT).toNumber(),

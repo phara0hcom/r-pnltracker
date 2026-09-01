@@ -138,6 +138,33 @@
   white-space: nowrap;
 }
 
+/**
+ * The surface shared by every floating panel — long-press popovers and the
+ * collapsed sidebar's tooltips.
+ *
+ * Colour, border and shadow only. Size is the caller's: a tooltip holding one
+ * word wants tighter padding and a smaller radius than a popover holding a
+ * 45-character fund name, and forcing them to match would make one of the two
+ * wrong.
+ */
+@mixin floating-surface {
+  z-index: 60;
+  color: var(--color-text);
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-md);
+}
+
+/** A long-press popover: the surface, sized for a full instrument name. */
+@mixin reveal-popover {
+  @include floating-surface;
+
+  max-width: min(80vw, 320px);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-md);
+}
+
 /** Hidden visually but still announced by screen readers. */
 @mixin visually-hidden {
   position: absolute;
@@ -149,6 +176,30 @@
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* ── Redesign layout ──────────────────────────────────────────────────────── */
+
+/**
+ * Hero card beside its strip of demoted figures.
+ *
+ * `align-items: flex-end` rather than `stretch` — the hero sizes to its own
+ * content (it never wraps to the strip's height), so the two bottoms line up
+ * instead of the shorter one stretching to match.
+ *
+ * Stacks on mobile: at 390px there is no room for the hero and a 5–6 cell
+ * strip side by side, so the row becomes a column and each child stretches to
+ * full width — `StatStrip` has its own mobile reflow for the cells within it.
+ */
+@mixin hero-row {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-end;
+
+  @include mobile {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 /* ── Breakpoints ──────────────────────────────────────────────────────────── */

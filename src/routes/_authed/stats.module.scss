@@ -1,5 +1,28 @@
 @use '../../styles/mixins' as m;
 
+.heroRow {
+  margin-bottom: var(--space-5);
+
+  @include m.hero-row;
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+/* ── PC two-column sections ───────────────────────────────────────────────── */
+
+.twoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
 .attribution {
   padding: var(--space-4);
 
@@ -25,12 +48,58 @@
   gap: var(--space-4);
 }
 
+.dotCell {
+  display: inline-flex;
+  align-items: center;
+}
+
+.classDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: var(--space-2);
+  border-radius: 50%;
+}
+
+/**
+ * The symbol line of the instrument cell.
+ *
+ * Capped, and `display: block` so the cap applies at all — a bare `<strong>` is
+ * inline, where `max-width` does nothing. Funds carry no ticker, so this line
+ * holds a 45-character fund name rather than `8411`; uncapped it set the width
+ * of the whole column.
+ */
+.instrument {
+  display: block;
+  max-width: 280px;
+
+  @include m.truncate;
+
+  @include m.mobile {
+    max-width: 100px;
+
+    /* Long-pressed to reveal the full name; without this iOS raises its own
+       selection callout on top of the popover. */
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+}
+
 .subName {
-  max-width: 26ch;
+  max-width: 280px;
   font-size: var(--text-xs);
   color: var(--color-text-subtle);
 
   @include m.truncate;
+
+  @include m.mobile {
+    max-width: 100px;
+
+    /* Long-pressed to reveal the full name; without this iOS raises its own
+       selection callout on top of the popover. */
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
 }
 
 .note {
@@ -39,4 +108,309 @@
   color: var(--color-text-subtle);
 
   @include m.tabular-nums;
+}
+
+/* ── SP ───────────────────────────────────────────────────────────────────── */
+
+.spStats {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-3);
+}
+
+.spRow {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+
+  dd {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--color-text);
+    white-space: nowrap;
+
+    @include m.tabular-nums;
+  }
+}
+
+.spHint {
+  color: var(--color-text-subtle);
+}
+
+.spSectionTitle {
+  margin: var(--space-5) 0 var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.spSectionDesc {
+  margin-bottom: var(--space-3);
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+}
+
+.spAttr {
+  display: flex;
+  flex-direction: column;
+}
+
+.spAttrRow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 0;
+}
+
+.spAttrHead {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+}
+
+.spAttrLabel {
+  color: var(--color-text-muted);
+}
+
+.spAttrValue {
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.spAttrTrack {
+  height: 8px;
+  overflow: hidden;
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-full);
+}
+
+.spAttrFillPos {
+  height: 100%;
+  background-color: var(--color-profit);
+  border-radius: var(--radius-full);
+}
+
+.spAttrFillNeg {
+  height: 100%;
+  background-color: var(--color-loss);
+  border-radius: var(--radius-full);
+}
+
+.spSymbols {
+  display: flex;
+  flex-direction: column;
+}
+
+.spSymbolRow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.spSymbolHead {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.spSymbolName {
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.truncate;
+}
+
+.spSymbolNet {
+  flex: none;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.spSymbolBar {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.spSymbolCloses {
+  flex: none;
+  width: 74px;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.spSymbolTrack {
+  flex: 1;
+  min-width: 0;
+}
+
+.spSymbolWin {
+  flex: none;
+  width: 34px;
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+  text-align: right;
+
+  @include m.tabular-nums;
+}
+
+/* ── Trade distribution ───────────────────────────────────────────────────── */
+
+/* Sized rather than left to stretch: `SegmentedTabs` is an equal-column grid,
+   and in a Section's actions slot it would otherwise run the width of the row. */
+.viewSwitch {
+  width: 148px;
+
+  @include m.mobile {
+    width: 132px;
+  }
+}
+
+.periodNav {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.periodLabel {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.periodButtons {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.periodButton {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.35;
+
+    &:hover {
+      background-color: transparent;
+    }
+  }
+}
+
+/**
+ * `pan-y` is load-bearing, not decorative.
+ *
+ * It hands vertical drags back to the page so the chart never traps a scroll,
+ * while keeping horizontal ones for `useSwipe` — without it the browser can
+ * claim the drag before `touchend` fires and the swipe simply never arrives.
+ */
+.swipeArea {
+  touch-action: pan-y;
+}
+
+.swipeHint {
+  margin-top: var(--space-2);
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+  text-align: center;
+}
+
+/* The date is the column the eye scans down, so it keeps its own width rather
+   than being squeezed by a long instrument name beside it. */
+.dateCell {
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+/* ── SP ───────────────────────────────────────────────────────────────────── */
+
+.spDistHead {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin: var(--space-5) 0 var(--space-1);
+
+  /* The heading owns the row margin above; inside it the margin would stack. */
+  .spSectionTitle {
+    margin: 0;
+  }
+}
+
+.spCloses {
+  display: flex;
+  flex-direction: column;
+}
+
+.spCloseRow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.spCloseHead {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.spCloseName {
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.truncate;
+}
+
+.spCloseNet {
+  flex: none;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.spCloseMeta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}
+
+/* Pushed to the end of the meta line so returns stack into a scannable column
+   down the list rather than floating after a variable-width account label. */
+.spCloseReturn {
+  margin-left: auto;
+  font-size: var(--text-xs);
 }

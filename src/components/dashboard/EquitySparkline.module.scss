@@ -1,0 +1,17 @@
+@use '../../styles/mixins' as m;
+
+.svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}

@@ -4,11 +4,147 @@
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
   min-height: 100dvh;
+  transition: grid-template-columns var(--duration) var(--ease);
 
   @include m.tablet {
+    /* The sidebar is gone below this width; the header takes its own row. */
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
   }
 }
+
+/** Collapsed to the icon rail. Desktop only — below the breakpoint the sidebar
+    is gone entirely and the width is irrelevant. */
+.shellCollapsed {
+  grid-template-columns: var(--sidebar-rail-width) 1fr;
+}
+
+/* ── Mobile header ────────────────────────────────────────────────────────── */
+
+/**
+ * Only exists below the sidebar's breakpoint.
+ *
+ * Sticky rather than fixed: it keeps its grid row, so the content below starts
+ * beneath it without a hardcoded offset that would have to track its height.
+ */
+.topBar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: none;
+  gap: var(--space-3);
+  align-items: center;
+  height: var(--topbar-height);
+  padding: 0 var(--space-4);
+  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+
+  @include m.tablet {
+    display: flex;
+  }
+}
+
+/**
+ * Holds the brand and the page name stacked on one another.
+ *
+ * Both are laid out; only their opacity changes. Swapping the text outright
+ * would reflow the bar mid-scroll, and a grid cell keeps the box sized to the
+ * wider of the two so nothing shifts as they cross over.
+ */
+.topBarLabel {
+  display: grid;
+  min-width: 0;
+}
+
+.labelSlot {
+  grid-area: 1 / 1;
+  align-self: center;
+  min-width: 0;
+  transition: opacity var(--duration) var(--ease);
+}
+
+.labelHidden {
+  opacity: 0;
+  /* Faded out, so it must not swallow taps meant for what is underneath. */
+  pointer-events: none;
+}
+
+.pageName {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+
+  @include m.truncate;
+}
+
+.hamburger {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  font-size: var(--text-md);
+  line-height: 1;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+}
+
+/* ── Drawer ───────────────────────────────────────────────────────────────── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background-color: rgb(0 0 0 / 55%);
+}
+
+.drawer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(82vw, 300px);
+  padding: var(--space-4) var(--space-3);
+  overflow-y: auto;
+  background-color: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+}
+
+.drawerHead {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-4);
+}
+
+.drawerClose {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+}
+
+/** Fills the drawer so the user footer sits at the bottom, as in the sidebar. */
+.drawerNav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ── Desktop sidebar ──────────────────────────────────────────────────────── */
 
 .sidebar {
   position: sticky;
@@ -20,16 +156,68 @@
   background-color: var(--color-surface);
   border-right: 1px solid var(--color-border);
 
+  /* Replaced by the header and drawer, not merely restacked — the wrapped row
+     of ten links it used to become pushed every screen below the fold. */
   @include m.tablet {
-    position: static;
-    height: auto;
+    display: none;
   }
 }
+
+/** Everything centres, and nothing may push the rail wider than its column. */
+.sidebarCollapsed {
+  padding-inline: var(--space-2);
+  overflow: hidden;
+
+  .brand {
+    justify-content: center;
+    padding-inline: 0;
+  }
+}
+
+/**
+ * Sits below the nav's own footer, so it is the last thing in the column and
+ * stays in the same place whichever state the rail is in.
+ */
+.collapseToggle {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-subtle);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.sidebarCollapsed .collapseToggle {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.collapseChevron {
+  width: 1.1em;
+  font-size: var(--text-md);
+  line-height: 1;
+  text-align: center;
+}
+
+/* ── Brand ────────────────────────────────────────────────────────────────── */
 
 .brand {
   display: flex;
   gap: var(--space-2);
   align-items: center;
+}
+
+/* Only the sidebar needs the gap under the brand; the drawer's head and the
+   header bar space themselves. */
+.sidebar > .brand {
   padding: var(--space-2) var(--space-3) var(--space-5);
 }
 
@@ -51,95 +239,7 @@
   letter-spacing: -0.01em;
 }
 
-.navList {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-
-  @include m.tablet {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-}
-
-.navLink {
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--text-base);
-  color: var(--color-text-muted);
-  text-decoration: none;
-  border-radius: var(--radius-md);
-  transition: background-color var(--duration-fast) var(--ease),
-    color var(--duration-fast) var(--ease);
-
-  @include m.focus-ring;
-
-  &:hover {
-    color: var(--color-text);
-    text-decoration: none;
-    background-color: var(--color-surface-hover);
-  }
-}
-
-.navLinkActive {
-  color: var(--color-text);
-  background-color: var(--color-surface-raised);
-
-  /* A left rule reads as "current" without relying on colour alone. */
-  box-shadow: inset 2px 0 0 var(--color-accent);
-}
-
-.navGlyph {
-  width: 1.1em;
-  font-size: var(--text-md);
-  line-height: 1;
-  text-align: center;
-  opacity: 0.75;
-}
-
-.footer {
-  padding-top: var(--space-4);
-  margin-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
-}
-
-.user {
-  display: flex;
-  flex-direction: column;
-  padding: 0 var(--space-3) var(--space-3);
-}
-
-.userName {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-
-  @include m.truncate;
-}
-
-.userEmail {
-  font-size: var(--text-xs);
-  color: var(--color-text-subtle);
-
-  @include m.truncate;
-}
-
-.signOut {
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  text-align: left;
-  border-radius: var(--radius-md);
-
-  @include m.interactive-surface;
-
-  &:hover {
-    color: var(--color-text);
-  }
-}
+/* ── Content ──────────────────────────────────────────────────────────────── */
 
 .content {
   min-width: 0; /* lets wide tables scroll instead of stretching the grid */
@@ -153,7 +253,7 @@
 /*
  * Kept readable rather than hidden: these are the previous screen's real
  * figures, and a fade is enough to say "not the page you asked for yet".
- * Deliberately not `pointer-events: none` — the sidebar stays outside this
+ * Deliberately not `pointer-events: none` — the nav stays outside this
  * element, so navigating somewhere else mid-load still works.
  */
 .contentBusy {

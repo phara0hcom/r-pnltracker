@@ -7,11 +7,14 @@ export function Stat({
   value,
   hint,
   tone,
+  meter,
 }: {
   label: string
   value: React.ReactNode
   hint?: React.ReactNode
   tone?: 'profit' | 'loss' | 'flat'
+  /** Fraction 0–1: a thin accent fill under the value, coloured by `tone`. */
+  meter?: number
 }) {
   return (
     <div className={styles.stat}>
@@ -25,6 +28,18 @@ export function Stat({
       >
         {value}
       </span>
+      {meter != null ? (
+        <div className={styles.meterTrack}>
+          <div
+            className={cx(
+              styles.meterFill,
+              tone === 'profit' && styles.meterProfit,
+              tone === 'loss' && styles.meterLoss,
+            )}
+            style={{ width: `${String(Math.min(Math.max(meter, 0), 1) * 100)}%` }}
+          />
+        </div>
+      ) : null}
       {hint ? <span className={styles.hint}>{hint}</span> : null}
     </div>
   )

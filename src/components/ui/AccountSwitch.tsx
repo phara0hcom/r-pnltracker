@@ -21,7 +21,10 @@ import type { AccountFilter } from '~/lib/domain/types'
  *
  * `replace: true` — flipping a filter is refining one view, not a new
  * destination, so Back should leave the screen rather than walk through every
- * toggle you tried.
+ * toggle you tried. `resetScroll: false` for the same reason Stats' own
+ * `setSearch` needs it: the router scrolls to the top on every navigation by
+ * default, and this switch lives in the page header, so a reader scrolled
+ * halfway down the screen would otherwise get thrown back up by their own tap.
  */
 export function useAccountFilter(): [AccountFilter, (next: AccountFilter) => void] {
   /*
@@ -43,6 +46,7 @@ export function useAccountFilter(): [AccountFilter, (next: AccountFilter) => voi
         // URL for the default view, and one canonical form for it.
         search: (prev) => ({ ...prev, scope: next === 'ALL' ? undefined : next }),
         replace: true,
+        resetScroll: false,
       })
     },
   ]

@@ -35,3 +35,26 @@
 .loss {
   color: var(--color-loss);
 }
+
+.meterTrack {
+  height: 3px;
+  margin-top: var(--space-2);
+  overflow: hidden;
+  background-color: var(--color-surface-hover);
+  border-radius: var(--radius-full);
+}
+
+.meterFill {
+  height: 100%;
+  background-color: var(--color-accent);
+  border-radius: var(--radius-full);
+  transition: width var(--duration) var(--ease);
+}
+
+.meterProfit {
+  background-color: var(--color-profit);
+}
+
+.meterLoss {
+  background-color: var(--color-loss);
+}

@@ -29,6 +29,7 @@ import {
   type TradeSide,
 } from '~/lib/domain/types'
 import { todayLocal } from '~/lib/localDate'
+import { daysUntilYearEnd } from '~/lib/nisa/daysLeft'
 import {
   ANNUAL_GROWTH_LIMIT,
   ANNUAL_TSUMITATE_LIMIT,
@@ -196,9 +197,12 @@ export interface NisaScreenData {
   growthUsed: string
   growthSubCap: string
   growthRemaining: string
+  tsumitateUsed: string
   pendingRestoration: string
   restorationDate: string
   legacyBookValue: string
+  /** Days from today to 31 December — the current year's annual frames expire then. */
+  daysLeftInYear: number
   annual: {
     year: number
     frame: 'NISA_GROWTH' | 'NISA_TSUMITATE'
@@ -227,9 +231,11 @@ export const getNisa = createServerFn({ method: 'GET' })
       growthUsed: report.lifetime.growthUsed.toFixed(0),
       growthSubCap: report.lifetime.growthSubCap.toFixed(0),
       growthRemaining: report.lifetime.growthRemaining.toFixed(0),
+      tsumitateUsed: report.lifetime.tsumitateUsed.toFixed(0),
       pendingRestoration: report.lifetime.pendingRestoration.toFixed(0),
       restorationDate: report.lifetime.restorationDate,
       legacyBookValue: legacyNisaBookValue(engine.positions).toFixed(0),
+      daysLeftInYear: daysUntilYearEnd(todayLocal()),
       annual: report.annual.map((frame) => ({
         year: frame.year,
         frame: frame.frame,
@@ -272,6 +278,8 @@ export interface TaxScreenData {
     tradeCount: number
     winRate: number | null
     netAfterTax: string
+    /** `estimatedTax / taxableGains`, as a share of *gross* gains. Null when there were none. */
+    effectiveRate: number | null
   }[]
   totals: {
     taxableGains: string
@@ -319,6 +327,9 @@ export const getTax = createServerFn({ method: 'GET' })
         tradeCount: summary.tradeCount,
         winRate: summary.winRate,
         netAfterTax: summary.netAfterTax.toFixed(0),
+        effectiveRate: summary.taxableGains.gt(0)
+          ? summary.estimatedCapitalGainsTax.div(summary.taxableGains).toNumber()
+          : null,
       })),
       totals: {
         taxableGains: yoy.totals.taxableGains.toFixed(0),
@@ -592,6 +603,39 @@ export interface StatsScreenData {
   /** Realized P&L per day, paired with that day's journal entry. */
   moodCorrelation: { mood: number; days: number; totalPnl: string; avgPnl: string }[]
   motivationCorrelation: { motivation: number; days: number; totalPnl: string; avgPnl: string }[]
+  /**
+   * Every close, oldest first — the trade-distribution section's own data.
+   *
+   * Sent whole rather than per period so paging through months or weeks costs
+   * no round-trip, the same trade the dashboard's monthly chart makes. It is
+   * also what lets the circle and axis scales be fixed to the full history:
+   * a window-at-a-time feed could only ever scale to what it could see.
+   */
+  closes: StatsClose[]
+}
+
+/** One realized close, as the trade-distribution table and chart render it. */
+export interface StatsClose {
+  /** Trade date of the sale, `YYYY-MM-DD`. Not the settlement date: this is a
+   *  behavioural view of when you traded, not a tax one. */
+  date: string
+  symbol: string
+  name: string
+  accountType: string
+  quantity: string
+  /** JPY cost of exactly the units sold. */
+  costJpy: string
+  realizedJpy: string
+  /**
+   * Realized ÷ cost basis of the units sold.
+   *
+   * Null when that basis is zero — a pool built entirely from 再投資 rows can
+   * close with nothing to measure the return against. Such a close still
+   * appears in the table; it has no height on the chart, so it is left out
+   * there and counted in the note beneath it.
+   */
+  returnPct: number | null
+  holdingDays: number
 }
 
 export const getStats = createServerFn({ method: 'GET' })
@@ -687,6 +731,20 @@ export const getStats = createServerFn({ method: 'GET' })
       },
       moodCorrelation: bucket('mood') as StatsScreenData['moodCorrelation'],
       motivationCorrelation: bucket('motivation') as StatsScreenData['motivationCorrelation'],
+      // Already chronological — the engine emits closes in the order it
+      // processes them — so the client can take the first and last as the range
+      // it may page over without sorting again.
+      closes: engine.realized.map((close) => ({
+        date: close.tradeDate,
+        symbol: close.symbol,
+        name: close.name,
+        accountType: close.accountType,
+        quantity: close.quantity.toFixed(),
+        costJpy: close.costJpy.toFixed(0),
+        realizedJpy: close.realizedJpy.toFixed(0),
+        returnPct: close.costJpy.gt(0) ? close.realizedJpy.div(close.costJpy).toNumber() : null,
+        holdingDays: close.holdingDays,
+      })),
     }
   })
 

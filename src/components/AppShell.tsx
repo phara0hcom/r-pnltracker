@@ -1,35 +1,38 @@
 /**
- * Persistent application frame: sidebar navigation plus the routed content area.
+ * Persistent application frame: navigation plus the routed content area.
+ *
+ * Two presentations of one nav. Above 1024px it is a sticky sidebar. At or
+ * below, where the sidebar used to collapse into a wrapped row of ten links
+ * sitting on top of every screen, it becomes a header bar and a drawer.
  *
  * Rendered inside the `_authed` guard, so a user is always present here.
  */
-import { Link } from '@tanstack/react-router'
+import * as Dialog from '@radix-ui/react-dialog'
+import { useRouter } from '@tanstack/react-router'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import styles from './AppShell.module.scss'
-import { useAccountFilter } from '~/components/ui/AccountSwitch'
+import { SidebarNav } from './SidebarNav'
+import {
+  getPageTitle,
+  getServerPageTitle,
+  subscribePageTitle,
+} from '~/components/screen/pageTitle'
 import { RouteProgress, useRouteLoading } from '~/components/ui/RouteProgress'
-import { signOut } from '~/lib/auth-client'
+import { useSidebarCollapsed } from '~/components/ui/useSidebarCollapsed'
 import { cx } from '~/lib/cx'
 import type { SessionUser } from '~/lib/session'
 
-interface NavItem {
-  to: string
-  label: string
-  /** Short glyph rather than an icon dependency. */
-  glyph: string
+/** The mark alone on the collapsed rail, where there is no room for the name. */
+function Brand({ wordmark = true }: { wordmark?: boolean }) {
+  return (
+    <div className={styles.brand}>
+      <span className={styles.brandMark} aria-hidden="true">
+        ¥
+      </span>
+      {wordmark ? <span className={styles.brandText}>PnL Tracker</span> : null}
+    </div>
+  )
 }
-
-const NAV: NavItem[] = [
-  { to: '/dashboard', label: 'Dashboard', glyph: '◎' },
-  { to: '/trades', label: 'Trades', glyph: '≡' },
-  { to: '/positions', label: 'Positions', glyph: '▤' },
-  { to: '/dividends', label: 'Dividends', glyph: '◇' },
-  { to: '/calendar', label: 'Calendar', glyph: '▦' },
-  { to: '/stats', label: 'Stats', glyph: '◈' },
-  { to: '/nisa', label: 'NISA', glyph: '◱' },
-  { to: '/tax', label: 'Tax', glyph: '¥' },
-  { to: '/import', label: 'Import', glyph: '↥' },
-  { to: '/settings', label: 'Settings', glyph: '⚙' },
-]
 
 export function AppShell({
   user,
@@ -39,62 +42,102 @@ export function AppShell({
   children: React.ReactNode
 }) {
   const loading = useRouteLoading()
-  const [account] = useAccountFilter()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [collapsed, toggleCollapsed] = useSidebarCollapsed()
+  const router = useRouter()
+
+  /*
+   * Once the screen's own title scrolls behind the header, the header takes it
+   * over — otherwise a long table leaves you with no indication of where you
+   * are beyond the app's name, which you already know.
+   */
+  const page = useSyncExternalStore(subscribePageTitle, getPageTitle, getServerPageTitle)
+  const showPageName = page.scrolledPast && page.title !== null
+
+  /*
+   * Closed once a navigation resolves, rather than on each link's click: a click
+   * handler would miss the browser Back button, leaving the drawer open over a
+   * screen already navigated away from.
+   *
+   * A subscription rather than an effect watching the pathname — the router is
+   * the external system here, and syncing its state into React state on every
+   * render is the cascading-render pattern `react-hooks` rightly rejects.
+   */
+  useEffect(
+    () =>
+      router.subscribe('onResolved', () => {
+        setMenuOpen(false)
+      }),
+    [router],
+  )
 
   return (
-    <div className={styles.shell}>
+    <div className={cx(styles.shell, collapsed && styles.shellCollapsed)}>
       <RouteProgress loading={loading} />
 
-      <nav className={styles.sidebar} aria-label="Main navigation">
-        <div className={styles.brand}>
-          <span className={styles.brandMark} aria-hidden="true">
-            ¥
+      {/* Below the sidebar's breakpoint only — see the stylesheet. */}
+      <header className={styles.topBar}>
+        <Dialog.Root open={menuOpen} onOpenChange={setMenuOpen}>
+          <Dialog.Trigger className={styles.hamburger} aria-label="Open navigation">
+            <span aria-hidden="true">☰</span>
+          </Dialog.Trigger>
+
+          <Dialog.Portal>
+            <Dialog.Overlay className={styles.overlay} />
+            {/* Radix supplies the focus trap, Escape handling, scroll lock and
+                `aria-modal` — the parts of a drawer that are easy to get subtly
+                wrong by hand. */}
+            <Dialog.Content className={styles.drawer} aria-label="Main navigation">
+              <Dialog.Title className="visually-hidden">Navigation</Dialog.Title>
+              <div className={styles.drawerHead}>
+                <Brand />
+                <Dialog.Close className={styles.drawerClose} aria-label="Close navigation">
+                  <span aria-hidden="true">✕</span>
+                </Dialog.Close>
+              </div>
+              <nav className={styles.drawerNav}>
+                <SidebarNav user={user} />
+              </nav>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+
+        {/* Both rendered, one faded out: crossfading between them keeps the bar
+            from reflowing as the text swaps mid-scroll. `aria-hidden` on the
+            inactive one stops a screen reader announcing both. */}
+        <span className={styles.topBarLabel}>
+          <span className={cx(styles.labelSlot, showPageName && styles.labelHidden)}
+                aria-hidden={showPageName}>
+            <Brand />
           </span>
-          <span className={styles.brandText}>PnL Tracker</span>
-        </div>
+          <span className={cx(styles.labelSlot, styles.pageName, !showPageName && styles.labelHidden)}
+                aria-hidden={!showPageName}>
+            {page.title}
+          </span>
+        </span>
+      </header>
 
-        <ul className={styles.navList}>
-          {NAV.map((item) => (
-            <li key={item.to}>
-              <Link
-                to={item.to}
-                /*
-                 * Carried on every link, including the screens that do not use
-                 * it. Those declare `scope` purely so it survives the trip —
-                 * dropping it on Trades meant a detour there silently reset the
-                 * switch, which is the whole reason it has its own key rather
-                 * than sharing Trades' `account`.
-                 */
-                search={account !== 'ALL' ? { scope: account } : undefined}
-                className={styles.navLink}
-                activeProps={{ className: cx(styles.navLink, styles.navLinkActive) }}
-              >
-                <span className={styles.navGlyph} aria-hidden="true">
-                  {item.glyph}
-                </span>
-                {item.label}
-              </Link>
-            </li>
-          ))}
-        </ul>
+      <nav
+        className={cx(styles.sidebar, collapsed && styles.sidebarCollapsed)}
+        aria-label="Main navigation"
+      >
+        <Brand wordmark={!collapsed} />
+        <SidebarNav user={user} collapsed={collapsed} />
 
-        <div className={styles.footer}>
-          <div className={styles.user}>
-            <span className={styles.userName}>{user.name}</span>
-            <span className={styles.userEmail}>{user.email}</span>
-          </div>
-          <button
-            type="button"
-            className={styles.signOut}
-            onClick={() => {
-              void signOut().then(() => {
-                window.location.href = '/signin'
-              })
-            }}
-          >
-            Sign out
-          </button>
-        </div>
+        <button
+          type="button"
+          className={styles.collapseToggle}
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          // The rail is a persisted preference, so the control is a switch
+          // rather than a plain button — its state is worth announcing.
+          aria-pressed={collapsed}
+        >
+          <span className={styles.collapseChevron} aria-hidden="true">
+            {collapsed ? '»' : '«'}
+          </span>
+          {collapsed ? null : 'Collapse'}
+        </button>
       </nav>
 
       {/* Dimmed while a navigation is in flight, so the figures on screen are

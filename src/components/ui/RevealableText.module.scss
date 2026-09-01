@@ -1,0 +1,6 @@
+@use '../../styles/mixins' as m;
+
+/** The whole string, revealed by a long press. */
+.popover {
+  @include m.reveal-popover;
+}
