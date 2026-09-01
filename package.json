@@ -2,6 +2,7 @@
   "name": "pnltracker",
   "private": true,
   "type": "module",
+  "version": "0.5.0",
   "engines": {
     "node": "22.x"
   },
