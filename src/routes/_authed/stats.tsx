@@ -1,7 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { z } from 'zod'
 import styles from './stats.module.scss'
 import { AccountDot } from '~/components/AccountDot'
+import { TradeScatter } from '~/components/charts/TradeScatter'
 import { ZeroBar } from '~/components/charts/ZeroBar'
 import { ACCOUNT_LABEL, ASSET_LABEL, days, pct, ratio, tone, yen, yenSigned } from '~/components/format'
 import { Empty, HeroStat, PageHeader, SegmentedTabs, Section, StatStrip, StripCell, Table } from '~/components/screen'
@@ -11,12 +13,23 @@ import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
 import { RevealableText } from '~/components/ui/RevealableText'
 import { useIsMobile } from '~/components/ui/useIsMobile'
+import { useSwipe } from '~/components/ui/useSwipe'
 import { accountScopeSchema } from '~/lib/accountScope'
+import { type WindowUnit, returnDomain, windowFor, windowsBack } from '~/lib/charts/tradeScatter'
 import { cx } from '~/lib/cx'
 import { getStats } from '~/server/screens'
 
 export const Route = createFileRoute('/_authed/stats')({
-  validateSearch: accountScopeSchema,
+  // The trade-distribution view and its window live in the URL for the same
+  // reason the dashboard's chart window does: a particular period stays
+  // shareable and survives a refresh. Optional rather than defaulted — a
+  // required key would force every redirect to /stats to supply one.
+  validateSearch: z
+    .object({
+      view: z.enum(['table', 'chart']).catch('table').optional(),
+      back: z.number().int().min(0).catch(0).optional(),
+    })
+    .extend(accountScopeSchema.shape),
   loaderDeps: ({ search }) => ({ account: search.scope ?? 'ALL' }),
   loader: ({ deps }) => getStats({ data: { account: deps.account } }),
   component: Stats,
@@ -31,8 +44,21 @@ const ASSET_COLOR: Record<string, string> = {
 const TABS = [
   { id: 'overview' as const, label: 'Overview' },
   { id: 'breakdown' as const, label: 'Breakdown' },
+  { id: 'trades' as const, label: 'Trades' },
   { id: 'journal' as const, label: 'Journal' },
 ]
+
+const VIEW_TABS = [
+  { id: 'table' as const, label: 'Table' },
+  { id: 'chart' as const, label: 'Chart' },
+]
+
+/**
+ * How far one press of the nav moves. A month on PC and a week on SP, because
+ * that is how many day columns each screen has room for — 31 columns on a
+ * 390px phone would be 12px each, which is narrower than the smallest circle.
+ */
+const stepFor = (isMobile: boolean): WindowUnit => (isMobile ? 'week' : 'month')
 
 function InstrumentCell({ symbol, name }: { symbol: string; name: string }) {
   return name === symbol ? (
@@ -50,7 +76,70 @@ function Stats() {
   const [account, setAccount] = useAccountFilter()
   const isMobile = useIsMobile()
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('overview')
+  const { view = 'table', back = 0 } = Route.useSearch()
+  const navigate = Route.useNavigate()
   const hasJournal = d.moodCorrelation.length > 0 || d.motivationCorrelation.length > 0
+
+  const unit = stepFor(isMobile)
+
+  /**
+   * The trade-distribution window, and the two scales the chart is drawn on.
+   *
+   * The whole history is already in the loader payload, so paging costs no
+   * round-trip — the same trade the dashboard chart makes. Both scales are
+   * derived from *every* close rather than the visible ones: a window-at-a-time
+   * scale would draw a quiet week's ¥3,000 win the same size as a busy month's
+   * ¥300,000 one and destroy the comparison paging exists to make.
+   *
+   * Anchored to the last close rather than to today. A portfolio whose most
+   * recent sale was in March should open on March, not on an empty August.
+   */
+  const distribution = useMemo(() => {
+    const anchor = d.closes.at(-1)?.date
+    if (anchor == null) return null
+
+    const maxBack = windowsBack(unit, d.closes[0]?.date ?? anchor, anchor)
+    // Clamped rather than trusted: `back` comes from the URL, and a stale
+    // bookmark from the PC (months) lands here as a week index on a phone.
+    const offset = Math.min(Math.max(back, 0), maxBack)
+    const window = windowFor(unit, anchor, offset)
+
+    return {
+      window,
+      offset,
+      maxBack,
+      inWindow: d.closes.filter((close) => close.date >= window.start && close.date <= window.end),
+      domain: returnDomain(
+        d.closes.map((close) => close.returnPct).filter((value): value is number => value != null),
+      ),
+      maxMagnitude: Math.max(0, ...d.closes.map((close) => Math.abs(Number(close.realizedJpy)))),
+    }
+  }, [d.closes, back, unit])
+
+  // Merged onto `prev` rather than replaced: the object form drops the whole
+  // search record, which would silently reset the account switch every time you
+  // paged the window — the bug the dashboard chart already hit.
+  const shift = (delta: number) => {
+    if (distribution == null) return
+    const next = Math.min(Math.max(distribution.offset + delta, 0), distribution.maxBack)
+    void navigate({ search: (prev) => ({ ...prev, back: next }), replace: true })
+  }
+
+  const setView = (next: (typeof VIEW_TABS)[number]['id']) => {
+    void navigate({ search: (prev) => ({ ...prev, view: next }), replace: true })
+  }
+
+  // Swiping left pulls the next period in from the right, which is the
+  // direction every calendar on the phone already moves.
+  const swipe = useSwipe({
+    onLeft: () => {
+      shift(-1)
+    },
+    onRight: () => {
+      shift(1)
+    },
+    enabled: isMobile,
+  })
 
   // Bars scale to the largest *component*, not the signed total — the three
   // parts can offset each other, so scaling by the total distorts them.
@@ -161,6 +250,146 @@ function Stats() {
         ))}
       </tbody>
     </Table>
+  )
+
+  const closeRows = distribution?.inWindow ?? []
+  const periodLabel = distribution?.window.label ?? ''
+
+  const closesTable = (
+    <Table caption={`Closes in ${periodLabel}`}>
+      <thead>
+        <tr>
+          <th scope="col">Date</th>
+          <th scope="col">Instrument</th>
+          <th scope="col">Account</th>
+          <th scope="col" data-numeric>Held</th>
+          <th scope="col" data-numeric>Return</th>
+          <th scope="col" data-numeric>Net P&L</th>
+        </tr>
+      </thead>
+      <tbody>
+        {closeRows.map((close, index) => (
+          <tr key={`${close.date}-${close.symbol}-${close.accountType}-${String(index)}`}>
+            <td className={styles.dateCell}>{close.date}</td>
+            <td>
+              <InstrumentCell symbol={close.symbol} name={close.name} />
+            </td>
+            <td>
+              <span className={styles.dotCell}>
+                <AccountDot accountType={close.accountType} />
+                {ACCOUNT_LABEL[close.accountType] ?? close.accountType}
+              </span>
+            </td>
+            <td data-numeric>{days(close.holdingDays)}</td>
+            <td data-numeric className={tone(close.returnPct)}>{pct(close.returnPct)}</td>
+            <td data-numeric className={tone(close.realizedJpy)}>{yenSigned(close.realizedJpy)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
+  )
+
+  const spClosesList = (
+    <div className={styles.spCloses}>
+      {closeRows.map((close, index) => (
+        <div
+          key={`${close.date}-${close.symbol}-${close.accountType}-${String(index)}`}
+          className={styles.spCloseRow}
+        >
+          <div className={styles.spCloseHead}>
+            <span className={styles.spCloseName}>{close.symbol}</span>
+            <span className={cx(styles.spCloseNet, tone(close.realizedJpy))}>
+              {yenSigned(close.realizedJpy)}
+            </span>
+          </div>
+          <div className={styles.spCloseMeta}>
+            <span>{close.date}</span>
+            <span>{ACCOUNT_LABEL[close.accountType] ?? close.accountType}</span>
+            <span>held {days(close.holdingDays)}</span>
+            <span className={cx(styles.spCloseReturn, tone(close.returnPct))}>
+              {pct(close.returnPct)}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+
+  const viewSwitch = (
+    <div className={styles.viewSwitch}>
+      <SegmentedTabs tabs={VIEW_TABS} active={view} onChange={setView} label="Trade distribution view" />
+    </div>
+  )
+
+  const distributionBody = distribution == null ? (
+    <Empty>
+      No closed trades yet. Once a position is sold it lands here — as a row in the table, and as a
+      circle on the chart.
+    </Empty>
+  ) : (
+    <>
+      <div className={styles.periodNav}>
+        {/* Announced on change: the nav buttons keep focus while everything
+            behind them is replaced, so without this a screen-reader user gets
+            no signal that the period moved. */}
+        <span className={styles.periodLabel} aria-live="polite">{distribution.window.label}</span>
+        <div className={styles.periodButtons}>
+          <button
+            type="button"
+            className={styles.periodButton}
+            onClick={() => {
+              shift(1)
+            }}
+            disabled={distribution.offset >= distribution.maxBack}
+            aria-label={unit === 'week' ? 'Show the previous week' : 'Show the previous month'}
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            className={styles.periodButton}
+            onClick={() => {
+              shift(-1)
+            }}
+            disabled={distribution.offset === 0}
+            aria-label={unit === 'week' ? 'Show the next week' : 'Show the next month'}
+          >
+            →
+          </button>
+          <button
+            type="button"
+            className={styles.periodButton}
+            onClick={() => {
+              void navigate({ search: (prev) => ({ ...prev, back: 0 }), replace: true })
+            }}
+            disabled={distribution.offset === 0}
+          >
+            Latest
+          </button>
+        </div>
+      </div>
+
+      {view === 'chart' ? (
+        <div className={styles.swipeArea} {...swipe}>
+          <TradeScatter
+            trades={distribution.inWindow}
+            days={distribution.window.days}
+            domain={distribution.domain}
+            maxMagnitude={distribution.maxMagnitude}
+            compact={isMobile}
+          />
+          {isMobile ? (
+            <p className={styles.swipeHint}>Swipe the chart to change week.</p>
+          ) : null}
+        </div>
+      ) : closeRows.length === 0 ? (
+        <Empty>No closes in {periodLabel}.</Empty>
+      ) : isMobile ? (
+        spClosesList
+      ) : (
+        closesTable
+      )}
+    </>
   )
 
   const journal = !hasJournal ? (
@@ -310,6 +539,21 @@ function Stats() {
             </>
           ) : null}
 
+          {tab === 'trades' ? (
+            <>
+              <div className={styles.spDistHead}>
+                <h2 className={styles.spSectionTitle}>Trade distribution</h2>
+                {viewSwitch}
+              </div>
+              <p className={styles.spSectionDesc}>
+                {view === 'chart'
+                  ? 'One circle per close: the day it closed across, its return on cost up, and the yen size of the result as the circle area.'
+                  : 'Every close in the week, with the return measured against the cost basis of the units sold.'}
+              </p>
+              {distributionBody}
+            </>
+          ) : null}
+
           {tab === 'journal' ? journal : null}
         </>
       ) : (
@@ -337,6 +581,18 @@ function Stats() {
 
           <Section title="By instrument" description="Ranked by contribution.">
             {byInstrumentTable}
+          </Section>
+
+          <Section
+            title="Trade distribution"
+            description={
+              view === 'chart'
+                ? 'One circle per close: the day it closed across, its return on cost up, and the yen size of the gain or loss as the circle area. Return and contribution are not the same thing — a small position can post a large percentage — and the two encodings are what separate them.'
+                : 'Every close in the month, with the return measured against the weighted-average cost of the units sold. There is no link back to an individual buy: 移動平均法 pools units, so a sale closes against the pool.'
+            }
+            actions={viewSwitch}
+          >
+            {distributionBody}
           </Section>
         </>
       )}
