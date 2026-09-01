@@ -17,9 +17,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useCallback, useMemo, useState } from 'react'
 import styles from './trades.module.scss'
-import { PageHeader } from '~/components/screen'
+import { PageHeader, Pagination } from '~/components/screen'
 import { NewTradeDialog } from '~/components/trades/NewTradeDialog'
-import { Pagination } from '~/components/trades/Pagination'
 import { TradeFilters } from '~/components/trades/TradeFilters'
 import { TradesTable } from '~/components/trades/TradesTable'
 import { useDebouncedSymbol } from '~/components/trades/useDebouncedSymbol'
@@ -27,7 +26,7 @@ import { ExportButton } from '~/components/ui/ExportButton'
 import { useIsMobile } from '~/components/ui/useIsMobile'
 import { tradesCsv, tradesCsvFilename } from '~/lib/export/tradesCsv'
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
-import { tradeSearchSchema, type TradeSearch, type TradeSortKey } from '~/lib/tradeSearch'
+import { PER_PAGE_OPTIONS, tradeSearchSchema, type TradeSearch, type TradeSortKey } from '~/lib/tradeSearch'
 import { listCashLedger, listTradeRows, type TradeRow } from '~/server/trades'
 
 /**
@@ -91,6 +90,10 @@ function TradesScreen() {
       void navigate({
         search: (prev) => ({ ...prev, ...patch, ...(resetsPage ? { page: 1 } : {}) }),
         replace: true,
+        // The router scrolls to the top on every navigation by default, which
+        // would throw the reader back to the header on every page turn or
+        // filter tweak — the same fix Stats' own setSearch needed.
+        resetScroll: false,
       })
     },
     [navigate],
@@ -292,9 +295,11 @@ function TradesScreen() {
 
       {filtered.length > 0 ? (
         <Pagination
+          label="Trades pagination"
           page={page}
           pageCount={pageCount}
           perPage={perPage}
+          perPageOptions={PER_PAGE_OPTIONS}
           total={filtered.length}
           onPage={(point) => {
             setSearch({ page: point })

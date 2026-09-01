@@ -6,7 +6,7 @@ import { AccountDot } from '~/components/AccountDot'
 import { TradeScatter } from '~/components/charts/TradeScatter'
 import { ZeroBar } from '~/components/charts/ZeroBar'
 import { ACCOUNT_LABEL, ASSET_LABEL, days, pct, ratio, tone, yen, yenSigned } from '~/components/format'
-import { Empty, HeroStat, PageHeader, SegmentedTabs, Section, StatStrip, StripCell, Table } from '~/components/screen'
+import { Empty, HeroStat, PageHeader, Pagination, SegmentedTabs, Section, StatStrip, StripCell, Table } from '~/components/screen'
 import { AttrBar } from '~/components/stats/AttrBar'
 import { CorrelationTable } from '~/components/stats/CorrelationTable'
 import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
@@ -28,6 +28,14 @@ export const Route = createFileRoute('/_authed/stats')({
     .object({
       view: z.enum(['table', 'chart']).catch('table').optional(),
       back: z.number().int().min(0).catch(0).optional(),
+      // Paging for the instrument table, named as on Trades. `.catch()` like
+      // every other param here: a hand-edited URL falls back to page one
+      // rather than erroring the route.
+      page: z.number().int().min(1).catch(1).optional(),
+      perPage: z
+        .union([z.literal(10), z.literal(25), z.literal(50), z.literal(100)])
+        .catch(25)
+        .optional(),
     })
     .extend(accountScopeSchema.shape),
   loaderDeps: ({ search }) => ({ account: search.scope ?? 'ALL' }),
@@ -47,6 +55,16 @@ const TABS = [
   { id: 'trades' as const, label: 'Trades' },
   { id: 'journal' as const, label: 'Journal' },
 ]
+
+/**
+ * Row counts offered under the instrument table.
+ *
+ * Smaller than the Trades screen's: this list is one row per instrument you
+ * have ever closed, which is tens of rows, not hundreds. The values have to
+ * exist in the route's `perPage` union or the call below does not compile.
+ */
+const PER_PAGE_OPTIONS = [10, 25, 50, 100] as const
+type PerPage = (typeof PER_PAGE_OPTIONS)[number]
 
 const VIEW_TABS = [
   { id: 'table' as const, label: 'Table' },
@@ -76,7 +94,7 @@ function Stats() {
   const [account, setAccount] = useAccountFilter()
   const isMobile = useIsMobile()
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('overview')
-  const { view = 'table', back = 0 } = Route.useSearch()
+  const { view = 'table', back = 0, page: rawPage = 1, perPage = 25 } = Route.useSearch()
   const navigate = Route.useNavigate()
   const hasJournal = d.moodCorrelation.length > 0 || d.motivationCorrelation.length > 0
 
@@ -116,17 +134,47 @@ function Stats() {
     }
   }, [d.closes, back, unit])
 
-  // Merged onto `prev` rather than replaced: the object form drops the whole
-  // search record, which would silently reset the account switch every time you
-  // paged the window — the bug the dashboard chart already hit.
+  /**
+   * Rewrites one search param without disturbing the rest of the screen.
+   *
+   * Merged onto `prev` rather than replaced: the object form drops the whole
+   * search record, which would silently reset the account switch every time you
+   * paged — the bug the dashboard chart already hit.
+   *
+   * `resetScroll: false` because none of these controls is a new destination.
+   * The router scrolls to the top of the page on every navigation by default,
+   * so without it, flipping the Table/Chart switch or stepping a page threw the
+   * reader back to the page header — away from the control they just pressed.
+   *
+   * `replace: true` for the same reason: refining one view should not stack a
+   * history entry per press, so Back leaves the screen rather than walking
+   * through every toggle.
+   */
+  const setSearch = (patch: Partial<ReturnType<typeof Route.useSearch>>) => {
+    void navigate({
+      search: (prev) => ({ ...prev, ...patch }),
+      replace: true,
+      resetScroll: false,
+    })
+  }
+
   const shift = (delta: number) => {
     if (distribution == null) return
-    const next = Math.min(Math.max(distribution.offset + delta, 0), distribution.maxBack)
-    void navigate({ search: (prev) => ({ ...prev, back: next }), replace: true })
+    setSearch({ back: Math.min(Math.max(distribution.offset + delta, 0), distribution.maxBack) })
   }
 
   const setView = (next: (typeof VIEW_TABS)[number]['id']) => {
-    void navigate({ search: (prev) => ({ ...prev, view: next }), replace: true })
+    setSearch({ view: next })
+  }
+
+  const setSymbolPage = (next: number) => {
+    setSearch({ page: next })
+  }
+
+  // Landing on page 4 of a 25-row view after switching to 100 rows would show
+  // rows 301+ of a list that no longer has them, so the size change restarts.
+  const setPerPage = (size: PerPage) => {
+    setSearch({ perPage: size, page: 1 })
   }
 
   // Swiping left pulls the next period in from the right, which is the
@@ -147,9 +195,47 @@ function Stats() {
     Math.max(Math.abs(Number(d.fx.stockEffect)), Math.abs(Number(d.fx.fxEffect)), Math.abs(Number(d.fx.costEffect))) ||
     1
 
+  // Extents span *every* instrument, not the visible page — the SP bars would
+  // otherwise rescale as you page and a rank-30 row would draw as wide as the
+  // top contributor. Same reason `ZeroBar` takes dataset-wide maxima.
   const symbolValues = d.symbols.map((row) => Number(row.netPnl))
   const symbolMaxPos = Math.max(0, ...symbolValues)
   const symbolMaxNeg = Math.abs(Math.min(0, ...symbolValues))
+
+  const symbolPageCount = Math.max(1, Math.ceil(d.symbols.length / perPage))
+  // Clamped rather than 404: narrowing the account switch while on page 4
+  // should land on the last real page, not an empty one. Matches Trades.
+  const symbolPage = Math.min(Math.max(rawPage, 1), symbolPageCount)
+  const symbolRows = useMemo(
+    () => d.symbols.slice((symbolPage - 1) * perPage, symbolPage * perPage),
+    [d.symbols, symbolPage, perPage],
+  )
+
+  /*
+   * Shown whenever the list is longer than the smallest page size, not merely
+   * when the *current* size overflows.
+   *
+   * Keying it on `pageCount > 1` would be a trap: 30 instruments at 25 a page
+   * shows the control, choosing 50 collapses it to one page, and the control
+   * that would put it back has just disappeared.
+   */
+  const symbolPagination =
+    d.symbols.length > PER_PAGE_OPTIONS[0] ? (
+      <Pagination
+        label="Instrument pagination"
+        page={symbolPage}
+        pageCount={symbolPageCount}
+        perPage={perPage}
+        perPageOptions={PER_PAGE_OPTIONS}
+        total={d.symbols.length}
+        onPage={(next) => {
+          setSymbolPage(next)
+        }}
+        onPerPage={(size) => {
+          setPerPage(size)
+        }}
+      />
+    ) : null
 
   const attribution = (
     <>
@@ -238,7 +324,7 @@ function Stats() {
         </tr>
       </thead>
       <tbody>
-        {d.symbols.map((row) => (
+        {symbolRows.map((row) => (
           <tr key={row.symbol}>
             <td>
               <InstrumentCell symbol={row.symbol} name={row.name} />
@@ -360,7 +446,7 @@ function Stats() {
             type="button"
             className={styles.periodButton}
             onClick={() => {
-              void navigate({ search: (prev) => ({ ...prev, back: 0 }), replace: true })
+              setSearch({ back: 0 })
             }}
             disabled={distribution.offset === 0}
           >
@@ -520,7 +606,7 @@ function Stats() {
 
               <h2 className={styles.spSectionTitle}>Top contributors</h2>
               <div className={styles.spSymbols}>
-                {d.symbols.map((row) => (
+                {symbolRows.map((row) => (
                   <div key={row.symbol} className={styles.spSymbolRow}>
                     <div className={styles.spSymbolHead}>
                       <span className={styles.spSymbolName}>{row.symbol}</span>
@@ -536,6 +622,7 @@ function Stats() {
                   </div>
                 ))}
               </div>
+              {symbolPagination}
             </>
           ) : null}
 
@@ -581,6 +668,7 @@ function Stats() {
 
           <Section title="By instrument" description="Ranked by contribution.">
             {byInstrumentTable}
+            {symbolPagination}
           </Section>
 
           <Section
