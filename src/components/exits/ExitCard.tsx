@@ -12,20 +12,11 @@
  */
 import styles from './ExitCard.module.scss'
 import { AccountDot } from '~/components/AccountDot'
-import { ACCOUNT_LABEL, qty } from '~/components/format'
+import { ACCOUNT_LABEL, money, qty, tone } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
 import type { ExitRuleRow } from '~/server/exit'
-
-/** Money in the position's own currency — the card never mixes the two. */
-const money = (value: string | null, currency: 'JPY' | 'USD'): string => {
-  if (value === null) return '—'
-  const amount = Number(value)
-  return currency === 'USD'
-    ? `$${amount.toFixed(2)}`
-    : `¥${amount.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
-}
 
 /**
  * Where price sits between the initial stop and Target 1, as a 0–1 fraction.
@@ -224,9 +215,9 @@ export function ExitCard({
           {unrealized === null ? null : (
             <div>
               <dt>Unrealized</dt>
-              <dd className={cx(unrealized > 0 && styles.profit, unrealized < 0 && styles.loss)}>
+              <dd className={styles[tone(row.unrealizedTotal)]}>
                 {unrealized > 0 ? '+' : ''}
-                {money(row.unrealizedTotal, 'JPY')}
+                {money(row.unrealizedTotal, row.currency)}
               </dd>
             </div>
           )}

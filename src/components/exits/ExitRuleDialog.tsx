@@ -22,6 +22,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import styles from './ExitRuleDialog.module.scss'
+import { toFieldErrors } from './fieldErrors'
 import { ACCOUNT_LABEL } from '~/components/format'
 import { FormField } from '~/components/trades/FormField'
 import { cx } from '~/lib/cx'
@@ -33,8 +34,20 @@ import {
   type ExitRuleRow,
 } from '~/server/exit'
 
+/**
+ * Identity of a holding, stable across refetches.
+ *
+ * The select used to carry an array *index*. `eligible` is re-fetched by
+ * react-query while the dialog sits open — a window-focus refetch, a new import,
+ * a plan created in another tab — and the server re-sorts it by symbol, so an
+ * index could silently come to mean a different position between picking one and
+ * submitting. The support level would then be filed against the wrong stock.
+ */
+const holdingKey = (holding: Pick<EligibleHolding, 'symbol' | 'accountType'>): string =>
+  `${holding.symbol}\u0000${holding.accountType}`
+
 interface Form {
-  /** Index into `eligible`, as a string — it is a `<select>` value. */
+  /** `holdingKey` of the chosen position, not its position in the list. */
   holding: string
   entryDate: string
   entryPrice: string
@@ -70,17 +83,6 @@ const METHOD_LABEL: Record<TrailingMethod, string> = {
   SMA20: 'SMA 20',
 }
 
-/** Field errors come back keyed by path; anything else is shown whole. */
-function toFieldErrors(error: unknown): Record<string, string> {
-  const issues = (error as { issues?: { path: (string | number)[]; message: string }[] }).issues
-  if (issues) {
-    return Object.fromEntries(
-      issues.map((issue) => [String(issue.path[0] ?? 'form'), issue.message]),
-    )
-  }
-  return { form: error instanceof Error ? error.message : 'Could not save' }
-}
-
 export function ExitRuleDialog({
   open,
   onOpenChange,
@@ -112,16 +114,16 @@ export function ExitRuleDialog({
     }
   }
 
-  const picked = form.holding === '' ? null : eligible[Number(form.holding)]
+  const picked = eligible.find((holding) => holdingKey(holding) === form.holding) ?? null
   const currency = editing?.currency ?? picked?.currency ?? 'JPY'
   const unit = currency === 'USD' ? ' ($)' : ' (¥)'
 
   /** Choosing a holding refills every derived field; support stays the user's. */
-  const pick = (index: string) => {
-    const holding = index === '' ? null : eligible[Number(index)]
+  const pick = (key: string) => {
+    const holding = eligible.find((candidate) => holdingKey(candidate) === key) ?? null
     setForm((previous) => ({
       ...previous,
-      holding: index,
+      holding: key,
       entryDate: holding?.entryDate ?? '',
       entryPrice: holding?.entryPrice ?? '',
       totalShares: holding?.quantity ?? '',
@@ -218,8 +220,8 @@ export function ExitRuleDialog({
                     required
                   >
                     <option value="">Choose a position…</option>
-                    {eligible.map((holding, index) => (
-                      <option key={`${holding.symbol}-${holding.accountType}`} value={String(index)}>
+                    {eligible.map((holding) => (
+                      <option key={holdingKey(holding)} value={holdingKey(holding)}>
                         {holding.symbol} · {holding.name} ·{' '}
                         {ACCOUNT_LABEL[holding.accountType] ?? holding.accountType}
                       </option>

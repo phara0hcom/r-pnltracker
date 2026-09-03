@@ -26,8 +26,11 @@ const position = (overrides: Partial<ExitRulePosition> = {}): ExitRulePosition =
   entryPrice: d(1000),
   totalShares: d(500),
   sharesRemaining: d(500),
+  sharesSold: d(0),
   supportLevel: d(950),
   entryAtr: d(20),
+  entryStopAtrMultiple: d('1.5'),
+  entryTargetMultiple: d('1.5'),
   lotSize: 100,
   trailingMethod: null,
   ...overrides,
@@ -66,11 +69,11 @@ describe('roundDownToLot', () => {
 describe('initialStopFor', () => {
   it('takes whichever of support and the ATR stop sits lower', () => {
     // support 950 vs 1000 − 1.5×20 = 970 → support wins, giving more room.
-    expect(initialStopFor(position(), settings()).stop.toString()).toBe('950')
+    expect(initialStopFor(position()).stop.toString()).toBe('950')
   })
 
   it('uses the ATR stop when support is the tighter of the two', () => {
-    const result = initialStopFor(position({ supportLevel: d(990) }), settings())
+    const result = initialStopFor(position({ supportLevel: d(990) }))
     expect(result.stop.toString()).toBe('970')
     expect(result.fromSupportOnly).toBe(false)
   })
@@ -78,7 +81,7 @@ describe('initialStopFor', () => {
   it('falls back to support alone when no entry-date payload arrived', () => {
     // An alert created after the position was opened never delivers the entry
     // bar. Substituting a later ATR would be a retroactive recalculation.
-    const result = initialStopFor(position({ entryAtr: null }), settings())
+    const result = initialStopFor(position({ entryAtr: null }))
     expect(result.stop.toString()).toBe('950')
     expect(result.fromSupportOnly).toBe(true)
   })
@@ -91,11 +94,11 @@ describe('assess — targets and sizing', () => {
     expect(result.target1.toString()).toBe('1075')
   })
 
-  it('respects a changed target multiplier', () => {
+  it('takes the target multiple from the plan, not from live settings', () => {
     const result = assess(
-      position(),
+      position({ entryTargetMultiple: d(2) }),
       [bar('2026-06-01', 1000)],
-      settings({ targetMultiple: d(2) }),
+      settings(),
       '2026-06-01',
     )
     expect(result.target1.toString()).toBe('1100')
@@ -304,7 +307,7 @@ describe('assess — suggested action', () => {
   it('switches to the trail once the sell shows up in the trade history', () => {
     // sharesRemaining is the engine's pool quantity, so importing the Target 1
     // sell is what moves this on — no separate "mark as taken" state.
-    const held = position({ sharesRemaining: d(300) })
+    const held = position({ sharesRemaining: d(300), sharesSold: d(200) })
     const bars = [bar('2026-06-01', 1080), bar('2026-06-02', 1100)]
     const result = assess(held, bars, settings(), '2026-06-02')
     expect(result.action.kind).toBe('TRAIL_ACTIVE')
@@ -312,7 +315,7 @@ describe('assess — suggested action', () => {
   })
 
   it('asks for a breakeven stop while the trail is still under entry', () => {
-    const held = position({ sharesRemaining: d(300) })
+    const held = position({ sharesRemaining: d(300), sharesSold: d(200) })
     const result = assess(held, [bar('2026-06-01', 1080, { atr14: d(60) })], settings(), '2026-06-01')
     expect(result.action.kind).toBe('MOVE_TO_BREAKEVEN')
   })
@@ -335,5 +338,79 @@ describe('assess — suggested action', () => {
     const us = position({ symbol: 'AAPL', assetClass: 'US_EQUITY', lotSize: 1 })
     const result = assess(us, [bar('2026-06-01', 1020)], settings(), '2026-06-01')
     expect(result.action.message).toContain('$1020.00')
+  })
+})
+
+describe('assess — entry facts stay locked', () => {
+  // The framework's central promise, and the one the docs and the settings form
+  // both state: a stop accepted when the trade was sized cannot be repriced by
+  // a later change of mind about the multiples.
+  it('ignores a changed global stop multiple for an existing plan', () => {
+    const plan = position()
+    const bars = [bar('2026-06-01', 1000)]
+
+    const before = assess(plan, bars, settings(), '2026-06-01')
+    const after = assess(plan, bars, settings({ initialStopAtrMultiple: d(5) }), '2026-06-01')
+
+    expect(after.initialStop.toString()).toBe(before.initialStop.toString())
+    expect(after.riskPerShare.toString()).toBe(before.riskPerShare.toString())
+    expect(after.target1.toString()).toBe(before.target1.toString())
+  })
+
+  it('ignores a changed global target multiple for an existing plan', () => {
+    const plan = position()
+    const bars = [bar('2026-06-01', 1000)]
+
+    const before = assess(plan, bars, settings(), '2026-06-01')
+    const after = assess(plan, bars, settings({ targetMultiple: d(3) }), '2026-06-01')
+
+    expect(after.target1.toString()).toBe(before.target1.toString())
+  })
+
+  it('still lets the path-dependent settings move, since the trail is replayed', () => {
+    const bars = [bar('2026-06-01', 1080)]
+    const wide = assess(position(), bars, settings({ trailingAtrMultiple: d(1) }), '2026-06-01')
+    const tight = assess(position(), bars, settings({ trailingAtrMultiple: d(3) }), '2026-06-01')
+    expect(wide.trailingStop?.toString()).toBe('1060')
+    expect(tight.trailingStop?.toString()).toBe('1020')
+  })
+})
+
+describe('assess — the partial is judged by realized sells', () => {
+  it('stays on the trail after the position is added to again', () => {
+    // 500 in, 200 sold at Target 1, then a 300-share top-up puts the pool at
+    // 600 — above the original entry size. Comparing remaining against
+    // totalShares would read that as "no partial taken" and re-recommend one.
+    const toppedUp = position({ sharesRemaining: d(600), sharesSold: d(200) })
+    const bars = [bar('2026-06-01', 1080), bar('2026-06-02', 1100)]
+
+    const result = assess(toppedUp, bars, settings(), '2026-06-02')
+    expect(result.partialTaken).toBe(true)
+    expect(result.action.kind).toBe('TRAIL_ACTIVE')
+  })
+
+  it('still asks for the partial while nothing has actually been sold', () => {
+    const result = assess(position(), [bar('2026-06-01', 1080)], settings(), '2026-06-01')
+    expect(result.partialTaken).toBe(false)
+    expect(result.action.kind).toBe('TAKE_PARTIAL')
+  })
+})
+
+describe('assess — the recommendation never states a false comparison', () => {
+  it('does not claim close ≥ Target 1 after a pullback', () => {
+    // Target 1 latches, so the close can be back under it while the partial is
+    // still outstanding. The card renders this string verbatim.
+    const bars = [bar('2026-06-01', 1080), bar('2026-06-02', 1050)]
+    const result = assess(position(), bars, settings(), '2026-06-02')
+
+    expect(result.action.kind).toBe('TAKE_PARTIAL')
+    expect(result.action.message).not.toContain('≥')
+    expect(result.action.message).toContain('was reached on 2026-06-01')
+    expect(result.action.message).toContain('eased to ¥1,050')
+  })
+
+  it('states the comparison plainly while price is still at or above the target', () => {
+    const result = assess(position(), [bar('2026-06-01', 1080)], settings(), '2026-06-01')
+    expect(result.action.message).toContain('≥ Target 1')
   })
 })

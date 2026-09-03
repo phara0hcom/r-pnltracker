@@ -10,6 +10,7 @@ import { createServerFn } from '@tanstack/react-start'
 import Decimal from 'decimal.js'
 import { z } from 'zod'
 import { authed } from './middleware'
+import { engineFor } from './screens'
 import {
   archiveExitRule as archiveRule,
   barsFor,
@@ -19,13 +20,11 @@ import {
   saveExitSettings as persistSettings,
   updateExitRule as patchRule,
 } from '~/db/exit.service'
-import { listTrades } from '~/db/trades.service'
 import type { AccountType, AssetClass } from '~/lib/domain/types'
+import { calendarFor, todayFor } from '~/lib/exit/calendar'
 import { openEntryStreaks, streakFor } from '~/lib/exit/entry'
 import { assess } from '~/lib/exit/rules'
 import { TRAILING_METHODS, type ExitActionKind, type TrailingMethod } from '~/lib/exit/types'
-import { todayLocal } from '~/lib/localDate'
-import { runEngine } from '~/lib/pnl/engine'
 
 /** Only listed equities get exit rules — no provider feeds a fund's 基準価額. */
 const ELIGIBLE_CLASSES: readonly AssetClass[] = ['JP_EQUITY', 'US_EQUITY']
@@ -134,16 +133,19 @@ export interface ExitScreenData {
 export const getExitScreen = createServerFn({ method: 'GET' })
   .middleware([authed])
   .handler(async ({ context }): Promise<ExitScreenData> => {
-    const [records, rules, settings] = await Promise.all([
-      listTrades(context.userId),
+    const [{ trades, engine }, rules, settings] = await Promise.all([
+      // The single engine entry point — same pipeline every other screen uses.
+      engineFor(context.userId),
       listExitRules(context.userId),
       getExitSettings(context.userId),
     ])
 
-    const trades = records.map((record) => record.trade)
-    const { positions } = runEngine(trades)
+    const { positions } = engine
     const streaks = openEntryStreaks(trades)
-    const today = todayLocal()
+    // "Today" is resolved per exchange, not from the server's clock: bars are
+    // dated in the exchange's zone, and on a UTC host the New York date lags
+    // by a session for part of every day.
+    const now = new Date()
 
     const heldBy = new Map(
       positions.map((position) => [
@@ -159,6 +161,10 @@ export const getExitScreen = createServerFn({ method: 'GET' })
       // the Target 1 sell is what moves a position from "take partial" to
       // "trail", with no separate flag to keep in step.
       const remaining = heldBy.get(poolKey(rule.symbol, rule.accountType)) ?? new Decimal(0)
+      // Realized sells in the current streak — what actually says the Target 1
+      // partial has been taken. A later top-up must not undo that.
+      const streak = streakFor(streaks, rule.symbol, rule.accountType)
+      const sold = streak?.sharesSold ?? new Decimal(0)
 
       const result = assess(
         {
@@ -170,14 +176,17 @@ export const getExitScreen = createServerFn({ method: 'GET' })
           entryPrice: rule.entryPrice,
           totalShares: rule.totalShares,
           sharesRemaining: remaining,
+          sharesSold: sold,
           supportLevel: rule.supportLevel,
           entryAtr: rule.entryAtr,
+          entryStopAtrMultiple: rule.entryStopAtrMultiple,
+          entryTargetMultiple: rule.entryTargetMultiple,
           lotSize: rule.lotSize,
           trailingMethod: rule.trailingMethod,
         },
         bars.get(rule.instrumentId) ?? [],
         settings,
-        today,
+        todayFor(calendarFor(rule.assetClass), now),
       )
 
       return {
@@ -228,7 +237,9 @@ export const getExitScreen = createServerFn({ method: 'GET' })
         unrealizedTotal:
           result.unrealizedPerShare === null
             ? null
-            : result.unrealizedPerShare.mul(remaining).toFixed(0),
+            // Two places, like every other per-share figure: rounding to whole
+            // units here discarded the cents on every US position.
+            : result.unrealizedPerShare.mul(remaining).toFixed(2),
 
         actionKind: result.action.kind,
         actionMessage: result.action.message,
@@ -242,7 +253,7 @@ export const getExitScreen = createServerFn({ method: 'GET' })
       .filter((position) => ELIGIBLE_CLASSES.includes(position.assetClass))
       .filter((position) => !ruledPools.has(poolKey(position.symbol, position.accountType)))
       .map((position) => {
-        const streak = streakFor(streaks, position.symbol, position.accountType)
+        const open = streakFor(streaks, position.symbol, position.accountType)
         return {
           symbol: position.symbol,
           name: position.name,
@@ -253,8 +264,8 @@ export const getExitScreen = createServerFn({ method: 'GET' })
           // Falls back to the pool average when no streak could be identified,
           // which only happens for a position whose opening trades predate the
           // imported history.
-          entryDate: streak?.entryDate ?? today,
-          entryPrice: (streak?.entryPrice ?? position.avgPriceNative).toFixed(2),
+          entryDate: open?.entryDate ?? todayFor(calendarFor(position.assetClass), now),
+          entryPrice: (open?.entryPrice ?? position.avgPriceNative).toFixed(2),
           lotSize: lotSizeFor(position.assetClass),
         }
       })
@@ -323,32 +334,51 @@ export const createExitRule = createServerFn({ method: 'POST' })
   .middleware([authed])
   .validator((data: unknown) => createSchema.parse(data))
   .handler(async ({ data, context }) => {
-    const id = await createRule(context.userId, data)
+    // The multiples in force right now become this plan's frozen entry facts.
+    const settings = await getExitSettings(context.userId)
+    const id = await createRule(context.userId, data, {
+      stopAtr: settings.initialStopAtrMultiple.toFixed(),
+      target: settings.targetMultiple.toFixed(),
+    })
     return { ok: true as const, id }
   })
 
-const updateSchema = z
-  .object({
-    id: z.string().min(1),
-    entryPrice: positiveDecimal('entry price').optional(),
-    totalShares: positiveDecimal('total shares').optional(),
-    supportLevel: positiveDecimal('support level').optional(),
-    trailingMethod: trailingMethod.nullable().optional(),
-    note: z.string().trim().max(500).nullable().optional(),
-  })
-  .refine(
-    (data) =>
-      data.supportLevel === undefined ||
-      data.entryPrice === undefined ||
-      new Decimal(data.supportLevel).lt(data.entryPrice),
-    { message: 'support level must be below the entry price', path: ['supportLevel'] },
-  )
+const updateSchema = z.object({
+  id: z.string().min(1),
+  entryPrice: positiveDecimal('entry price').optional(),
+  totalShares: positiveDecimal('total shares').optional(),
+  supportLevel: positiveDecimal('support level').optional(),
+  trailingMethod: trailingMethod.nullable().optional(),
+  note: z.string().trim().max(500).nullable().optional(),
+})
 
 export const updateExitRule = createServerFn({ method: 'POST' })
   .middleware([authed])
   .validator((data: unknown) => updateSchema.parse(data))
   .handler(async ({ data, context }) => {
     const { id, ...patch } = data
+
+    // Validated against the *merged* result rather than the patch alone.
+    // Checking only the fields present let a partial update — say a support
+    // level with no entry price — set support above entry, which makes R
+    // negative and puts Target 1 below the entry price: the whole framework
+    // inverts, and the position reads as stopped out on its own entry bar.
+    const rules = await listExitRules(context.userId, true)
+    const existing = rules.find((rule) => rule.id === id)
+    if (!existing) throw new Error('exit plan not found')
+
+    const entryPrice = new Decimal(patch.entryPrice ?? existing.entryPrice)
+    const supportLevel = new Decimal(patch.supportLevel ?? existing.supportLevel)
+    if (supportLevel.gte(entryPrice)) {
+      throw new z.ZodError([
+        {
+          code: 'custom',
+          path: ['supportLevel'],
+          message: 'support level must be below the entry price',
+        },
+      ])
+    }
+
     await patchRule(context.userId, id, patch)
     return { ok: true as const }
   })

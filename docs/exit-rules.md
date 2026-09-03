@@ -128,6 +128,12 @@ quantity, so importing the Target 1 sell is what moves a plan from "take partial
 to "trail" — there is no second flag to keep in step, and no way for the two to
 disagree.
 
+Whether the partial has been taken is judged from the **sells actually recorded
+in the current streak**, not from `remaining < entry size`. The two differ the
+moment a winner is added to: a top-up lifts the pool back above the entry size,
+and the weaker test would re-recommend a partial exit that had already been
+executed.
+
 ---
 
 ## 3. The rules as implemented
@@ -147,6 +153,14 @@ disagree.
 
 Every multiplier, the partial fraction, the time-stop day count and the
 staleness threshold are settings on the screen, not constants.
+
+**Two of them are frozen into each plan when it is created**: the initial-stop
+ATR multiple and the Target 1 multiple. They are stored on the row alongside the
+entry ATR, so editing them in Settings reprices the *next* plan and never one
+already open — otherwise "locked at entry" would not be true, and a change of
+mind about the multiple would silently move the stop, R and Target 1 of every
+live position. The rest (trail width, time stop, staleness) are path-dependent
+by design and take effect everywhere on the next read.
 
 **The trailing stop only ever ratchets up.** A wider stop computed on a quieter
 day never loosens one already earned.
@@ -212,6 +226,12 @@ outright rather than stored as zero.
 the bar's opening instant in UTC milliseconds; for a 東証 daily bar that is 15:00
 UTC the *previous* day. Reading it naively would shift every JP bar back one day
 and break both the entry-ATR lookup and the staleness count.
+
+**"Today" is resolved per exchange too**, for the same reason and with the same
+consequences. The server runs in UTC on Vercel, where the New York date lags by
+a session for part of every day; comparing a UTC date against bars stored in
+exchange-local dates would inflate each US position's staleness by a day and
+trip its time stop early.
 
 **A plan opened before its entry-day bar exists** rests on the support level
 alone — the card says *"support only — no entry ATR"*. When a payload for that

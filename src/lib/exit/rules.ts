@@ -71,7 +71,6 @@ export function roundDownToLot(shares: Decimal, lotSize: number): Decimal {
  */
 export function initialStopFor(
   position: ExitRulePosition,
-  settings: ExitSettings,
 ): { stop: Decimal; fromSupportOnly: boolean } {
   if (position.entryAtr === null) {
     // No entry-date payload — usually an alert created after the position was
@@ -80,8 +79,9 @@ export function initialStopFor(
     // later ATR would be the retroactive recalculation the framework forbids.
     return { stop: position.supportLevel, fromSupportOnly: true }
   }
+  // The plan's own multiple, frozen at creation — never the live setting.
   const volatilityStop = position.entryPrice.sub(
-    position.entryAtr.mul(settings.initialStopAtrMultiple),
+    position.entryAtr.mul(position.entryStopAtrMultiple),
   )
   return { stop: Decimal.min(position.supportLevel, volatilityStop), fromSupportOnly: false }
 }
@@ -187,6 +187,11 @@ function replay(
  * `bars` may be the instrument's entire stored history — bars before entry are
  * dropped here rather than at the call site, so no caller can accidentally let
  * a pre-entry high seed the trailing stop.
+ *
+ * `today` must be the current date **in the exchange's timezone**, which is the
+ * zone every `tradingDay` is stored in. Passing the server's own calendar date
+ * would compare dates from two zones and skew both the staleness count and the
+ * time stop by a session. Use `todayFor(calendarFor(assetClass))`.
  */
 export function assess(
   position: ExitRulePosition,
@@ -201,9 +206,10 @@ export function assess(
     .filter((bar) => bar.tradingDay >= position.entryDate)
     .sort((left, right) => (left.tradingDay < right.tradingDay ? -1 : 1))
 
-  const { stop: initialStop, fromSupportOnly } = initialStopFor(position, settings)
+  const { stop: initialStop, fromSupportOnly } = initialStopFor(position)
   const riskPerShare = position.entryPrice.sub(initialStop)
-  const target1 = position.entryPrice.add(riskPerShare.mul(settings.targetMultiple))
+  // Locked multiples, so changing the global setting reprices new plans only.
+  const target1 = position.entryPrice.add(riskPerShare.mul(position.entryTargetMultiple))
   const partialExitShares = roundDownToLot(
     position.totalShares.mul(settings.partialExitFraction),
     position.lotSize,
@@ -212,7 +218,7 @@ export function assess(
   const state = replay(history, target1, settings, method)
   const { latestBar, priorBar } = state
 
-  const partialTaken = position.sharesRemaining.lt(position.totalShares)
+  const partialTaken = position.sharesSold.gt(0)
   const trailingActive = state.target1Hit && state.trailingStop !== null
 
   // Before Target 1 the initial stop stands alone. After it, breakeven is the
@@ -257,6 +263,7 @@ export function assess(
     partialExitShares,
     target1,
     target1Hit: state.target1Hit,
+    target1HitDate: state.target1HitDate,
     trailingActive,
     trailingStop: state.trailingStop,
     currentStop,
@@ -300,6 +307,7 @@ interface ActionInput {
   partialExitShares: Decimal
   target1: Decimal
   target1Hit: boolean
+  target1HitDate: string | null
   trailingActive: boolean
   trailingStop: Decimal | null
   currentStop: Decimal
@@ -374,9 +382,16 @@ function decideAction(input: ActionInput): ExitAction {
         severity: 'attention',
       }
     }
+    // Target 1 is latched, so the current close may have fallen back below it.
+    // Stating "close ≥ Target 1" unconditionally printed a comparison that was
+    // plainly false on any pullback after a target touch, in a message the card
+    // renders verbatim.
+    const reached = latestBar.close.gte(input.target1)
     return {
       kind: 'TAKE_PARTIAL',
-      message: `Take partial profit — sell ${shares(input.partialExitShares)} shares now (close ${asMoney(latestBar.close)} ≥ Target 1 ${asMoney(input.target1)}).`,
+      message: reached
+        ? `Take partial profit — sell ${shares(input.partialExitShares)} shares now (close ${asMoney(latestBar.close)} ≥ Target 1 ${asMoney(input.target1)}).`
+        : `Take partial profit — sell ${shares(input.partialExitShares)} shares. Target 1 ${asMoney(input.target1)} was reached${input.target1HitDate === null ? '' : ` on ${input.target1HitDate}`}; price has since eased to ${asMoney(latestBar.close)}.`,
       severity: 'attention',
     }
   }

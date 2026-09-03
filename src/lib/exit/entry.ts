@@ -31,6 +31,14 @@ export interface EntryStreak {
   entryPrice: Decimal
   /** Units bought during the streak, before any partial exit. */
   totalShares: Decimal
+  /**
+   * Units sold during the streak.
+   *
+   * Carried so the exit framework can tell "the Target 1 partial has been taken"
+   * from an actual realized sell rather than from `remaining < totalShares`,
+   * which a later top-up silently falsifies.
+   */
+  sharesSold: Decimal
 }
 
 const key = (symbol: string, account: AccountType) => `${symbol}\0${account}`
@@ -45,7 +53,9 @@ export function openEntryStreaks(trades: NormalizedTrade[]): Map<string, EntrySt
   // it opened — which would strand the streak on the wrong side of the flat.
   for (const trade of sortTradesForEngine(trades)) {
     const poolKey = key(trade.symbol, trade.accountType)
-    pools.set(poolKey, [...(pools.get(poolKey) ?? []), trade])
+    const bucket = pools.get(poolKey)
+    if (bucket) bucket.push(trade)
+    else pools.set(poolKey, [trade])
   }
 
   const out = new Map<string, EntryStreak>()
@@ -65,6 +75,7 @@ export function openEntryStreaks(trades: NormalizedTrade[]): Map<string, EntrySt
             entryDate: trade.tradeDate,
             entryPrice: trade.unitPrice,
             totalShares: trade.quantity,
+            sharesSold: new Decimal(0),
           }
         } else if (streak !== null) {
           // Bound before the assignment: reading `streak` inside the object that
@@ -88,6 +99,9 @@ export function openEntryStreaks(trades: NormalizedTrade[]): Map<string, EntrySt
 
       if (CLOSING_SIDES.includes(trade.side)) {
         quantity = quantity.sub(trade.quantity)
+        if (streak !== null) {
+          streak = { ...streak, sharesSold: streak.sharesSold.add(trade.quantity) }
+        }
         // Fully closed — the next buy will start a fresh streak. A partial sell
         // deliberately does not reset it: that is the Target 1 exit, and the
         // remaining shares are still the same swing.

@@ -158,7 +158,7 @@ function Exits() {
 
       <Section
         title="Framework settings"
-        description="Applies to every plan on the next read. Stops already locked at entry are not recalculated — a changed ATR multiple affects new plans only."
+        description="The stop and Target 1 multiples are frozen into each plan when it is created, so changing them affects new plans only. Trail width, time stop and staleness are path-dependent and apply everywhere on the next read."
       >
         <ExitSettingsForm settings={data.settings} onSaved={refresh} />
       </Section>

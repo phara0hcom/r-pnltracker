@@ -251,6 +251,11 @@
   color: var(--color-loss);
 }
 
+/* `tone()` returns profit | loss | flat, so all three need a rule. */
+.flat {
+  color: var(--color-text-muted);
+}
+
 .actions {
   display: flex;
   flex-shrink: 0;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calendarFor, isTradingDay, tradingDaysBetween } from './calendar'
+import { calendarFor, isTradingDay, todayFor, tradingDaysBetween } from './calendar'
 
 describe('isTradingDay — 東証', () => {
   it('closes for the whole 年末年始 run, not just the national holiday', () => {
@@ -105,5 +105,22 @@ describe('calendarFor', () => {
     expect(calendarFor('US_EQUITY')).toBe('US')
     expect(calendarFor('JP_EQUITY')).toBe('JP')
     expect(calendarFor('FUND')).toBe('JP')
+  })
+})
+
+describe('todayFor', () => {
+  it('reads the date on the exchange, not on the host', () => {
+    // 02:00 UTC: already the 4th in Tokyo, still the 3rd in New York. Using the
+    // server's own date would age every US position by a session for part of
+    // each day, inflating staleness and tripping the time stop early.
+    const instant = new Date('2026-09-04T02:00:00Z')
+    expect(todayFor('JP', instant)).toBe('2026-09-04')
+    expect(todayFor('US', instant)).toBe('2026-09-03')
+  })
+
+  it('agrees with the host only when the host happens to share the zone', () => {
+    const instant = new Date('2026-09-03T12:00:00Z')
+    expect(todayFor('JP', instant)).toBe('2026-09-03')
+    expect(todayFor('US', instant)).toBe('2026-09-03')
   })
 })

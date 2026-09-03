@@ -7,6 +7,7 @@
  * a trail should be lives in the pure module, where it can be tested against
  * handmade bar sequences without a database.
  */
+import { randomUUID } from 'node:crypto'
 import Decimal from 'decimal.js'
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import { idFor } from './mappers'
@@ -28,6 +29,8 @@ export interface ExitRuleRecord {
   totalShares: Decimal
   supportLevel: Decimal
   entryAtr: Decimal | null
+  entryStopAtrMultiple: Decimal
+  entryTargetMultiple: Decimal
   lotSize: number
   trailingMethod: TrailingMethod | null
   note: string | null
@@ -46,8 +49,16 @@ export interface ExitRuleInput {
   note: string | null
 }
 
-const exitRuleId = (userId: string, instrumentId: string, account: AccountType, entryDate: string) =>
-  idFor('exitrule', userId, instrumentId, account, entryDate)
+/**
+ * A fresh id per plan.
+ *
+ * Deliberately random rather than a hash of (user, instrument, account, entry
+ * date): a deterministic id collides when the same pool is re-entered on the
+ * same date after an earlier plan was archived, and an upsert on that id would
+ * overwrite the archived record instead of creating a new plan. Uniqueness of
+ * *live* plans is the partial index's job, not the primary key's.
+ */
+const newExitRuleId = () => idFor('exitrule', randomUUID())
 
 function toRecord(row: {
   rule: typeof exitRules.$inferSelect
@@ -65,6 +76,8 @@ function toRecord(row: {
     totalShares: new Decimal(row.rule.totalShares),
     supportLevel: new Decimal(row.rule.supportLevel),
     entryAtr: row.rule.entryAtr === null ? null : new Decimal(row.rule.entryAtr),
+    entryStopAtrMultiple: new Decimal(row.rule.entryStopAtrMultiple),
+    entryTargetMultiple: new Decimal(row.rule.entryTargetMultiple),
     lotSize: row.rule.lotSize,
     trailingMethod: row.rule.trailingMethod,
     note: row.rule.note,
@@ -98,12 +111,40 @@ export async function listExitRules(
  * central rule: the initial stop is fixed at entry, so the ATR it was derived
  * from has to be frozen alongside it.
  */
-export async function createExitRule(userId: string, input: ExitRuleInput): Promise<string> {
+export async function createExitRule(
+  userId: string,
+  input: ExitRuleInput,
+  multiples: { stopAtr: string; target: string },
+): Promise<string> {
   const [instrument] = await db
     .select()
     .from(instruments)
     .where(eq(instruments.symbol, input.symbol))
   if (!instrument) throw new Error(`unknown instrument ${input.symbol}`)
+
+  // Checked explicitly rather than left to an upsert. The conflict target used
+  // to be the primary key, which is not the constraint that governs uniqueness
+  // here — the partial index on (user, instrument, account) WHERE archived_at IS
+  // NULL is. The two disagreed in both directions: a second plan for the same
+  // pool on a different entry date slipped past the upsert and died as a raw
+  // 23505, while re-creating one for the same date silently resurrected and
+  // overwrote the archived record.
+  const [live] = await db
+    .select({ id: exitRules.id })
+    .from(exitRules)
+    .where(
+      and(
+        eq(exitRules.userId, userId),
+        eq(exitRules.instrumentId, instrument.id),
+        eq(exitRules.accountType, input.accountType),
+        isNull(exitRules.archivedAt),
+      ),
+    )
+  if (live) {
+    throw new Error(
+      `${input.symbol} already has an active exit plan. Archive it before opening another.`,
+    )
+  }
 
   const [entryBar] = await db
     .select({ atr14: exitFeedBars.atr14 })
@@ -115,37 +156,25 @@ export async function createExitRule(userId: string, input: ExitRuleInput): Prom
       ),
     )
 
-  const id = exitRuleId(userId, instrument.id, input.accountType, input.entryDate)
+  const id = newExitRuleId()
 
-  await db
-    .insert(exitRules)
-    .values({
-      id,
-      userId,
-      instrumentId: instrument.id,
-      accountType: input.accountType,
-      entryDate: input.entryDate,
-      entryPrice: input.entryPrice,
-      totalShares: input.totalShares,
-      supportLevel: input.supportLevel,
-      entryAtr: entryBar?.atr14 ?? null,
-      lotSize: input.lotSize,
-      trailingMethod: input.trailingMethod,
-      note: input.note,
-    })
-    .onConflictDoUpdate({
-      target: exitRules.id,
-      set: {
-        entryPrice: input.entryPrice,
-        totalShares: input.totalShares,
-        supportLevel: input.supportLevel,
-        lotSize: input.lotSize,
-        trailingMethod: input.trailingMethod,
-        note: input.note,
-        archivedAt: null,
-        updatedAt: new Date(),
-      },
-    })
+  await db.insert(exitRules).values({
+    id,
+    userId,
+    instrumentId: instrument.id,
+    accountType: input.accountType,
+    entryDate: input.entryDate,
+    entryPrice: input.entryPrice,
+    totalShares: input.totalShares,
+    supportLevel: input.supportLevel,
+    entryAtr: entryBar?.atr14 ?? null,
+    // Frozen here, from the settings in force at creation.
+    entryStopAtrMultiple: multiples.stopAtr,
+    entryTargetMultiple: multiples.target,
+    lotSize: input.lotSize,
+    trailingMethod: input.trailingMethod,
+    note: input.note,
+  })
 
   return id
 }
@@ -206,7 +235,9 @@ export async function barsFor(instrumentIds: string[]): Promise<Map<string, Feed
       macdHist: new Decimal(row.macdHist),
       atr14: new Decimal(row.atr14),
     }
-    out.set(row.instrumentId, [...(out.get(row.instrumentId) ?? []), bar])
+    const bucket = out.get(row.instrumentId)
+    if (bucket) bucket.push(bar)
+    else out.set(row.instrumentId, [bar])
   }
 
   return out

@@ -63,8 +63,30 @@ export interface ExitRulePosition {
    * disagreeing with the actual holding.
    */
   sharesRemaining: Decimal
+  /**
+   * Units actually sold since this swing was entered.
+   *
+   * This, not `sharesRemaining < totalShares`, is what says the partial has been
+   * taken. Comparing against the entry size breaks the moment the position is
+   * added to: a top-up lifts the pool back above `totalShares` and the framework
+   * would re-recommend a partial exit that was already executed.
+   */
+  sharesSold: Decimal
   /** Support identified at entry — the discretionary half of the initial stop. */
   supportLevel: Decimal
+  /**
+   * The ATR multiple the initial stop was set with, copied from settings at
+   * creation and never re-read.
+   *
+   * Stored on the plan rather than taken live because the framework's central
+   * promise is that the stop accepted when the trade was sized cannot move. With
+   * the multiple read from global settings instead, editing "Initial stop ATR ×"
+   * would silently reprice the stop and R of every position already open — the
+   * exact retroactive recalculation the locking is meant to prevent.
+   */
+  entryStopAtrMultiple: Decimal
+  /** The R multiple Target 1 was set at, locked at entry for the same reason. */
+  entryTargetMultiple: Decimal
   /**
    * ATR(14) from the entry-date bar, or null when no payload covered that day.
    *

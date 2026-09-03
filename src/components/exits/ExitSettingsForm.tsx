@@ -8,13 +8,16 @@
  * not to prevent experimenting outside it.
  *
  * Saving re-evaluates every open position, because the levels are derived on
- * read rather than stored. The one thing a change here cannot do is move a stop
- * that is already locked: `initialStop` and R are fixed from the entry-date bar,
- * so a new ATR multiple applies to the next plan, not to the ones already open.
+ * read rather than stored. What a change here cannot do is move a stop that is
+ * already locked: each plan stores the stop and target multiples it was created
+ * with, so those two fields apply to the next plan and never to one already
+ * open. The rest — trail width, time stop, staleness — are path-dependent by
+ * design and do take effect immediately, everywhere.
  */
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import styles from './ExitSettingsForm.module.scss'
+import { toFieldErrors } from './fieldErrors'
 import { FormField } from '~/components/trades/FormField'
 import { cx } from '~/lib/cx'
 import { TRAILING_METHODS, type TrailingMethod } from '~/lib/exit/types'
@@ -61,14 +64,7 @@ export function ExitSettingsForm({
       onSaved()
     },
     onError: (error: unknown) => {
-      const issues = (error as { issues?: { path: (string | number)[]; message: string }[] }).issues
-      if (issues) {
-        setErrors(
-          Object.fromEntries(issues.map((issue) => [String(issue.path[0] ?? 'form'), issue.message])),
-        )
-        return
-      }
-      setErrors({ form: error instanceof Error ? error.message : 'Could not save' })
+      setErrors(toFieldErrors(error))
     },
   })
 
@@ -81,7 +77,11 @@ export function ExitSettingsForm({
       }}
     >
       <div className={styles.grid}>
-        <FormField label="Target 1 multiple" error={errors.targetMultiple} hint="1.5–2.0 × R">
+        <FormField
+          label="Target 1 multiple"
+          error={errors.targetMultiple}
+          hint="1.5–2.0 × R · new plans only"
+        >
           <input
             className={styles.input}
             inputMode="decimal"

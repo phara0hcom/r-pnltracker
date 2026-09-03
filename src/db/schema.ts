@@ -461,6 +461,18 @@ export const exitRules = pgTable(
      * later ATR.
      */
     entryAtr: money('entry_atr'),
+    /**
+     * The multiples the stop and target were set with, copied from settings when
+     * the plan was created.
+     *
+     * Stored rather than read live because otherwise "locked at entry" is not
+     * true: editing the global ATR multiple would reprice the stop, R and
+     * Target 1 of every plan already open, which is the retroactive
+     * recalculation the framework exists to prevent. The path-dependent
+     * settings (trail width, time stop, staleness) stay live by design.
+     */
+    entryStopAtrMultiple: money('entry_stop_atr_multiple').notNull().default('1.5'),
+    entryTargetMultiple: money('entry_target_multiple').notNull().default('1.5'),
 
     /** 100 on 東証, 1 for US shares — no suggestion is ever a fractional lot. */
     lotSize: integer('lot_size').notNull().default(100),

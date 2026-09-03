@@ -102,10 +102,13 @@ derivation and sources.
 - **Unsettled rows carry `受渡金額 = "-"`** — the amount must be derived and `isSettled` set false.
 - **`再投資` rows are zero-cash buys** that add units *and* cost basis.
 - **旧NISA is a separate system** and is excluded from the ¥18M lifetime cap.
-- **Exit-rule entry facts are locked**: `initialStop` and R are fixed from the entry-date
-  ATR and never recomputed, while everything path-dependent (highest close, Target 1 latch,
-  the ratcheting trail) is *replayed* from stored bars rather than mutated — a poisoned
-  high-water mark on a one-way ratchet is uncorrectable. See `docs/exit-rules.md`.
+- **Exit-rule entry facts are locked**: `initialStop`, R and Target 1 are fixed from the
+  entry-date ATR *and the stop/target multiples stored on the plan*, never re-read from
+  settings — otherwise changing a multiple reprices every open position. Everything
+  path-dependent (highest close, Target 1 latch, the ratcheting trail) is *replayed* from
+  stored bars rather than mutated — a poisoned high-water mark on a one-way ratchet is
+  uncorrectable. Trading-day maths compares exchange-local dates on both sides. See
+  `docs/exit-rules.md`.
 
 `src/lib/pnl/reconcile.test.ts` replays the engine against 10 month-end 取引残高報告書
 snapshots. It is the strongest correctness check in the repo — a cost-basis or ordering bug

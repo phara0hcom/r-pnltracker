@@ -217,6 +217,31 @@ export function tradingDaysBetween(from: string, to: string, calendar: MarketCal
   return count
 }
 
+/**
+ * The zone each exchange's session dates are expressed in.
+ *
+ * Needed because "today" is not a global fact. Bars are dated in the exchange's
+ * timezone (see `webhook.ts`), so comparing them against the *server's* calendar
+ * date mixes two zones: on a UTC host at 02:00 the New York date is still
+ * yesterday, which would inflate every US position's staleness by a session and
+ * trip the time stop a day early.
+ */
+const CALENDAR_ZONES: Record<MarketCalendar, string> = {
+  JP: 'Asia/Tokyo',
+  US: 'America/New_York',
+}
+
+/** Today's date on the exchange, regardless of where the process is running. */
+export function todayFor(calendar: MarketCalendar, now: Date = new Date()): string {
+  // `en-CA` renders as YYYY-MM-DD, the shape stored everywhere else.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: CALENDAR_ZONES[calendar],
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now)
+}
+
 /** The calendar an instrument trades on. Funds are never exit-rule eligible. */
 export const calendarFor = (assetClass: 'JP_EQUITY' | 'US_EQUITY' | 'FUND'): MarketCalendar =>
   assetClass === 'US_EQUITY' ? 'US' : 'JP'
