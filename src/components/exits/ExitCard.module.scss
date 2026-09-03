@@ -1,0 +1,281 @@
+@use '../../styles/mixins' as m;
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+
+  @include m.card;
+}
+
+/*
+ * Severity is carried by a left edge rather than a tinted background: several
+ * cards sit in one grid, and filling them would turn the screen into a block of
+ * colour where nothing stands out — which is the opposite of the intent.
+ */
+.urgent {
+  border-left: 3px solid var(--color-loss);
+}
+
+.attention {
+  border-left: 3px solid var(--color-warn);
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.account {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.badge {
+  padding: 2px var(--space-2);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-full);
+}
+
+.badgeHit {
+  color: var(--color-profit);
+  background-color: var(--color-profit-dim);
+}
+
+.badgeTrail {
+  color: var(--color-accent);
+  background-color: var(--color-accent-dim);
+}
+
+.badgeWarn {
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+}
+
+/* ── Recommendation ───────────────────────────────────────────────────────── */
+
+.action {
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  border-radius: var(--radius-md);
+}
+
+.action.urgent {
+  color: var(--color-loss);
+  background-color: var(--color-loss-dim);
+  border-left: none;
+}
+
+.action.attention {
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+  border-left: none;
+}
+
+.action.neutral {
+  color: var(--color-text-muted);
+  background-color: var(--color-surface-raised);
+}
+
+/* ── Price ladder ─────────────────────────────────────────────────────────── */
+
+.ladder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ladderTrack {
+  position: relative;
+  height: 6px;
+  background: linear-gradient(
+    to right,
+    var(--color-loss-dim),
+    var(--color-surface-raised) 45%,
+    var(--color-profit-dim)
+  );
+  border-radius: var(--radius-full);
+}
+
+.ladderStop,
+.ladderNow {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  transform: translateX(-1px);
+}
+
+.ladderStop {
+  background-color: var(--color-loss);
+}
+
+.ladderNow {
+  width: 3px;
+  height: 16px;
+  top: -5px;
+  background-color: var(--color-text);
+}
+
+.ladderEnds {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.6875rem;
+  color: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}
+
+/* ── Levels ───────────────────────────────────────────────────────────────── */
+
+.levels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+
+  @include m.mobile {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.level {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.levelLabel {
+  font-size: 0.6875rem;
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.levelValue {
+  font-size: var(--text-md);
+  color: var(--color-text);
+
+  @include m.tabular-nums;
+}
+
+.stopValue {
+  color: var(--color-loss);
+}
+
+.targetValue {
+  color: var(--color-profit);
+}
+
+.liveValue {
+  font-size: var(--text-lg);
+}
+
+.levelHint {
+  font-size: 0.6875rem;
+  color: var(--color-text-subtle);
+
+  @include m.truncate;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+.foot {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-end;
+  justify-content: space-between;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+
+  div {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  dt {
+    font-size: 0.6875rem;
+    color: var(--color-text-subtle);
+  }
+
+  dd {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+
+    @include m.tabular-nums;
+  }
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+.actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.linkButton {
+  padding: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+
+  @include m.focus-ring;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.note {
+  padding-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border-top: 1px dashed var(--color-border);
+}

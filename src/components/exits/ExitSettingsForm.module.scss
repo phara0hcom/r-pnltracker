@@ -1,0 +1,70 @@
+@use '../../styles/mixins' as m;
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.focus-ring;
+}
+
+.formError {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-loss);
+  background-color: var(--color-loss-dim);
+  border: 1px solid var(--color-loss);
+  border-radius: var(--radius-md);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.saved {
+  font-size: var(--text-xs);
+  color: var(--color-profit);
+}
+
+.primary {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-bg);
+  background-color: var(--color-profit);
+  border: 1px solid var(--color-profit);
+  border-radius: var(--radius-md);
+
+  @include m.focus-ring;
+
+  &:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+.busy {
+  opacity: 0.7;
+}

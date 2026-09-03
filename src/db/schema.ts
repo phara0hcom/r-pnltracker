@@ -9,7 +9,7 @@
  * Every user-owned table carries `userId` even though this is a single-user
  * app: it costs nothing now and avoids a painful migration if that changes.
  */
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import {
   boolean,
   date,
@@ -42,6 +42,8 @@ export const dividendKindEnum = pgEnum('dividend_kind', ['DIVIDEND', 'DISTRIBUTI
 export const originEnum = pgEnum('origin', ['IMPORT', 'MANUAL'])
 export const cashKindEnum = pgEnum('cash_kind', ['DEPOSIT', 'WITHDRAWAL', 'TRANSFER'])
 export const priceSourceEnum = pgEnum('price_source', ['FINNHUB', 'SCRAPE', 'MANUAL', 'STALE'])
+/** How the exit-rule trailing stop is computed once Target 1 is taken. */
+export const trailingMethodEnum = pgEnum('trailing_method', ['ATR', 'SMA10', 'SMA20'])
 
 /** Monetary/quantity precision: 24 digits total, 8 decimal places. */
 const money = (name: string) => numeric(name, { precision: 24, scale: 8 })
@@ -409,6 +411,155 @@ export const importBatches = pgTable('import_batches', {
   importedAt: timestamp('imported_at').notNull().defaultNow(),
 })
 
+// ── Exit rules ──────────────────────────────────────────────────────────────
+
+/**
+ * One swing-trade exit plan per open position.
+ *
+ * Every column here is a *locked entry fact*. The framework's whole premise is
+ * that the stop and the risk unit R are fixed when the trade is sized and never
+ * recomputed, so a later shift in support or volatility cannot retroactively
+ * move the level that was accepted at entry. That is why `entry_price`,
+ * `total_shares` and `entry_atr` are stored copies rather than reads of the
+ * engine or the feed: the engine's moving-average cost basis drifts with every
+ * subsequent buy, and the framework needs the price this particular swing was
+ * entered at.
+ *
+ * Everything path-dependent — highest close, whether Target 1 was reached, the
+ * ratcheting trail — is deliberately *not* stored. It is replayed from
+ * `exit_feed_bars` on every read, so a corrected or backfilled payload yields
+ * the right answer instead of permanently poisoning a high-water mark that only
+ * ever moves one way.
+ *
+ * Shares remaining is likewise absent: it is the engine's pool quantity, so
+ * importing the Target 1 sell moves the position on by itself.
+ */
+export const exitRules = pgTable(
+  'exit_rules',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    instrumentId: text('instrument_id')
+      .notNull()
+      .references(() => instruments.id, { onDelete: 'cascade' }),
+    /** Pools are keyed (symbol × account), and so is the exit plan over one. */
+    accountType: accountTypeEnum('account_type').notNull(),
+
+    entryDate: date('entry_date').notNull(),
+    entryPrice: money('entry_price').notNull(),
+    totalShares: money('total_shares').notNull(),
+    /** Support identified at entry — the discretionary half of the initial stop. */
+    supportLevel: money('support_level').notNull(),
+    /**
+     * ATR(14) from the entry-date payload.
+     *
+     * Null when no bar covered that day, which is the normal case for an alert
+     * created after the position was opened. The initial stop then rests on
+     * support alone and the screen says so, rather than silently substituting a
+     * later ATR.
+     */
+    entryAtr: money('entry_atr'),
+
+    /** 100 on 東証, 1 for US shares — no suggestion is ever a fractional lot. */
+    lotSize: integer('lot_size').notNull().default(100),
+    /** Per-position override; null defers to this user's global setting. */
+    trailingMethod: trailingMethodEnum('trailing_method'),
+    note: text('note'),
+
+    /** Set when the plan is retired. Kept, not deleted, so the record survives. */
+    archivedAt: timestamp('archived_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    // One live plan per pool. Partial, so re-entering the same name later is a
+    // new plan rather than a constraint violation against the archived one.
+    uniqueIndex('exit_rules_active_uq')
+      .on(table.userId, table.instrumentId, table.accountType)
+      .where(sql`archived_at is null`),
+    index('exit_rules_user_idx').on(table.userId, table.archivedAt),
+  ],
+)
+
+/**
+ * Daily indicator bars pushed by the TradingView alert, one row per session.
+ *
+ * Unscoped by user, exactly like `price_cache` and `fx_rates` above: a closing
+ * price and its SMA are market data, identical for everyone, and the webhook
+ * arrives bearing a shared secret rather than a session. This is also what lets
+ * the endpoint stay stateless about who is asking.
+ *
+ * Every payload is kept rather than overwriting "today's row", because the
+ * rules need history: the highest close since entry and the last five MACD
+ * histogram readings are both windows over the past, and the trailing ratchet
+ * has to be replayable from the beginning to be correctable at all.
+ */
+export const exitFeedBars = pgTable(
+  'exit_feed_bars',
+  {
+    instrumentId: text('instrument_id')
+      .notNull()
+      .references(() => instruments.id, { onDelete: 'cascade' }),
+    /**
+     * Session date in the *exchange's* timezone.
+     *
+     * Derived from the payload's `time` rather than stored raw: TradingView
+     * sends the bar-open instant in UTC milliseconds, which for a 東証 daily bar
+     * lands on the previous calendar day once converted naively. Getting this
+     * wrong shifts every bar a day and quietly breaks the staleness check.
+     */
+    tradingDay: date('trading_day').notNull(),
+    /** The raw `time` field, kept for diagnosing a timezone dispute. */
+    barTime: timestamp('bar_time').notNull(),
+    exchange: varchar('exchange', { length: 32 }),
+
+    close: money('close').notNull(),
+    sma10: money('sma10').notNull(),
+    sma20: money('sma20').notNull(),
+    rsi14: money('rsi14').notNull(),
+    macd: money('macd').notNull(),
+    macdSignal: money('macd_signal').notNull(),
+    macdHist: money('macd_hist').notNull(),
+    atr14: money('atr14').notNull(),
+
+    receivedAt: timestamp('received_at').notNull().defaultNow(),
+  },
+  (table) => [
+    // Re-sending a session's payload corrects it rather than duplicating it.
+    primaryKey({ columns: [table.instrumentId, table.tradingDay] }),
+    index('exit_feed_day_idx').on(table.tradingDay),
+  ],
+)
+
+/**
+ * The framework's tunables, per user.
+ *
+ * Stored rather than hardcoded because every one of them is a judgement the
+ * framework explicitly leaves open — target multiple 1.5–2.0, partial 33–50%,
+ * time stop 10–15 days. A row is created on first save; its absence means the
+ * defaults in `lib/exit/types.ts` apply.
+ */
+export const exitSettings = pgTable('exit_settings', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  /** Target 1 = entry + this × R. */
+  targetMultiple: money('target_multiple').notNull().default('1.5'),
+  /** Fraction of the position sold at Target 1. */
+  partialExitFraction: money('partial_exit_fraction').notNull().default('0.5'),
+  /** Initial stop = entry − this × ATR(14) at entry. */
+  initialStopAtrMultiple: money('initial_stop_atr_multiple').notNull().default('1.5'),
+  /** Chandelier width: highest close − this × ATR(14). */
+  trailingAtrMultiple: money('trailing_atr_multiple').notNull().default('3'),
+  timeStopDays: integer('time_stop_days').notNull().default(12),
+  trailingMethod: trailingMethodEnum('trailing_method').notNull().default('ATR'),
+  /** Trading days without a payload before the feed is called stale. */
+  staleTradingDays: integer('stale_trading_days').notNull().default(3),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+})
+
 // ── Relations ───────────────────────────────────────────────────────────────
 
 export const userRelations = relations(user, ({ many }) => ({
@@ -454,3 +605,7 @@ export type DbNote = typeof notes.$inferSelect
 export type NewDbNote = typeof notes.$inferInsert
 export type DbPriceCache = typeof priceCache.$inferSelect
 export type DbPriceOverride = typeof priceOverrides.$inferSelect
+export type DbExitRule = typeof exitRules.$inferSelect
+export type NewDbExitRule = typeof exitRules.$inferInsert
+export type DbExitFeedBar = typeof exitFeedBars.$inferSelect
+export type DbExitSettings = typeof exitSettings.$inferSelect
