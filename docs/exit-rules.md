@@ -43,9 +43,18 @@ Confirm it works before wiring any alert — a `GET` on the same URL is a health
 check:
 
 ```bash
-curl https://<your-app>/api/tv/<secret>
+curl https://pnl.tamerelsayed.com/api/tv/<secret>
 # {"ok":true,"endpoint":"exit-rules feed"}
 ```
+
+With the secret unset the endpoint fails closed on every path and verb:
+
+```bash
+# {"error":"webhook not configured"}  — HTTP 503
+```
+
+A wrong secret returns `404`, not `401`, so a prober learns nothing about
+whether the path is a real endpoint.
 
 ### 1.2 Apply the Pine script
 
@@ -89,7 +98,7 @@ The script needs no modification — the endpoint tolerates the two ways Pine's
 5. Expiration: the longest date offered. **On the Plus plan alerts expire after
    two months** — open-ended is Premium-only. Set a recurring reminder to renew,
    or the feed stops silently.
-6. Notifications tab: enable **Webhook URL**, paste `https://<your-app>/api/tv/<secret>`.
+6. Notifications tab: enable **Webhook URL**, paste `https://pnl.tamerelsayed.com/api/tv/<secret>`.
 7. Repeat per position. TradingView alerts are per-symbol, so add one when a
    position opens and delete it when the position closes. The Plus limit of 200
    alerts is not a practical constraint for a personal book.
