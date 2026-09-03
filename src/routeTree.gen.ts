@@ -15,6 +15,7 @@ import { Route as SigninRouteImport } from './routes/signin'
 import { Route as AuthedCalendarRouteImport } from './routes/_authed/calendar'
 import { Route as AuthedDashboardRouteImport } from './routes/_authed/dashboard'
 import { Route as AuthedDividendsRouteImport } from './routes/_authed/dividends'
+import { Route as AuthedExitsRouteImport } from './routes/_authed/exits'
 import { Route as AuthedImportRouteImport } from './routes/_authed/import'
 import { Route as AuthedNisaRouteImport } from './routes/_authed/nisa'
 import { Route as AuthedPositionsRouteImport } from './routes/_authed/positions'
@@ -23,6 +24,7 @@ import { Route as AuthedStatsRouteImport } from './routes/_authed/stats'
 import { Route as AuthedTaxRouteImport } from './routes/_authed/tax'
 import { Route as AuthedTradesRouteImport } from './routes/_authed/trades'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiTvSecretRouteImport } from './routes/api/tv/$secret'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -51,6 +53,11 @@ const AuthedDashboardRoute = AuthedDashboardRouteImport.update({
 const AuthedDividendsRoute = AuthedDividendsRouteImport.update({
   id: '/dividends',
   path: '/dividends',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedExitsRoute = AuthedExitsRouteImport.update({
+  id: '/exits',
+  path: '/exits',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedImportRoute = AuthedImportRouteImport.update({
@@ -93,6 +100,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTvSecretRoute = ApiTvSecretRouteImport.update({
+  id: '/api/tv/$secret',
+  path: '/api/tv/$secret',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -100,6 +112,7 @@ export interface FileRoutesByFullPath {
   '/calendar': typeof AuthedCalendarRoute
   '/dashboard': typeof AuthedDashboardRoute
   '/dividends': typeof AuthedDividendsRoute
+  '/exits': typeof AuthedExitsRoute
   '/import': typeof AuthedImportRoute
   '/nisa': typeof AuthedNisaRoute
   '/positions': typeof AuthedPositionsRoute
@@ -108,6 +121,7 @@ export interface FileRoutesByFullPath {
   '/tax': typeof AuthedTaxRoute
   '/trades': typeof AuthedTradesRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/tv/$secret': typeof ApiTvSecretRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -115,6 +129,7 @@ export interface FileRoutesByTo {
   '/calendar': typeof AuthedCalendarRoute
   '/dashboard': typeof AuthedDashboardRoute
   '/dividends': typeof AuthedDividendsRoute
+  '/exits': typeof AuthedExitsRoute
   '/import': typeof AuthedImportRoute
   '/nisa': typeof AuthedNisaRoute
   '/positions': typeof AuthedPositionsRoute
@@ -123,6 +138,7 @@ export interface FileRoutesByTo {
   '/tax': typeof AuthedTaxRoute
   '/trades': typeof AuthedTradesRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/tv/$secret': typeof ApiTvSecretRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -132,6 +148,7 @@ export interface FileRoutesById {
   '/_authed/calendar': typeof AuthedCalendarRoute
   '/_authed/dashboard': typeof AuthedDashboardRoute
   '/_authed/dividends': typeof AuthedDividendsRoute
+  '/_authed/exits': typeof AuthedExitsRoute
   '/_authed/import': typeof AuthedImportRoute
   '/_authed/nisa': typeof AuthedNisaRoute
   '/_authed/positions': typeof AuthedPositionsRoute
@@ -140,6 +157,7 @@ export interface FileRoutesById {
   '/_authed/tax': typeof AuthedTaxRoute
   '/_authed/trades': typeof AuthedTradesRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/tv/$secret': typeof ApiTvSecretRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -149,6 +167,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/dashboard'
     | '/dividends'
+    | '/exits'
     | '/import'
     | '/nisa'
     | '/positions'
@@ -157,6 +176,7 @@ export interface FileRouteTypes {
     | '/tax'
     | '/trades'
     | '/api/auth/$'
+    | '/api/tv/$secret'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -164,6 +184,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/dashboard'
     | '/dividends'
+    | '/exits'
     | '/import'
     | '/nisa'
     | '/positions'
@@ -172,6 +193,7 @@ export interface FileRouteTypes {
     | '/tax'
     | '/trades'
     | '/api/auth/$'
+    | '/api/tv/$secret'
   id:
     | '__root__'
     | '/'
@@ -180,6 +202,7 @@ export interface FileRouteTypes {
     | '/_authed/calendar'
     | '/_authed/dashboard'
     | '/_authed/dividends'
+    | '/_authed/exits'
     | '/_authed/import'
     | '/_authed/nisa'
     | '/_authed/positions'
@@ -188,6 +211,7 @@ export interface FileRouteTypes {
     | '/_authed/tax'
     | '/_authed/trades'
     | '/api/auth/$'
+    | '/api/tv/$secret'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -195,6 +219,7 @@ export interface RootRouteChildren {
   AuthedRoute: typeof AuthedRouteWithChildren
   SigninRoute: typeof SigninRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiTvSecretRoute: typeof ApiTvSecretRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -239,6 +264,13 @@ declare module '@tanstack/react-router' {
       path: '/dividends'
       fullPath: '/dividends'
       preLoaderRoute: typeof AuthedDividendsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/exits': {
+      id: '/_authed/exits'
+      path: '/exits'
+      fullPath: '/exits'
+      preLoaderRoute: typeof AuthedExitsRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/import': {
@@ -297,6 +329,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/tv/$secret': {
+      id: '/api/tv/$secret'
+      path: '/api/tv/$secret'
+      fullPath: '/api/tv/$secret'
+      preLoaderRoute: typeof ApiTvSecretRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -304,6 +343,7 @@ interface AuthedRouteChildren {
   AuthedCalendarRoute: typeof AuthedCalendarRoute
   AuthedDashboardRoute: typeof AuthedDashboardRoute
   AuthedDividendsRoute: typeof AuthedDividendsRoute
+  AuthedExitsRoute: typeof AuthedExitsRoute
   AuthedImportRoute: typeof AuthedImportRoute
   AuthedNisaRoute: typeof AuthedNisaRoute
   AuthedPositionsRoute: typeof AuthedPositionsRoute
@@ -317,6 +357,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedCalendarRoute: AuthedCalendarRoute,
   AuthedDashboardRoute: AuthedDashboardRoute,
   AuthedDividendsRoute: AuthedDividendsRoute,
+  AuthedExitsRoute: AuthedExitsRoute,
   AuthedImportRoute: AuthedImportRoute,
   AuthedNisaRoute: AuthedNisaRoute,
   AuthedPositionsRoute: AuthedPositionsRoute,
@@ -334,6 +375,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthedRoute: AuthedRouteWithChildren,
   SigninRoute: SigninRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiTvSecretRoute: ApiTvSecretRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

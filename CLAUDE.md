@@ -40,7 +40,7 @@ usual source of warnings.
 
 `csv/` holds the owner's actual Rakuten exports and is gitignored. `src/lib/import/loadFixtures.ts`
 reads it directly — these are the only meaningful fixtures, because synthetic data does not
-reproduce the quirks the code exists to handle. **Without `csv/`, 53 tests across 9 files fail.**
+reproduce the quirks the code exists to handle. **Without `csv/`, 62 tests across 12 files fail.**
 A fresh clone cannot run the suite until those exports are restored.
 
 ## Architecture
@@ -69,6 +69,9 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/lib/pnl/engine.ts` | `runEngine` — cost basis and realized events |
 | `src/db/import.service.ts` | two-phase `previewImport` / `commitImport` |
 | `src/server/screens.ts` | one server fn per screen; calls `runEngine` via `engineFor()` |
+| `src/lib/exit/rules.ts` | swing-trade exit framework — stops, targets, trail, recommendation |
+| `src/lib/exit/calendar.ts` | JP/US trading-day calendars, derived from the statutory rules |
+| `src/routes/api/tv/$secret.ts` | TradingView webhook — the only unauthenticated route |
 | `src/server/middleware.ts` | `authed` (composes `sameOrigin`) — supplies typed `context.userId` |
 
 Every server function touching user data must `.middleware([authed])`. The typed
@@ -99,6 +102,13 @@ derivation and sources.
 - **Unsettled rows carry `受渡金額 = "-"`** — the amount must be derived and `isSettled` set false.
 - **`再投資` rows are zero-cash buys** that add units *and* cost basis.
 - **旧NISA is a separate system** and is excluded from the ¥18M lifetime cap.
+- **Exit-rule entry facts are locked**: `initialStop`, R and Target 1 are fixed from the
+  entry-date ATR *and the stop/target multiples stored on the plan*, never re-read from
+  settings — otherwise changing a multiple reprices every open position. Everything
+  path-dependent (highest close, Target 1 latch, the ratcheting trail) is *replayed* from
+  stored bars rather than mutated — a poisoned high-water mark on a one-way ratchet is
+  uncorrectable. Trading-day maths compares exchange-local dates on both sides. See
+  `docs/exit-rules.md`.
 
 `src/lib/pnl/reconcile.test.ts` replays the engine against 10 month-end 取引残高報告書
 snapshots. It is the strongest correctness check in the repo — a cost-basis or ordering bug
@@ -137,7 +147,9 @@ the correction.
 
 See `SETUP.md` for the full checklist. `.env` keys: `DATABASE_URL` (Neon **pooled** `-pooler`
 host), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-`ALLOWED_EMAIL` (hard allowlist — empty fails closed), `FINNHUB_API_KEY`.
+`ALLOWED_EMAIL` (hard allowlist — empty fails closed), `FINNHUB_API_KEY`,
+`TRADINGVIEW_WEBHOOK_SECRET` (24+ chars; forms the `/api/tv/<secret>` path — unset disables
+the exit-rules feed rather than failing).
 
 Price providers degrade rather than throw: Finnhub (US only) → JP scrape (Yahoo, then
 kabutan) → manual override → stale cache. Nothing in `src/lib/prices/providers.ts` may

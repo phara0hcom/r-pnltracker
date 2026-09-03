@@ -13,6 +13,22 @@ export const yenSigned = (value: string | number | null | undefined): string => 
   return (asNumber > 0 ? '+' : '') + '¥' + asNumber.toLocaleString('en-US', { maximumFractionDigits: 0 })
 }
 
+/**
+ * A figure in its instrument's own currency.
+ *
+ * Delegates to `yen` rather than restating it, so the two can never drift. The
+ * currency argument is required on purpose: the Exit Rules card previously
+ * hardcoded 'JPY' for one field and printed a US position's dollars with a yen
+ * sign, which a default would have allowed again.
+ */
+export const money = (
+  value: string | number | null | undefined,
+  currency: 'JPY' | 'USD',
+): string => {
+  if (value == null) return '—'
+  return currency === 'USD' ? '$' + Number(value).toFixed(2) : yen(value)
+}
+
 export const pct = (value: number | null | undefined, digits = 1): string =>
   value == null ? '—' : (value * 100).toFixed(digits) + '%'
 

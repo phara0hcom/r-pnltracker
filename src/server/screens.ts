@@ -52,7 +52,7 @@ import { buildYearOverYear, type TaxYearBasis } from '~/lib/tax/report'
  * engine's *output* instead would be wrong — a 特定 sell would still have been
  * averaged against NISA units.
  */
-async function engineFor(userId: string, account: AccountFilter = 'ALL') {
+export async function engineFor(userId: string, account: AccountFilter = 'ALL') {
   const records = await listTrades(userId)
   const everyTrade = records.map((record) => record.trade)
   const list = everyTrade.filter((trade) => matchesAccountFilter(trade.accountType, account))
