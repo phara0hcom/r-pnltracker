@@ -210,6 +210,41 @@ duplicating — a duplicate would distort the five-reading momentum window.
 
 ---
 
+## 4.1 The bar also becomes the current price
+
+A daily close arrives at the moment it is the freshest reading anyone has: the
+alert fires *at* the close, while Finnhub and the JP scrape are polled only when
+someone opens Settings and asks. So the webhook publishes the close into
+`price_cache` as well as `exit_feed_bars`, under the source `FEED`, and Positions
+stops showing a staler figure than the Exit Rules card beside it.
+
+Three conditions, each closing a way the price could go backwards or sideways:
+
+- **Only the newest bar held.** `recordFeedBar` reports whether the day it just
+  stored is the latest for that instrument. TradingView resends bars after a
+  chart reload, and a replayed bar carries an old trading day — recording it is
+  right, publishing its close as *current* is not.
+- **Only forward in time.** The upsert carries `setWhere as_of < excluded.as_of`,
+  so a delivery that was slow in flight cannot overwrite a quote fetched while it
+  travelled. Two writers touch this row and neither reads before writing.
+- **Never a fund.** `feedCurrencyFor` returns `null` for them. 基準価額 is quoted
+  per 10,000 口, so a raw close filed against a fund is wrong by four orders of
+  magnitude rather than merely absent.
+
+`as_of` is the delivery time, not the payload's `time`, which is the bar's
+*open*. Filing a close under its opening timestamp would date every JP bar to
+00:00 JST, and it would then lose the comparison above against any quote fetched
+later the same day — correct, and permanently unable to publish itself.
+
+A hand-entered override still wins: the screens resolve `override ?? cached`, so
+nothing in this path needs to know overrides exist. And the publish is wrapped —
+a pricing fault logs and returns 200, because the bar is the job and a 5xx would
+make TradingView retry a delivery that already succeeded.
+
+**This needs `drizzle/0004_price_source_feed.sql` applied** (`npm run db:push`).
+Without it the enum has no `FEED` value, and the price write fails on every bar —
+logged, not fatal.
+
 ## 5. Edge cases handled
 
 **Opening gaps are approximated, not observed.** The payload carries `close`
@@ -278,6 +313,8 @@ a zero-share sale.
 | `src/lib/exit/webhook.ts` | Payload parsing, timezone and Pine-JSON repair |
 | `src/routes/api/tv/$secret.ts` | The webhook endpoint (no session — see §1.1) |
 | `src/db/exit.service.ts` | Plans, settings, bar storage |
+| `src/db/prices.service.ts` | Publishing a bar close into the shared price cache |
+| `src/lib/prices/feed.ts` | Which asset classes a feed close may be published for |
 | `src/server/exit.ts` | Server functions backing the screen |
 | `src/routes/_authed/exits.tsx` | The screen — splits plans by urgency, cards above a table |
 | `src/components/exits/ExitCard.tsx` | The slim card, for plans rated `urgent` or `attention` |

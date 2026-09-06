@@ -21,6 +21,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { eq } from 'drizzle-orm'
 import { db } from '~/db'
 import { backfillEntryAtrForBar, recordFeedBar } from '~/db/exit.service'
+import { cacheFeedClose } from '~/db/prices.service'
 import { instruments } from '~/db/schema'
 import {
   MIN_SECRET_LENGTH,
@@ -117,7 +118,7 @@ export const Route = createFileRoute('/api/tv/$secret')({
 
         const tradingDay = tradingDayFor(time, zoneFor(exchange ?? null, instrument.assetClass))
 
-        await recordFeedBar({
+        const { isLatest } = await recordFeedBar({
           instrumentId: instrument.id,
           tradingDay,
           barTime: new Date(time),
@@ -129,7 +130,51 @@ export const Route = createFileRoute('/api/tv/$secret')({
         // moment that gap closes.
         const backfilled = await backfillEntryAtrForBar(instrument.id, tradingDay, indicators.atr14)
 
-        return json({ ok: true, symbol: instrument.symbol, tradingDay, backfilled }, 200)
+        /*
+         * The close is also the best price anyone has for this instrument at
+         * the moment it lands. The alert fires *at* the daily close, whereas
+         * the quote providers are polled only when someone asks — so without
+         * this, Positions could show a staler figure than the Exit Rules card
+         * beside it, sourced from the same instrument minutes earlier.
+         *
+         * Only when the bar is the newest one held: a replayed bar carries an
+         * old trading day, and an old close must not become the current price.
+         *
+         * `asOf` is delivery time, not the payload's `time`, which is the bar's
+         * *open*. Filing a close under its opening timestamp would date every
+         * JP bar to 00:00 JST, and it would then lose the `setWhere` comparison
+         * against any quote fetched later the same day — the price would be
+         * correct and permanently unable to publish itself.
+         */
+        let priced = false
+        if (isLatest) {
+          try {
+            priced = await cacheFeedClose({
+              instrumentId: instrument.id,
+              assetClass: instrument.assetClass,
+              close: indicators.close,
+              asOf: new Date(),
+            })
+          } catch (error) {
+            /*
+             * Publishing the price is a bonus; recording the bar is the job.
+             * A throw here would 500 a request whose bar has already been
+             * stored, and TradingView retries a 5xx — so a pricing fault would
+             * present as the exit feed being down, which is the one failure
+             * this feature most needs to report honestly.
+             *
+             * The likely cause is the `price_source` enum missing 'FEED',
+             * i.e. drizzle/0004 not yet applied, so the message says so.
+             */
+            console.error(
+              `[tv] bar stored, price not published for ${instrument.symbol}: ${
+                error instanceof Error ? error.message : String(error)
+              } — is drizzle/0004_price_source_feed.sql applied?`,
+            )
+          }
+        }
+
+        return json({ ok: true, symbol: instrument.symbol, tradingDay, backfilled, priced }, 200)
       },
     },
   },

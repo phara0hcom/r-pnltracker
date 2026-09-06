@@ -41,7 +41,7 @@ export const dividendKindEnum = pgEnum('dividend_kind', ['DIVIDEND', 'DISTRIBUTI
 /** Where a row came from. Manual rows are never touched by an import. */
 export const originEnum = pgEnum('origin', ['IMPORT', 'MANUAL'])
 export const cashKindEnum = pgEnum('cash_kind', ['DEPOSIT', 'WITHDRAWAL', 'TRANSFER'])
-export const priceSourceEnum = pgEnum('price_source', ['FINNHUB', 'SCRAPE', 'MANUAL', 'STALE'])
+export const priceSourceEnum = pgEnum('price_source', ['FINNHUB', 'SCRAPE', 'MANUAL', 'STALE', 'FEED'])
 /** How the exit-rule trailing stop is computed once Target 1 is taken. */
 export const trailingMethodEnum = pgEnum('trailing_method', ['ATR', 'SMA10', 'SMA20'])
 

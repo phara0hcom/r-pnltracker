@@ -20,6 +20,13 @@ npm run db:push      # apply to DATABASE_URL
 npm run db:studio
 ```
 
+`drizzle/meta/` is committed on purpose — it is the snapshot `db:generate` diffs
+against, and ignoring it is what let the folder drift until `generate` proposed
+recreating tables that already existed. `drizzle/0000_baseline.sql` is the
+current schema, already applied; `drizzle/archive/` holds the superseded files.
+The database is built by `db:push`, not by replaying migrations — there is no
+`__drizzle_migrations` table.
+
 Single test file / single test:
 
 ```bash

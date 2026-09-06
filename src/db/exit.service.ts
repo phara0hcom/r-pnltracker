@@ -9,7 +9,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import Decimal from 'decimal.js'
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, max } from 'drizzle-orm'
 import { idFor } from './mappers'
 import { exitFeedBars, exitRules, exitSettings, instruments } from './schema'
 import { db } from './index'
@@ -276,14 +276,20 @@ export interface FeedBarInput {
 }
 
 /**
- * Stores one payload.
+ * Stores one payload, and reports whether it is the newest bar held for that
+ * instrument.
  *
  * Upsert on (instrument, day): TradingView can fire twice for the same close
  * after a chart reload, and a resent bar should correct the row rather than
  * duplicate it — a duplicated bar would distort the five-reading momentum
  * window that the time stop reads.
+ *
+ * The same resend is why the return value exists. A replayed bar carries an old
+ * trading day, and the caller uses this to decide whether the close is fit to
+ * publish as the instrument's current price — `false` means an older day
+ * arrived late and must not drag that price backwards.
  */
-export async function recordFeedBar(input: FeedBarInput): Promise<void> {
+export async function recordFeedBar(input: FeedBarInput): Promise<{ isLatest: boolean }> {
   await db
     .insert(exitFeedBars)
     .values(input)
@@ -304,6 +310,16 @@ export async function recordFeedBar(input: FeedBarInput): Promise<void> {
         receivedAt: new Date(),
       },
     })
+
+  // Read back rather than compared against a prior read: the row above is
+  // already committed, so the maximum includes it and the answer cannot be
+  // invalidated by a concurrent delivery for a later day.
+  const [newest] = await db
+    .select({ tradingDay: max(exitFeedBars.tradingDay) })
+    .from(exitFeedBars)
+    .where(eq(exitFeedBars.instrumentId, input.instrumentId))
+
+  return { isLatest: newest?.tradingDay === input.tradingDay }
 }
 
 /**
