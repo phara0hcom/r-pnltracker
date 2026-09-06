@@ -140,6 +140,17 @@ describe('parseFeedBody', () => {
     const result = parseFeedBody(validBody.replace('1780272000000', `"${'9'.repeat(400)}"`))
     expect(result.ok).toBe(false)
   })
+
+  it('rejects a finite bar time beyond the range Date can represent', () => {
+    // The gap the finite check alone leaves open: 1e16 is finite and positive,
+    // so it parses, but it is past Date's ±8.64e15 limit — `tradingDayFor` then
+    // formats an Invalid Date and `Intl` throws, which on the webhook route is
+    // an uncaught 500 that TradingView will retry rather than a 400 it will not.
+    for (const time of ['"9999999999999999"', '10000000000000000']) {
+      const result = parseFeedBody(validBody.replace('1780272000000', time))
+      expect(result.ok).toBe(false)
+    }
+  })
 })
 
 describe('webhookSecretUsable', () => {

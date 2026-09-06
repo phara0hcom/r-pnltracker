@@ -106,6 +106,13 @@ const numeric = z.union([z.number(), z.string().trim().min(1)]).transform((raw, 
   }
 })
 
+/**
+ * The largest instant `Date` can represent, per ECMA-262 — ±8.64e15 ms, about
+ * ±273,790 years around the epoch. Past it every date operation is silently an
+ * Invalid Date until something formats one and throws.
+ */
+const MAX_TIME_MS = 8.64e15
+
 export const feedPayloadSchema = z.object({
   ticker: z.string().trim().min(1).max(128),
   exchange: z.string().trim().max(32).optional(),
@@ -117,7 +124,18 @@ export const feedPayloadSchema = z.object({
     // only: the string branch matches "0", and a long enough run of digits parses
     // to Infinity. Either one files a bar at an impossible date instead of being
     // rejected — "0" lands it on 1970-01-01, where it matches no plan ever.
-    .refine((value) => Number.isFinite(value) && value > 0, 'bar time must be positive'),
+    //
+    // The upper bound is the same guard for the same reason, and the one the
+    // finite check does not cover: a value between `MAX_TIME_MS` and
+    // `Number.MAX_VALUE` is finite and positive, so it passes into
+    // `tradingDayFor`, where `new Date()` is an Invalid Date and `Intl` throws.
+    // On this route that would surface as an uncaught 500 rather than the 400
+    // this rejection produces — and TradingView retries a 5xx, so a payload
+    // that can never succeed would be redelivered.
+    .refine(
+      (value) => Number.isFinite(value) && value > 0 && value <= MAX_TIME_MS,
+      'bar time must be positive and within the representable date range',
+    ),
   close: numeric,
   sma10: numeric,
   sma20: numeric,
