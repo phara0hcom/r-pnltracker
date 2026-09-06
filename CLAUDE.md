@@ -69,6 +69,7 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/lib/pnl/engine.ts` | `runEngine` — cost basis and realized events |
 | `src/db/import.service.ts` | two-phase `previewImport` / `commitImport` |
 | `src/server/screens.ts` | one server fn per screen; calls `runEngine` via `engineFor()` |
+| `src/server/engine.ts` | `engineFor` — trades + engine, kept out of client-reachable modules |
 | `src/lib/exit/rules.ts` | swing-trade exit framework — stops, targets, trail, recommendation |
 | `src/lib/exit/calendar.ts` | JP/US trading-day calendars, derived from the statutory rules |
 | `src/routes/api/tv/$secret.ts` | TradingView webhook — the only unauthenticated route |
@@ -76,6 +77,15 @@ already-formatted strings (`Decimal` → string) and the components only render 
 
 Every server function touching user data must `.middleware([authed])`. The typed
 `context.userId` means a handler that forgets the check does not compile.
+
+**A module exporting a server function must not export anything else that touches the
+database, and nothing reachable from a `.validator()` may import a server-only module.**
+Start strips handler bodies from the client stub, but an exported helper is not droppable
+and validators run in the browser by design — and Rollup then preserves the imported
+module's side effects regardless. One exported helper put `pg`, `drizzle-orm` and the
+schema in the client bundle; `iconv-lite` arrived the same way through a validator and
+crashed every page on `Buffer`. `noServerCodeInClient()` in `vite.config.ts` fails the
+client build if it recurs. See `docs/server-only-modules.md`.
 
 Routes are file-based under `src/routes/`. `_authed.tsx` guards its children in `beforeLoad`,
 so an unauthenticated visitor is redirected before any loader hits the database. Filter and

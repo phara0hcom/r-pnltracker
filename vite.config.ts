@@ -1,7 +1,77 @@
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import react from '@vitejs/plugin-react'
 import { nitro } from 'nitro/vite'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
+
+/**
+ * Modules that must never reach the browser.
+ *
+ * First-party entries are the roots — everything heavy (`pg`, `drizzle-orm`,
+ * `iconv-lite`) is reachable only through them, and is listed as well so a new
+ * path to it is caught too.
+ */
+const SERVER_ONLY = [
+  /\/src\/db\//,
+  /\/src\/lib\/auth\.ts$/,
+  /\/src\/lib\/import\/decode\.ts$/,
+  // Not `better-auth`: its `dist/client` half is the browser SDK and belongs
+  // in the client bundle. `src/lib/auth.ts` above is the server instance.
+  /\/node_modules\/(pg|pg-pool|pg-protocol|pg-types|drizzle-orm|iconv-lite)\//,
+]
+
+/**
+ * Fails the client build if server-only code lands in a browser chunk.
+ *
+ * This is a guard against a silent, recurring failure mode rather than a
+ * hypothetical one. Start strips server-function handler bodies from the client
+ * stub and drops the imports those bodies alone used — but an *exported*
+ * non-server-function helper is not droppable, and Rollup preserves an imported
+ * module's top-level side effects whether or not its exports are used. One
+ * exported helper in `server/screens.ts` was therefore enough to put `pg`,
+ * `drizzle-orm` and the database schema in the browser bundle, and `iconv-lite`
+ * arrived by the same route through a `.validator()` — which legitimately runs
+ * on the client. That one *crashed* the app, because `iconv-lite` reads
+ * `Buffer.prototype` as it loads; the rest shipped 450 KB and said nothing.
+ *
+ * The cost of the leak scales with how quiet it is, so it is worth a hard
+ * failure. See `docs/server-only-modules.md`.
+ */
+function noServerCodeInClient(): Plugin {
+  return {
+    name: 'pnl:no-server-code-in-client',
+    applyToEnvironment: (environment) => environment.name === 'client',
+    generateBundle(_options, bundle) {
+      const offenders = new Map<string, string>()
+      for (const [fileName, chunk] of Object.entries(bundle)) {
+        if (chunk.type !== 'chunk') continue
+        for (const id of Object.keys(chunk.modules)) {
+          if (SERVER_ONLY.some((pattern) => pattern.test(id))) offenders.set(id, fileName)
+        }
+      }
+      if (offenders.size === 0) return
+
+      // First-party paths first: one of them is the root, and the hundred
+      // `node_modules` files behind it are just the subtree it dragged along.
+      const named = [...offenders]
+        .map(([id, fileName]): [string, string] => [
+          id.replace(/^.*\/(src|node_modules)\//, '$1/'),
+          fileName,
+        ])
+        .sort(([a], [b]) => Number(a.startsWith('node_modules/')) - Number(b.startsWith('node_modules/')))
+      const shown = named.slice(0, 10)
+      const listing = shown.map(([id, fileName]) => `  ${id} → ${fileName}`).join('\n')
+      const rest = named.length - shown.length
+
+      this.error(
+        `server-only modules reached the client bundle:\n${listing}` +
+          (rest > 0 ? `\n  … and ${String(rest)} more` : '') +
+          '\n\nSomething client-reachable references them outside a stripped server body. ' +
+          'Move the reference into a handler, or into a module only handlers import — ' +
+          'see docs/server-only-modules.md.',
+      )
+    },
+  }
+}
 
 export default defineConfig({
   server: { port: 3000 },
@@ -52,6 +122,7 @@ export default defineConfig({
       },
     }),
     react(),
+    noServerCodeInClient(),
   ],
   resolve: {
     alias: { '~': new URL('./src', import.meta.url).pathname },

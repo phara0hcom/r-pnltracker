@@ -6,7 +6,6 @@
  */
 import { createServerFn } from '@tanstack/react-start'
 import { getRequest } from '@tanstack/react-start/server'
-import { isAllowedEmail, sessionForRequest } from './auth'
 
 export interface SessionUser {
   id: string
@@ -17,6 +16,16 @@ export interface SessionUser {
 
 export const getSessionUser = createServerFn({ method: 'GET' }).handler(
   async (): Promise<SessionUser | null> => {
+    // Imported inside the handler, never at module scope.
+    //
+    // Start strips this body from the client build, but a top-level import
+    // survives that: Rollup keeps an imported module's top-level side effects
+    // even when none of its exports are used. `lib/auth` reaches `db/index.ts`,
+    // which opens a `pg` pool as a side effect — so a static import here put the
+    // whole of `pg`, `drizzle-orm` and the database schema in the browser
+    // bundle. See `docs/server-only-modules.md`.
+    const { isAllowedEmail, sessionForRequest } = await import('./auth')
+
     const request = getRequest()
     // Memoised per request: this runs in `_authed.beforeLoad`, and the `authed`
     // middleware asks for the same session again a moment later.
