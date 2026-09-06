@@ -20,13 +20,25 @@ export const yenSigned = (value: string | number | null | undefined): string => 
  * currency argument is required on purpose: the Exit Rules card previously
  * hardcoded 'JPY' for one field and printed a US position's dollars with a yen
  * sign, which a default would have allowed again.
+ *
+ * Dollars are grouped for the same reason `money` in `lib/exit/rules.ts` groups
+ * them — a bare `$10000.00` beside a `¥10,000` reads as a typo. The two have to
+ * agree: an Exit Rules card prints the recommendation formatted by that one and
+ * the figures under it by this one, so a US position showed the same number
+ * written both ways an inch apart.
  */
 export const money = (
   value: string | number | null | undefined,
   currency: 'JPY' | 'USD',
 ): string => {
   if (value == null) return '—'
-  return currency === 'USD' ? '$' + Number(value).toFixed(2) : yen(value)
+  return currency === 'USD'
+    ? '$' +
+        Number(value).toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+    : yen(value)
 }
 
 /**
