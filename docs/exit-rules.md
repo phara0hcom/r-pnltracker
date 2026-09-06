@@ -106,7 +106,10 @@ The script needs no modification — the endpoint tolerates the two ways Pine's
    alerts is not a practical constraint for a personal book.
 
 A lapsed alert is the single most likely failure of this feature, which is why
-staleness is surfaced per card *and* the suggested action says so explicitly.
+staleness is surfaced per plan *and* the suggested action says so explicitly.
+Note that a stale plan is still rated `neutral`, so it appears in the screen's
+*On track* table carrying a warn-tone `Stale Nd` flag rather than in the action
+group — the flag is the only thing distinguishing it there.
 
 ---
 
@@ -236,10 +239,10 @@ exchange-local dates would inflate each US position's staleness by a day and
 trip its time stop early.
 
 **A plan opened before its entry-day bar exists** rests on the support level
-alone — the card says *"support only — no entry ATR"*. When a payload for that
-date later arrives, the webhook backfills the ATR for exactly that plan. This is
-not a recalculation: it completes a value that was missing, from the plan's own
-entry date.
+alone — the plan reads *"support only — no entry ATR"* against its initial stop.
+When a payload for that date later arrives, the webhook backfills the ATR for
+exactly that plan. This is not a recalculation: it completes a value that was
+missing, from the plan's own entry date.
 
 **A plan whose position was closed and re-entered is retired, not re-used.**
 Shares remaining is read live from the pool, so buying the same name again before
@@ -260,8 +263,8 @@ feed is quiet — and the stale badge stays visible either way.
 
 **Share quantities are always whole board lots**: 100 on 東証, 1 for US shares,
 rounded *down*. Over-trimming a winner is the costlier mistake. A single-lot
-position cannot be halved, and the card says so rather than suggesting a
-zero-share sale.
+position cannot be halved, and the recommendation says so rather than suggesting
+a zero-share sale.
 
 ---
 
@@ -276,7 +279,11 @@ zero-share sale.
 | `src/routes/api/tv/$secret.ts` | The webhook endpoint (no session — see §1.1) |
 | `src/db/exit.service.ts` | Plans, settings, bar storage |
 | `src/server/exit.ts` | Server functions backing the screen |
-| `src/routes/_authed/exits.tsx` | The screen |
+| `src/routes/_authed/exits.tsx` | The screen — splits plans by urgency, cards above a table |
+| `src/components/exits/ExitCard.tsx` | The slim card, for plans rated `urgent` or `attention` |
+| `src/components/exits/ExitPlanRow.tsx` | The table row, for plans rated `neutral` |
+| `src/components/exits/ExitPlanDialog.tsx` | One plan in full, read-only — opened from either |
+| `src/components/exits/ExitRuleDialog.tsx` | The create/edit form (not the read dialog) |
 
 `src/lib/exit/` is pure and DB-free like the rest of `lib/`, so the whole rule
 set is tested against handmade bar sequences with no database and no network —

@@ -1,5 +1,5 @@
 csv/*
-design_handoff_content_redesign/*
+design_handoff_content_redesign*/
 node_modules
 .env
 .env.local

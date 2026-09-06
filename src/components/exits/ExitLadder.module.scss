@@ -1,0 +1,65 @@
+@use '../../styles/mixins' as m;
+
+.ladder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* Loss at the stop end, profit at the target end — the gradient is the only
+   thing telling you which way along the axis is good. */
+.track {
+  position: relative;
+  height: 6px;
+  background: linear-gradient(
+    to right,
+    var(--color-loss-dim),
+    var(--color-surface-raised) 45%,
+    var(--color-profit-dim)
+  );
+  border-radius: var(--radius-full);
+}
+
+.stop,
+.now {
+  position: absolute;
+  border-radius: 1px;
+  transform: translateX(-1px);
+}
+
+.stop {
+  top: -2px;
+  width: 2px;
+  height: 10px;
+  background-color: var(--color-loss);
+}
+
+/* The last close is the mark you look for, so it is taller and full-contrast
+   against the stop's 2px. */
+.now {
+  top: -3px;
+  width: 3px;
+  height: 12px;
+  background-color: var(--color-text);
+}
+
+.large {
+  .stop {
+    top: -3px;
+    height: 12px;
+  }
+
+  .now {
+    top: -5px;
+    height: 16px;
+  }
+}
+
+.ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.6875rem;
+  color: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}

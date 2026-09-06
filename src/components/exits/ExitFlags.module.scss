@@ -1,0 +1,37 @@
+.flags {
+  display: flex;
+  flex-wrap: wrap;
+  flex: none;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.badge {
+  padding: 2px var(--space-2);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-full);
+}
+
+.compact {
+  padding: 1px 6px;
+  font-size: 0.625rem;
+}
+
+.hit {
+  color: var(--color-profit);
+  background-color: var(--color-profit-dim);
+}
+
+.trail {
+  color: var(--color-accent);
+  background-color: var(--color-accent-dim);
+}
+
+.warn {
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+}

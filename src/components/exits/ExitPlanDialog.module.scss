@@ -1,0 +1,234 @@
+@use '../../styles/mixins' as m;
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgb(0 0 0 / 65%);
+  backdrop-filter: blur(2px);
+}
+
+/* Wider than the edit form: this one has to hold a three-across level grid
+   without the columns collapsing to two figures and a hint each. */
+.content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(760px, calc(100vw - var(--space-6)));
+  max-height: calc(100dvh - var(--space-6));
+  padding: var(--space-5);
+  overflow-y: auto;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  transform: translate(-50%, -50%);
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+.account {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.headActions {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.close {
+  width: 28px;
+  height: 28px;
+  font-size: var(--text-md);
+  line-height: 1;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+}
+
+/* ── Recommendation ───────────────────────────────────────────────────────── */
+
+.action {
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  border-radius: var(--radius-md);
+}
+
+.urgent {
+  color: var(--color-loss);
+  background-color: var(--color-loss-dim);
+}
+
+.attention {
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+}
+
+.neutral {
+  color: var(--color-text-muted);
+  background-color: var(--color-surface-raised);
+}
+
+/* ── Levels ───────────────────────────────────────────────────────────────── */
+
+.levels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+
+  @include m.mobile {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.level {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.levelLabel {
+  font-size: 0.6875rem;
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.levelValue {
+  font-size: var(--text-md);
+  color: var(--color-text);
+
+  @include m.tabular-nums;
+}
+
+.stopValue {
+  color: var(--color-loss);
+}
+
+.targetValue {
+  color: var(--color-profit);
+}
+
+.liveValue {
+  font-size: var(--text-lg);
+}
+
+.levelHint {
+  font-size: 0.6875rem;
+  color: var(--color-text-subtle);
+
+  @include m.truncate;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+.foot {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-end;
+  justify-content: space-between;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+
+  @include m.mobile {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+
+  div {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  dt {
+    font-size: 0.6875rem;
+    color: var(--color-text-subtle);
+  }
+
+  dd {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+
+    @include m.tabular-nums;
+  }
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+/* `tone()` returns profit | loss | flat, so all three need a rule. */
+.flat {
+  color: var(--color-text-muted);
+}
+
+.actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.editButton {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+}
+
+.note {
+  padding-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border-top: 1px dashed var(--color-border);
+}

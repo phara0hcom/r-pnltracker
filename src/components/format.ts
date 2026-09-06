@@ -29,6 +29,20 @@ export const money = (
   return currency === 'USD' ? '$' + Number(value).toFixed(2) : yen(value)
 }
 
+/**
+ * `money` with an explicit sign, for figures that are read as a change.
+ *
+ * `Number` prints the minus but never the plus, and an unsigned gain beside a
+ * signed loss reads as an amount rather than a direction.
+ */
+export const moneySigned = (
+  value: string | number | null | undefined,
+  currency: 'JPY' | 'USD',
+): string => {
+  if (value == null) return '—'
+  return (Number(value) > 0 ? '+' : '') + money(value, currency)
+}
+
 export const pct = (value: number | null | undefined, digits = 1): string =>
   value == null ? '—' : (value * 100).toFixed(digits) + '%'
 

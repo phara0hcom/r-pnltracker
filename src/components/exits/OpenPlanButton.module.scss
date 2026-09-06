@@ -1,0 +1,13 @@
+@use '../../styles/mixins' as m;
+
+.open {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background: none;
+  border: none;
+  /* Follows whatever it covers — 12px on a card, square on a table row. */
+  border-radius: inherit;
+
+  @include m.focus-ring;
+}

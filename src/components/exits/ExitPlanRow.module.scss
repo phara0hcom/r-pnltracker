@@ -1,0 +1,68 @@
+@use '../../styles/mixins' as m;
+
+/*
+ * Positioned so the row's `OpenPlanButton` — which lives inside the first cell,
+ * because a `<button>` is not valid as a direct child of `<tr>` — resolves
+ * against the row rather than the cell, and so covers all of it.
+ */
+.row {
+  position: relative;
+}
+
+.instrument {
+  max-width: 250px;
+}
+
+.identity {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.symbol {
+  flex: none;
+  font-weight: var(--weight-medium);
+}
+
+.name {
+  min-width: 0;
+  color: var(--color-text-subtle);
+
+  @include m.truncate;
+}
+
+/* Short enough to stay a glance rather than a chart, and fixed so the marks
+   line up down the column. */
+.ladder {
+  width: 90px;
+}
+
+.current {
+  font-weight: var(--weight-medium);
+}
+
+.stop {
+  color: var(--color-loss);
+}
+
+.target {
+  color: var(--color-profit);
+}
+
+.held {
+  color: var(--color-text-muted);
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+/* `tone()` returns profit | loss | flat, so all three need a rule. */
+.flat {
+  color: var(--color-text-muted);
+}
