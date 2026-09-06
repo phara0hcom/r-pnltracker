@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { authed } from './middleware'
 import { db } from '~/db'
 import { instrumentId } from '~/db/mappers'
+import { cacheQuote } from '~/db/prices.service'
 import { fxRates as schemaFx, instruments, priceCache, priceOverrides } from '~/db/schema'
 import { listTrades } from '~/db/trades.service'
 import type { AssetClass } from '~/lib/domain/types'
@@ -98,26 +99,9 @@ export const refreshPrices = createServerFn({ method: 'POST' })
         continue
       }
 
-      await db
-        .insert(priceCache)
-        .values({
-          instrumentId: id,
-          price: quote.price,
-          currency: quote.currency,
-          asOf: quote.asOf,
-          source: quote.source,
-        })
-        .onConflictDoUpdate({
-          target: priceCache.instrumentId,
-          set: {
-            price: quote.price,
-            currency: quote.currency,
-            asOf: quote.asOf,
-            source: quote.source,
-            fetchedAt: new Date(),
-          },
-        })
-      updated++
+      // Unguarded on purpose — see `cacheQuote`. A press of the button always
+      // writes, so this always counts.
+      if (await cacheQuote({ instrumentId: id, ...quote })) updated++
     }
 
     const fx = await fetchUsdJpy()

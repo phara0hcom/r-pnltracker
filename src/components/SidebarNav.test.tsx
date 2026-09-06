@@ -24,6 +24,7 @@ const ROUTES = [
   '/dashboard',
   '/trades',
   '/positions',
+  '/exits',
   '/dividends',
   '/calendar',
   '/stats',

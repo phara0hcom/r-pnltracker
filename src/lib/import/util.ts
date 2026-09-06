@@ -7,14 +7,8 @@
  */
 import { createHash } from 'node:crypto'
 import Decimal from 'decimal.js'
-import iconv from 'iconv-lite'
 import type { AccountType, AssetClass, TradeSide } from '../domain/types'
 import { ZERO } from '../domain/types'
-
-/** Rakuten writes Shift-JIS. Files are small, so decode eagerly. */
-export function decodeShiftJis(buf: Buffer | Uint8Array): string {
-  return iconv.decode(Buffer.from(buf), 'Shift_JIS')
-}
 
 /**
  * Trim ASCII and full-width (U+3000) whitespace.

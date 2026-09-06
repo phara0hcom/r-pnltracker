@@ -9,8 +9,9 @@ npm run dev          # Vite dev server on :3000
 npm run build        # production build → .output/ (Nitro; Vercel consumes this)
 npm start            # serve the build (node .output/server/index.mjs)
 
-npm test             # vitest run
+npm test             # vitest run — the fast suite, run after every change
 npm run test:watch
+npm run test:db      # real Postgres in a container; needs Docker or Podman
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint . (type-aware; must be clean)
 npm run lint:fix
@@ -19,6 +20,13 @@ npm run db:generate  # drizzle-kit generate — after editing db/schema.ts
 npm run db:push      # apply to DATABASE_URL
 npm run db:studio
 ```
+
+`drizzle/meta/` is committed on purpose — it is the snapshot `db:generate` diffs
+against, and ignoring it is what let the folder drift until `generate` proposed
+recreating tables that already existed. `drizzle/0000_baseline.sql` is the
+current schema, already applied; `drizzle/archive/` holds the superseded files.
+The database is built by `db:push`, not by replaying migrations — there is no
+`__drizzle_migrations` table.
 
 Single test file / single test:
 
@@ -36,11 +44,21 @@ All three must pass, and lint must be warning-free — `npx eslint src --max-war
 is the check actually used. `npm run lint:fix` handles import ordering, which is the
 usual source of warnings.
 
+`npm run test:db` is separate on purpose. `*.db.test.ts` starts a throwaway
+Postgres via testcontainers and builds it from `drizzle/0000_baseline.sql`, which
+takes seconds rather than milliseconds — the verification loop above is run after
+every change and has to stay fast enough that nobody skips it. Those tests cover
+what only a real server can answer, chiefly whether `on conflict … do update …
+where` actually refuses a stale write. They **skip themselves** when no container
+runtime is present, so the command is safe to run anywhere. Podman needs no
+configuration: the socket is found and `DOCKER_HOST` set automatically, and Ryuk
+is disabled because its socket bind-mount cannot work on macOS.
+
 ### Tests depend on real, gitignored data
 
 `csv/` holds the owner's actual Rakuten exports and is gitignored. `src/lib/import/loadFixtures.ts`
 reads it directly — these are the only meaningful fixtures, because synthetic data does not
-reproduce the quirks the code exists to handle. **Without `csv/`, 53 tests across 9 files fail.**
+reproduce the quirks the code exists to handle. **Without `csv/`, 62 tests across 12 files fail.**
 A fresh clone cannot run the suite until those exports are restored.
 
 ## Architecture
@@ -69,10 +87,23 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/lib/pnl/engine.ts` | `runEngine` — cost basis and realized events |
 | `src/db/import.service.ts` | two-phase `previewImport` / `commitImport` |
 | `src/server/screens.ts` | one server fn per screen; calls `runEngine` via `engineFor()` |
+| `src/server/engine.ts` | `engineFor` — trades + engine, kept out of client-reachable modules |
+| `src/lib/exit/rules.ts` | swing-trade exit framework — stops, targets, trail, recommendation |
+| `src/lib/exit/calendar.ts` | JP/US trading-day calendars, derived from the statutory rules |
+| `src/routes/api/tv/$secret.ts` | TradingView webhook — the only unauthenticated route |
 | `src/server/middleware.ts` | `authed` (composes `sameOrigin`) — supplies typed `context.userId` |
 
 Every server function touching user data must `.middleware([authed])`. The typed
 `context.userId` means a handler that forgets the check does not compile.
+
+**A module exporting a server function must not export anything else that touches the
+database, and nothing reachable from a `.validator()` may import a server-only module.**
+Start strips handler bodies from the client stub, but an exported helper is not droppable
+and validators run in the browser by design — and Rollup then preserves the imported
+module's side effects regardless. One exported helper put `pg`, `drizzle-orm` and the
+schema in the client bundle; `iconv-lite` arrived the same way through a validator and
+crashed every page on `Buffer`. `noServerCodeInClient()` in `vite.config.ts` fails the
+client build if it recurs. See `docs/server-only-modules.md`.
 
 Routes are file-based under `src/routes/`. `_authed.tsx` guards its children in `beforeLoad`,
 so an unauthenticated visitor is redirected before any loader hits the database. Filter and
@@ -99,6 +130,13 @@ derivation and sources.
 - **Unsettled rows carry `受渡金額 = "-"`** — the amount must be derived and `isSettled` set false.
 - **`再投資` rows are zero-cash buys** that add units *and* cost basis.
 - **旧NISA is a separate system** and is excluded from the ¥18M lifetime cap.
+- **Exit-rule entry facts are locked**: `initialStop`, R and Target 1 are fixed from the
+  entry-date ATR *and the stop/target multiples stored on the plan*, never re-read from
+  settings — otherwise changing a multiple reprices every open position. Everything
+  path-dependent (highest close, Target 1 latch, the ratcheting trail) is *replayed* from
+  stored bars rather than mutated — a poisoned high-water mark on a one-way ratchet is
+  uncorrectable. Trading-day maths compares exchange-local dates on both sides. See
+  `docs/exit-rules.md`.
 
 `src/lib/pnl/reconcile.test.ts` replays the engine against 10 month-end 取引残高報告書
 snapshots. It is the strongest correctness check in the repo — a cost-basis or ordering bug
@@ -137,7 +175,9 @@ the correction.
 
 See `SETUP.md` for the full checklist. `.env` keys: `DATABASE_URL` (Neon **pooled** `-pooler`
 host), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-`ALLOWED_EMAIL` (hard allowlist — empty fails closed), `FINNHUB_API_KEY`.
+`ALLOWED_EMAIL` (hard allowlist — empty fails closed), `FINNHUB_API_KEY`,
+`TRADINGVIEW_WEBHOOK_SECRET` (24+ chars; forms the `/api/tv/<secret>` path — unset disables
+the exit-rules feed rather than failing).
 
 Price providers degrade rather than throw: Finnhub (US only) → JP scrape (Yahoo, then
 kabutan) → manual override → stale cache. Nothing in `src/lib/prices/providers.ts` may

@@ -7,6 +7,7 @@
  */
 import { createServerFn } from '@tanstack/react-start'
 import { and, eq } from 'drizzle-orm'
+import { engineFor } from './engine'
 import { authed } from './middleware'
 import { db } from '~/db'
 import { fromDividendRow, instrumentId } from '~/db/mappers'
@@ -18,13 +19,11 @@ import {
   priceCache,
   priceOverrides,
 } from '~/db/schema'
-import { listTrades } from '~/db/trades.service'
 import { accountFilterInput } from '~/lib/accountScope'
 import {
   matchesAccountFilter,
   OPENING_SIDES,
   ZERO,
-  type AccountFilter,
   type AssetClass,
   type TradeSide,
 } from '~/lib/domain/types'
@@ -36,35 +35,11 @@ import {
   buildNisaReport,
   legacyNisaBookValue,
 } from '~/lib/nisa/quota'
-import { runEngine } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
 import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
 import { findReinvestment } from '~/lib/tax/reinvestment'
 import { buildYearOverYear, type TaxYearBasis } from '~/lib/tax/report'
-
-/**
- * Loads trades and runs the engine once — every screen starts here.
- *
- * The account filter is applied to the trades *before* the engine runs, which
- * is exact rather than approximate: pools are keyed `(symbol × accountType)`,
- * so dropping whole accounts cannot alter the pools that remain. Filtering the
- * engine's *output* instead would be wrong — a 特定 sell would still have been
- * averaged against NISA units.
- */
-async function engineFor(userId: string, account: AccountFilter = 'ALL') {
-  const records = await listTrades(userId)
-  const everyTrade = records.map((record) => record.trade)
-  const list = everyTrade.filter((trade) => matchesAccountFilter(trade.accountType, account))
-  // `unfilteredTrades` is returned for the rare lookup that must see across the
-  // switch — matching a 再投資 to its dividend, where Rakuten's two rows can sit
-  // in different accounts. Everything else wants `trades`.
-  //
-  // `records` carries the row ids, memos and per-trade journals alongside. The
-  // calendar needs those and used to re-read them with a second `listTrades`,
-  // which fetched and re-mapped the whole history twice per month viewed.
-  return { records, trades: list, unfilteredTrades: everyTrade, engine: runEngine(list) }
-}
 
 /** This user's hand-entered prices, keyed by instrument id. */
 async function overridesFor(userId: string) {

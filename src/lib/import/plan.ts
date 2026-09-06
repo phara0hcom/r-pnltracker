@@ -12,8 +12,8 @@
  * given key or none, so the ordinals it assigns match those of the full export.
  */
 import type { NormalizedDividend, NormalizedTrade, ParseResult } from '../domain/types'
+import { decodeShiftJis } from './decode'
 import { detectFormat } from './tradeHistory'
-import { decodeShiftJis } from './util'
 
 /**
  * Order a batch so trade histories commit before statements.

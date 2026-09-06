@@ -1,0 +1,206 @@
+@use '../../styles/mixins' as m;
+
+.newButton {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  @include m.mobile {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+  }
+}
+
+.warning {
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+  border: 1px solid var(--color-warn);
+  border-radius: var(--radius-md);
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.8125em;
+  }
+}
+
+/*
+ * A stack, not a grid. These are the plans that need reading, and two across
+ * means the second one is competing with the first for the same glance — the
+ * whole point of slimming the card was that a full column of them fits.
+ */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.tableNote {
+  margin-top: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+/* ── Phone ────────────────────────────────────────────────────────────────── */
+
+/* Sections on SP are a label, not a heading block — `Section`'s title and
+   description are more chrome than a 390px screen can spare. */
+.spSectionTitle {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.spSectionTitle + * {
+  margin-bottom: var(--space-5);
+}
+
+.spNote {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.spCards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.spList {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * Two lines rather than a row of columns, and positioned so the whole thing is
+ * the tap target. `min-height` keeps it at a comfortable 48px even for the
+ * shortest instrument name.
+ */
+.spRow {
+  position: relative;
+  min-height: 48px;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.spRowHead {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.spIdentity {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.spName {
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.truncate;
+}
+
+.spPnl {
+  flex: none;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.spLadder {
+  margin-top: var(--space-2);
+}
+
+.spEnds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-1);
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}
+
+.spSessions {
+  margin-left: auto;
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+/* `tone()` returns profit | loss | flat, so all three need a rule. */
+.flat {
+  color: var(--color-text-muted);
+}
+
+/* ── Plans to archive ─────────────────────────────────────────────────────── */
+
+.closedList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.closedRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-md);
+}
+
+.closedName {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+
+  @include m.truncate;
+}
+
+.closedMeta {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}
+
+/* Full-width so the explanation wraps onto its own line under the row. */
+.closedNote {
+  flex-basis: 100%;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

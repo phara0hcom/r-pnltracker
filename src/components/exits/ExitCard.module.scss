@@ -1,0 +1,203 @@
+@use '../../styles/mixins' as m;
+
+/*
+ * Positioned so `OpenPlanButton` can stretch over it — the whole card is the
+ * target, and the button's focus ring then draws around the card itself.
+ */
+.card {
+  position: relative;
+  padding: var(--space-3) var(--space-4);
+
+  @include m.card;
+
+  &:hover {
+    background-color: var(--color-surface-hover);
+  }
+
+  /*
+   * Severity is carried by a left edge rather than a tinted background: these
+   * sit in a stack, and filling them would turn the group into a block of
+   * colour where nothing stands out — which is the opposite of the intent.
+   */
+  &.urgent {
+    border-left: 3px solid var(--color-loss);
+  }
+
+  &.attention {
+    border-left: 3px solid var(--color-warn);
+  }
+}
+
+/* ── Identity ─────────────────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.identity {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.symbol {
+  flex: none;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+}
+
+.name {
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-subtle);
+
+  @include m.truncate;
+}
+
+.account {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+  white-space: nowrap;
+}
+
+/* ── Recommendation ───────────────────────────────────────────────────────── */
+
+.action {
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  border-radius: var(--radius-md);
+
+  &.urgent {
+    color: var(--color-loss);
+    background-color: var(--color-loss-dim);
+  }
+
+  &.attention {
+    color: var(--color-warn);
+    background-color: var(--color-warn-dim);
+  }
+
+  &.neutral {
+    color: var(--color-text-muted);
+    background-color: var(--color-surface-raised);
+  }
+}
+
+/* ── Ladder, facts and the affordance ─────────────────────────────────────── */
+
+.meta {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  margin-top: var(--space-3);
+}
+
+/* Fixed rather than fluid: the ladders read as one scale down the stack only
+   while they are all the same length. */
+.ladder {
+  flex: none;
+  width: 200px;
+}
+
+.facts {
+  display: flex;
+  flex: 1;
+  gap: var(--space-5);
+  min-width: 0;
+  margin: 0;
+
+  div {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  dt {
+    font-size: 0.6875rem;
+    color: var(--color-text-subtle);
+  }
+
+  dd {
+    margin: 0;
+    font-size: var(--text-sm);
+
+    @include m.tabular-nums;
+  }
+}
+
+.details {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+/* `tone()` returns profit | loss | flat, so all three need a rule. */
+.flat {
+  color: var(--color-text-muted);
+}
+
+/* ── Phone ────────────────────────────────────────────────────────────────── */
+
+.compact {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.compactName {
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.truncate;
+}
+
+/* Tinted text without the filled block: at 390px the sentence is three lines,
+   and three lines of tinted background is the card. */
+.compactAction {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  text-wrap: pretty;
+
+  &.urgent {
+    color: var(--color-loss);
+  }
+
+  &.attention {
+    color: var(--color-warn);
+  }
+
+  &.neutral {
+    color: var(--color-text-muted);
+  }
+}
+
+.compactLadder {
+  margin-top: var(--space-3);
+}
+
+.compactEnds {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-1);
+  font-size: 0.625rem;
+  color: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}

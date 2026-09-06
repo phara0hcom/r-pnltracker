@@ -8,7 +8,6 @@
  */
 import { createMiddleware } from '@tanstack/react-start'
 import { getRequest } from '@tanstack/react-start/server'
-import { isAllowedEmail, sessionForRequest } from '~/lib/auth'
 
 export interface AuthedContext {
   userId: string
@@ -61,6 +60,12 @@ export const sameOrigin = createMiddleware({ type: 'function' }).server(({ next 
 export const authed = createMiddleware({ type: 'function' })
   .middleware([sameOrigin])
   .server(async ({ next }) => {
+    // Imported inside `.server()` for the same reason as in `lib/session.ts`:
+    // at module scope it drags `pg` and `drizzle-orm` into the client bundle,
+    // because Rollup preserves an imported module's side effects regardless of
+    // whether anything it exports is used. See `docs/server-only-modules.md`.
+    const { isAllowedEmail, sessionForRequest } = await import('~/lib/auth')
+
     const request = getRequest()
     // Shared with the `_authed` guard, which has already resolved this session
     // earlier in the same request — see `sessionForRequest`.

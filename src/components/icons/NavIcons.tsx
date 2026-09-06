@@ -103,6 +103,19 @@ const Import = ({ className }: IconProps) => (
   </svg>
 )
 
+/**
+ * A price line with a stop level beneath it. The horizontal rule is the point —
+ * a bare trend line would read as Stats, and the whole screen is about the
+ * level the line must not cross.
+ */
+const Exits = ({ className }: IconProps) => (
+  <svg {...BASE} className={className}>
+    <path d="M1.8 10.2 5 6.6l2.4 2.2L11 3.8" />
+    <path d="M9.6 3.8H11v1.4" />
+    <path d="M1.8 13.2h12.4" strokeDasharray="2 1.8" />
+  </svg>
+)
+
 const Settings = ({ className }: IconProps) => (
   <svg {...BASE} className={className}>
     <circle cx="8" cy="8" r="3.1" />
@@ -115,6 +128,7 @@ export const NAV_ICONS = {
   '/dashboard': Dashboard,
   '/trades': Trades,
   '/positions': Positions,
+  '/exits': Exits,
   '/dividends': Dividends,
   '/calendar': Calendar,
   '/stats': Stats,

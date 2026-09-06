@@ -2,15 +2,15 @@
   "name": "pnltracker",
   "private": true,
   "type": "module",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "vite dev --port 3000",
     "build": "vite build",
     "start": "node .output/server/index.mjs",
-    "test": "vitest run",
+    "test": "vitest run --project lib --project dom",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
@@ -20,7 +20,8 @@
     "lint:fix": "eslint . --fix",
     "seed": "vite-node src/scripts/seed.ts",
     "report": "vite-node src/scripts/report.ts",
-    "preview": "npm run build && npm run start"
+    "preview": "npm run build && npm run start",
+    "test:db": "vitest run --project db"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",
@@ -51,6 +52,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.6",
     "@types/node": "^22.10.5",

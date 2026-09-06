@@ -13,6 +13,48 @@ export const yenSigned = (value: string | number | null | undefined): string => 
   return (asNumber > 0 ? '+' : '') + '¥' + asNumber.toLocaleString('en-US', { maximumFractionDigits: 0 })
 }
 
+/**
+ * A figure in its instrument's own currency.
+ *
+ * Delegates to `yen` rather than restating it, so the two can never drift. The
+ * currency argument is required on purpose: the Exit Rules card previously
+ * hardcoded 'JPY' for one field and printed a US position's dollars with a yen
+ * sign, which a default would have allowed again.
+ *
+ * Dollars are grouped for the same reason `money` in `lib/exit/rules.ts` groups
+ * them — a bare `$10000.00` beside a `¥10,000` reads as a typo. The two have to
+ * agree: an Exit Rules card prints the recommendation formatted by that one and
+ * the figures under it by this one, so a US position showed the same number
+ * written both ways an inch apart.
+ */
+export const money = (
+  value: string | number | null | undefined,
+  currency: 'JPY' | 'USD',
+): string => {
+  if (value == null) return '—'
+  return currency === 'USD'
+    ? '$' +
+        Number(value).toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+    : yen(value)
+}
+
+/**
+ * `money` with an explicit sign, for figures that are read as a change.
+ *
+ * `Number` prints the minus but never the plus, and an unsigned gain beside a
+ * signed loss reads as an amount rather than a direction.
+ */
+export const moneySigned = (
+  value: string | number | null | undefined,
+  currency: 'JPY' | 'USD',
+): string => {
+  if (value == null) return '—'
+  return (Number(value) > 0 ? '+' : '') + money(value, currency)
+}
+
 export const pct = (value: number | null | undefined, digits = 1): string =>
   value == null ? '—' : (value * 100).toFixed(digits) + '%'
 
