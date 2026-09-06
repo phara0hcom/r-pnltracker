@@ -158,7 +158,7 @@ function Exits() {
           data.rules.length === 0
             ? 'Stops, targets and trails for open swing positions.'
             : isMobile
-              ? `${String(data.rules.length)} plan${data.rules.length === 1 ? '' : 's'} · ${String(action.length)} need attention`
+              ? `${String(data.rules.length)} plan${data.rules.length === 1 ? '' : 's'} · ${String(action.length)} need${action.length === 1 ? 's' : ''} attention`
               : `${String(data.rules.length)} open plan${data.rules.length === 1 ? '' : 's'} · ${String(action.length)} needing attention`
         }
       >

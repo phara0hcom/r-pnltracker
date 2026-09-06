@@ -17,7 +17,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
 import { Pool } from 'pg'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type * as ExitService from './exit.service'
 import type * as PricesService from './prices.service'
 
@@ -128,6 +128,36 @@ async function cached(): Promise<{ price: string; source: string; currency: stri
 const LATER = new Date('2026-09-04T20:00:00Z')
 const EARLIER = new Date('2026-09-04T19:00:00Z')
 
+/**
+ * Puts a known row in place, so a test that needs a starting price says so.
+ *
+ * Written through the service rather than raw SQL: `numeric(24,8)` round-trips
+ * through the same path the assertions read back, so an expected value never
+ * has to guess at the scale.
+ */
+async function seed(price: string, asOf: Date): Promise<void> {
+  await prices!.cacheQuote({
+    instrumentId: INSTRUMENT,
+    price,
+    currency: 'JPY',
+    asOf,
+    source: 'FINNHUB',
+  })
+}
+
+/*
+ * Every test starts from an empty cache and no bars.
+ *
+ * These ran in order and each leaned on the row the last one left, which passes
+ * only while the whole file runs start to finish — and the first thing anyone
+ * does with a failure is re-run that one test on its own.
+ */
+beforeEach(async () => {
+  if (!available) return
+  await sql!.query('delete from price_cache')
+  await sql!.query('delete from exit_feed_bars')
+})
+
 describe.skipIf(!available)('price cache, against a real Postgres', () => {
   it('accepts the FEED source, proving the enum migration landed', async () => {
     // If drizzle/0004 had not been applied this insert is what would fail, and
@@ -145,10 +175,7 @@ describe.skipIf(!available)('price cache, against a real Postgres', () => {
   })
 
   it('refuses to move the price backwards when guarded', async () => {
-    await prices!.cacheQuote(
-      { instrumentId: INSTRUMENT, price: '500', currency: 'JPY', asOf: LATER, source: 'FEED' },
-      { onlyIfNewer: true },
-    )
+    await seed('500', LATER)
 
     const wrote = await prices!.cacheQuote(
       { instrumentId: INSTRUMENT, price: '999', currency: 'JPY', asOf: EARLIER, source: 'FEED' },
@@ -160,15 +187,25 @@ describe.skipIf(!available)('price cache, against a real Postgres', () => {
     expect((await cached())?.price).toBe('500.00000000')
   })
 
-  it('lets a genuinely newer reading through', async () => {
+  it('refuses an equal timestamp, which is not newer', async () => {
+    await seed('500', LATER)
+
     const wrote = await prices!.cacheQuote(
-      {
-        instrumentId: INSTRUMENT,
-        price: '750',
-        currency: 'JPY',
-        asOf: new Date('2026-09-05T20:00:00Z'),
-        source: 'FEED',
-      },
+      { instrumentId: INSTRUMENT, price: '999', currency: 'JPY', asOf: LATER, source: 'FEED' },
+      { onlyIfNewer: true },
+    )
+
+    // A redelivery of the bar already stored carries the same stamp. Nothing to
+    // do, and `<` rather than `<=` is what makes that a no-op.
+    expect(wrote).toBe(false)
+    expect((await cached())?.price).toBe('500.00000000')
+  })
+
+  it('lets a genuinely newer reading through', async () => {
+    await seed('500', EARLIER)
+
+    const wrote = await prices!.cacheQuote(
+      { instrumentId: INSTRUMENT, price: '750', currency: 'JPY', asOf: LATER, source: 'FEED' },
       { onlyIfNewer: true },
     )
     expect(wrote).toBe(true)
@@ -176,6 +213,10 @@ describe.skipIf(!available)('price cache, against a real Postgres', () => {
   })
 
   it('overwrites regardless when unguarded, which is what Refresh relies on', async () => {
+    // Seeded *newer* than the write that follows, so only the absence of the
+    // guard can explain the overwrite.
+    await seed('500', LATER)
+
     const wrote = await prices!.cacheQuote({
       instrumentId: INSTRUMENT,
       price: '123',
@@ -192,7 +233,7 @@ describe.skipIf(!available)('price cache, against a real Postgres', () => {
       instrumentId: INSTRUMENT,
       assetClass: 'JP_EQUITY',
       close: '2684',
-      asOf: new Date('2026-09-06T06:00:00Z'),
+      asOf: LATER,
     })
     expect(wrote).toBe(true)
     expect(await cached()).toMatchObject({ price: '2684.00000000', source: 'FEED', currency: 'JPY' })
@@ -209,16 +250,18 @@ describe.skipIf(!available)('price cache, against a real Postgres', () => {
   })
 
   it('never writes a fund, whose price is on a different scale', async () => {
-    const before = await cached()
+    await seed('500', EARLIER)
+
     expect(
       await prices!.cacheFeedClose({
         instrumentId: INSTRUMENT,
         assetClass: 'FUND',
         close: '12345',
+        // Newer than the seeded row, so the guard cannot be what stops it.
         asOf: new Date('2027-01-01T00:00:00Z'),
       }),
     ).toBe(false)
-    expect(await cached()).toEqual(before)
+    expect((await cached())?.price).toBe('500.00000000')
   })
 })
 
@@ -253,8 +296,12 @@ describe.skipIf(!available)('feed bars, against a real Postgres', () => {
     expect(rows[0]?.close).toBe('2700.00000000')
   })
 
-  it('reports the newest day held, so a replay cannot publish its close', async () => {
-    expect(await exits!.recordFeedBar(bar('2026-09-07', '2750'))).toEqual({ isLatest: true })
+  it('calls the first bar of all the latest', async () => {
+    expect(await exits!.recordFeedBar(bar('2026-09-04', '2684'))).toEqual({ isLatest: true })
+  })
+
+  it('refuses a replay that a newer session has superseded', async () => {
+    await exits!.recordFeedBar(bar('2026-09-07', '2750'))
     // Arriving after it, but for an earlier session.
     expect(await exits!.recordFeedBar(bar('2026-08-28', '2600'))).toEqual({ isLatest: false })
   })

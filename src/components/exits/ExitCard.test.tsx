@@ -59,6 +59,21 @@ describe('the urgency split', () => {
     expect(onOpen).toHaveBeenCalledWith(ROW)
   })
 
+  it('names the dialog after the plan, not after the chart link', () => {
+    // Radix names a dialog from its title. Putting an InstrumentLink in there
+    // made it announce as "7203 トヨタ自動車 — open chart on TradingView in a
+    // new tab", because the link carries that text for its own screen-reader
+    // label. Nothing about the rendered dialog looks different when it returns.
+    render(<ExitPlanDialog row={ROW} onClose={vi.fn()} onArchive={vi.fn()} onEdit={vi.fn()} />)
+
+    const id = screen.getByRole('dialog').getAttribute('aria-labelledby')
+    expect(id).toBeTruthy()
+    expect(document.getElementById(id!)?.textContent).toBe('7203 トヨタ自動車')
+
+    // The chart itself survives, as its own control with its own name.
+    expect(screen.getByRole('link', { name: /Open 7203 on TradingView/ })).toBeTruthy()
+  })
+
   it('gives the dialog everything the card gave up, plus edit and archive', () => {
     render(<ExitPlanDialog row={ROW} onClose={vi.fn()} onArchive={vi.fn()} onEdit={vi.fn()} />)
 

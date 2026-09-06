@@ -19,9 +19,10 @@ import { ExitLadder } from './ExitLadder'
 import styles from './ExitPlanDialog.module.scss'
 import { AccountDot } from '~/components/AccountDot'
 import { ACCOUNT_LABEL, ASSET_LABEL, money, moneySigned, qty, tone } from '~/components/format'
-import { InstrumentLink } from '~/components/InstrumentLink'
+import { ExternalIcon } from '~/components/icons/ExternalIcon'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
+import { tradingViewUrl } from '~/lib/tradingview'
 import type { ExitRuleRow } from '~/server/exit'
 
 function Level({
@@ -75,6 +76,9 @@ export function ExitPlanDialog({
    */
   const handingOff = useRef(false)
 
+  /** `null` for funds, which carry no ticker in any export. */
+  const chart = row === null ? null : tradingViewUrl(row.symbol, row.assetClass)
+
   return (
     <Dialog.Root
       open={row !== null}
@@ -96,12 +100,26 @@ export function ExitPlanDialog({
             <>
               <header className={styles.head}>
                 <div className={styles.identity}>
+                  {/*
+                    Plain text, not an `InstrumentLink`. Radix names the dialog
+                    from its title, and the link carries a visually-hidden
+                    "open chart on TradingView in a new tab" — which made the
+                    dialog announce itself as an instruction. The chart is still
+                    one click away, as the icon beside the name.
+                  */}
                   <Dialog.Title className={styles.title}>
-                    <InstrumentLink
-                      symbol={row.symbol}
-                      name={row.name}
-                      assetClass={row.assetClass}
-                    />
+                    {row.symbol} <span className={styles.instrumentName}>{row.name}</span>
+                    {chart === null ? null : (
+                      <a
+                        className={styles.chart}
+                        href={chart}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Open ${row.symbol} on TradingView in a new tab`}
+                      >
+                        <ExternalIcon />
+                      </a>
+                    )}
                   </Dialog.Title>
                   <span className={styles.account}>
                     <AccountDot accountType={row.accountType} />

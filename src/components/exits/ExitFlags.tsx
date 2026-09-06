@@ -18,6 +18,10 @@ export function ExitFlags({
 }) {
   const badge = cx(styles.badge, compact && styles.compact)
 
+  /* Most plans carry none. Returning nothing keeps an empty element out of
+     every on-track row's Flags cell and off the card's header row. */
+  if (!row.target1Hit && !row.trailingActive && !row.timeStopFlag && !row.stale) return null
+
   return (
     <span className={styles.flags}>
       {row.target1Hit ? <span className={cx(badge, styles.hit)}>Target 1 hit</span> : null}

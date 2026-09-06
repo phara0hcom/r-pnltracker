@@ -31,9 +31,18 @@ without editing the Pine script for every alert.
 
 The trade-off is understood and accepted: a path secret can appear in proxy and
 CDN logs in a way a header would not. It is mitigated by the token being long,
-single-purpose, rotatable by changing one environment variable, and capable of
-nothing except appending a price bar for an instrument that already exists in
-the database.
+single-purpose, and rotatable by changing one environment variable.
+
+**Know what the token can reach**, because §4.1 widened it. It appends a bar for
+an instrument that already exists — and publishes that bar's close as the
+instrument's current price. `price_cache` has no `userId`: a quote is market data
+and one row serves everyone, which is what lets an unauthenticated route write it
+at all. So a leaked secret no longer only distorts the Exit Rules screen; it
+moves the market value and unrealized P&L shown on Positions, the Dashboard and
+Stats. It still cannot read anything, reach an instrument that was never traded,
+or touch a hand-entered override, which wins over the cache everywhere. Rotate it
+if it is ever exposed, and re-run *Refresh prices* afterwards to overwrite
+anything a bogus bar published.
 
 **Under 24 characters, the endpoint refuses to serve at all.** Unset *or too
 short*, the Exit Rules screen says so at the top rather than letting every plan
