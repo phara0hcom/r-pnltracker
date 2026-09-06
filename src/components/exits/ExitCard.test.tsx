@@ -19,53 +19,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { ExitCard } from './ExitCard'
 import { ExitPlanDialog } from './ExitPlanDialog'
 import { ExitPlanRow } from './ExitPlanRow'
-import type { ExitRuleRow } from '~/server/exit'
+import { makePlan } from '~/test/exitPlan'
 
-const ROW: ExitRuleRow = {
-  id: 'r1',
-  symbol: '7203',
-  name: 'トヨタ自動車',
-  assetClass: 'JP_EQUITY',
-  accountType: 'SPECIFIC',
-  currency: 'JPY',
-  entryDate: '2026-06-03',
-  entryPrice: '2996',
-  totalShares: '300',
-  sharesRemaining: '300',
-  supportLevel: '2700',
-  entryAtr: '95',
-  lotSize: 100,
-  trailingMethod: 'ATR',
-  trailingMethodOverride: null,
-  note: 'Support at ¥2,700 from the June base.',
-  initialStop: '2710',
-  riskPerShare: '286',
-  target1: '3180',
-  partialExitShares: '200',
-  target1Hit: false,
-  target1HitDate: null,
-  partialTaken: false,
-  highestClose: '3050',
-  trailingStop: null,
-  trailingActive: false,
-  currentStop: '2710',
-  currentPrice: '2684',
-  lastBarDate: '2026-09-04',
-  rsi14: '31.4',
-  macdHist: '-18.2',
-  atr14: '88',
-  daysHeld: 63,
-  tradingDaysHeld: 42,
-  timeStopFlag: false,
-  stale: true,
-  staleTradingDays: 6,
-  stopFromSupportOnly: false,
-  unrealizedPerShare: '-280',
-  unrealizedTotal: '-84000',
-  actionKind: 'STOPPED_OUT',
-  actionMessage: 'Stopped out — close ¥2,684 is at or below the ¥2,710 stop.',
-  actionSeverity: 'urgent',
-}
+const ROW = makePlan()
 
 describe('the urgency split', () => {
   it('leaves the card with the recommendation and five facts, not the levels', async () => {

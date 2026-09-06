@@ -10,6 +10,12 @@ const alias = { '~': fileURLToPath(new URL('./src', import.meta.url)) }
  * and run far faster without a DOM; components and hooks need one. `.test.ts`
  * therefore means node and `.test.tsx` means jsdom — the same split the lint
  * config already draws.
+ *
+ * `.db.test.ts` is a third kind, and is deliberately not in `npm test`. Those
+ * start a real Postgres in a container: seconds rather than milliseconds, and
+ * only where a container runtime exists. The verification loop is run after
+ * every change and has to stay fast enough that nobody is tempted to skip it,
+ * so they live behind `npm run test:db` and are asked for on purpose.
  */
 export default defineConfig({
   resolve: { alias },
@@ -22,6 +28,7 @@ export default defineConfig({
           globals: true,
           environment: 'node',
           include: ['src/**/*.test.ts'],
+          exclude: ['**/node_modules/**', 'src/**/*.db.test.ts'],
         },
       },
       {
@@ -32,6 +39,18 @@ export default defineConfig({
           environment: 'jsdom',
           include: ['src/**/*.test.tsx'],
           setupFiles: ['src/test/setupDom.ts'],
+        },
+      },
+      {
+        resolve: { alias },
+        test: {
+          name: 'db',
+          globals: true,
+          environment: 'node',
+          include: ['src/**/*.db.test.ts'],
+          /* Pulling the image on a cold machine dominates the first run. */
+          testTimeout: 60_000,
+          hookTimeout: 300_000,
         },
       },
     ],

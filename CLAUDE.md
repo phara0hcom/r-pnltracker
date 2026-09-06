@@ -9,8 +9,9 @@ npm run dev          # Vite dev server on :3000
 npm run build        # production build → .output/ (Nitro; Vercel consumes this)
 npm start            # serve the build (node .output/server/index.mjs)
 
-npm test             # vitest run
+npm test             # vitest run — the fast suite, run after every change
 npm run test:watch
+npm run test:db      # real Postgres in a container; needs Docker or Podman
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint . (type-aware; must be clean)
 npm run lint:fix
@@ -42,6 +43,16 @@ and `.env` resolve: `npm run report`, `npm run seed`, and the ad-hoc reports in
 All three must pass, and lint must be warning-free — `npx eslint src --max-warnings=0`
 is the check actually used. `npm run lint:fix` handles import ordering, which is the
 usual source of warnings.
+
+`npm run test:db` is separate on purpose. `*.db.test.ts` starts a throwaway
+Postgres via testcontainers and builds it from `drizzle/0000_baseline.sql`, which
+takes seconds rather than milliseconds — the verification loop above is run after
+every change and has to stay fast enough that nobody skips it. Those tests cover
+what only a real server can answer, chiefly whether `on conflict … do update …
+where` actually refuses a stale write. They **skip themselves** when no container
+runtime is present, so the command is safe to run anywhere. Podman needs no
+configuration: the socket is found and `DOCKER_HOST` set automatically, and Ryuk
+is disabled because its socket bind-mount cannot work on macOS.
 
 ### Tests depend on real, gitignored data
 
