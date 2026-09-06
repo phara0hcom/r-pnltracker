@@ -107,9 +107,13 @@ function momentumShrinking(history: Decimal[]): boolean {
   })
 }
 
+/** Grouped in both currencies — a bare `$10000.00` next to `¥10,000` reads as a typo. */
 const money = (value: Decimal, assetClass: AssetClass): string =>
   assetClass === 'US_EQUITY'
-    ? `$${value.toDecimalPlaces(2).toFixed(2)}`
+    ? `$${value
+        .toDecimalPlaces(2)
+        .toNumber()
+        .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : `¥${value.toDecimalPlaces(0).toNumber().toLocaleString('en-US')}`
 
 const shares = (value: Decimal): string => value.toNumber().toLocaleString('en-US')
@@ -339,6 +343,24 @@ function decideAction(input: ActionInput): ExitAction {
       kind: 'POSITION_CLOSED',
       message: 'Position closed — no shares remaining. Archive this rule.',
       severity: 'neutral',
+    }
+  }
+
+  // A live pool quantity is not proof this plan still describes it. If the
+  // position went flat and was re-entered before the plan was archived, the
+  // locked entry facts belong to the previous swing: Target 1 stays latched by
+  // the old winner, the trail carries highs from months ago, `sharesSold` resets
+  // to zero so the partial reads as untaken, and the partial size is a fraction
+  // of a position that no longer exists. None of that can be salvaged from the
+  // stored facts, so the only honest recommendation is to re-plan.
+  if (
+    position.currentStreakEntryDate !== null &&
+    position.currentStreakEntryDate > position.entryDate
+  ) {
+    return {
+      kind: 'PLAN_SUPERSEDED',
+      message: `Position was closed and re-opened on ${position.currentStreakEntryDate} — this plan describes the earlier swing entered ${position.entryDate}, so its stop, target and trail no longer apply. Archive it and open a new plan.`,
+      severity: 'attention',
     }
   }
 

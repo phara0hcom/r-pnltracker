@@ -57,6 +57,7 @@
 
 .closedRow {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-3);
   align-items: center;
   justify-content: space-between;
@@ -78,4 +79,11 @@
   color: var(--color-text-subtle);
 
   @include m.tabular-nums;
+}
+
+/* Full-width so the explanation wraps onto its own line under the row. */
+.closedNote {
+  flex-basis: 100%;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }

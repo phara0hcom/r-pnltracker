@@ -93,7 +93,13 @@ interface Pool extends PositionState {
   weightedDateSum: Decimal
 }
 
-const poolKey = (symbol: string, account: AccountType) => `${symbol}\0${account}`
+/**
+ * The canonical pool key. Exported because a pool is `(symbol × accountType)`
+ * everywhere — the exit framework keys plans over the same pools — and a second
+ * encoder is a second chance to disagree. The NUL separator is deliberate:
+ * `instruments.symbol` carries fund *names*, which contain spaces.
+ */
+export const poolKey = (symbol: string, account: AccountType) => `${symbol}\0${account}`
 
 const toEpochDays = (iso: string): number => Math.floor(Date.parse(`${iso}T00:00:00Z`) / 86_400_000)
 

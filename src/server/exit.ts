@@ -15,6 +15,7 @@ import {
   archiveExitRule as archiveRule,
   barsFor,
   createExitRule as createRule,
+  getExitRule,
   getExitSettings,
   listExitRules,
   saveExitSettings as persistSettings,
@@ -25,6 +26,8 @@ import { calendarFor, todayFor } from '~/lib/exit/calendar'
 import { openEntryStreaks, streakFor } from '~/lib/exit/entry'
 import { assess } from '~/lib/exit/rules'
 import { TRAILING_METHODS, type ExitActionKind, type TrailingMethod } from '~/lib/exit/types'
+import { webhookSecretUsable } from '~/lib/exit/webhook'
+import { poolKey } from '~/lib/pnl/engine'
 
 /** Only listed equities get exit rules — no provider feeds a fund's 基準価額. */
 const ELIGIBLE_CLASSES: readonly AssetClass[] = ['JP_EQUITY', 'US_EQUITY']
@@ -38,9 +41,6 @@ const currencyFor = (assetClass: AssetClass): 'JPY' | 'USD' =>
 /** Per-share prices. Two places is enough for both currencies, and exact for both. */
 const price = (value: Decimal | null): string | null => value?.toFixed(2) ?? null
 const shares = (value: Decimal): string => value.toFixed()
-
-/** Engine pools are keyed (symbol x accountType); so is an exit plan over one. */
-const poolKey = (symbol: string, account: AccountType): string => `${symbol} ${account}`
 
 export interface ExitRuleRow {
   id: string
@@ -122,11 +122,15 @@ export interface ExitSettingsView {
 
 export interface ExitScreenData {
   rules: ExitRuleRow[]
-  /** Plans whose position is gone - shown apart, not mixed into live ones. */
-  closed: ExitRuleRow[]
+  /**
+   * Plans that no longer describe a live swing — the position is closed, or was
+   * closed and re-entered since. Shown apart rather than mixed into the live
+   * ones, whose figures they would otherwise sit beside looking equally current.
+   */
+  toArchive: ExitRuleRow[]
   eligible: EligibleHolding[]
   settings: ExitSettingsView
-  /** False when the webhook secret is unset, so the screen can say why no data. */
+  /** False when the secret is unset *or too short*, so the screen can say why no data. */
   webhookConfigured: boolean
 }
 
@@ -178,6 +182,7 @@ export const getExitScreen = createServerFn({ method: 'GET' })
           sharesRemaining: remaining,
           sharesSold: sold,
           supportLevel: rule.supportLevel,
+          currentStreakEntryDate: streak?.entryDate ?? null,
           entryAtr: rule.entryAtr,
           entryStopAtrMultiple: rule.entryStopAtrMultiple,
           entryTargetMultiple: rule.entryTargetMultiple,
@@ -271,9 +276,12 @@ export const getExitScreen = createServerFn({ method: 'GET' })
       })
       .sort((left, right) => left.symbol.localeCompare(right.symbol))
 
+    const retired = (row: ExitRuleRow): boolean =>
+      row.actionKind === 'POSITION_CLOSED' || row.actionKind === 'PLAN_SUPERSEDED'
+
     return {
-      rules: evaluated.filter((row) => row.actionKind !== 'POSITION_CLOSED'),
-      closed: evaluated.filter((row) => row.actionKind === 'POSITION_CLOSED'),
+      rules: evaluated.filter((row) => !retired(row)),
+      toArchive: evaluated.filter(retired),
       eligible,
       settings: {
         targetMultiple: settings.targetMultiple.toFixed(2),
@@ -284,7 +292,10 @@ export const getExitScreen = createServerFn({ method: 'GET' })
         trailingMethod: settings.trailingMethod,
         staleTradingDays: settings.staleTradingDays,
       },
-      webhookConfigured: Boolean(process.env.TRADINGVIEW_WEBHOOK_SECRET),
+      // The route's own predicate, not a truthiness check: a secret shorter than
+      // the minimum 503s every payload, and reporting that as configured left
+      // the screen silent about the one thing wrong with it.
+      webhookConfigured: webhookSecretUsable(process.env.TRADINGVIEW_WEBHOOK_SECRET),
     }
   })
 
@@ -363,8 +374,7 @@ export const updateExitRule = createServerFn({ method: 'POST' })
     // level with no entry price — set support above entry, which makes R
     // negative and puts Target 1 below the entry price: the whole framework
     // inverts, and the position reads as stopped out on its own entry bar.
-    const rules = await listExitRules(context.userId, true)
-    const existing = rules.find((rule) => rule.id === id)
+    const existing = await getExitRule(context.userId, id)
     if (!existing) throw new Error('exit plan not found')
 
     const entryPrice = new Decimal(patch.entryPrice ?? existing.entryPrice)

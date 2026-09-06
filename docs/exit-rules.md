@@ -35,9 +35,11 @@ single-purpose, rotatable by changing one environment variable, and capable of
 nothing except appending a price bar for an instrument that already exists in
 the database.
 
-**Under 24 characters, the endpoint refuses to serve at all.** Unset, the Exit
-Rules screen says so at the top rather than letting every plan quietly read as
-stale.
+**Under 24 characters, the endpoint refuses to serve at all.** Unset *or too
+short*, the Exit Rules screen says so at the top rather than letting every plan
+quietly read as stale — the screen and the endpoint share one predicate
+(`webhookSecretUsable`), so a secret the route rejects can never be reported as
+configured.
 
 Confirm it works before wiring any alert — a `GET` on the same URL is a health
 check:
@@ -238,6 +240,15 @@ alone — the card says *"support only — no entry ATR"*. When a payload for th
 date later arrives, the webhook backfills the ATR for exactly that plan. This is
 not a recalculation: it completes a value that was missing, from the plan's own
 entry date.
+
+**A plan whose position was closed and re-entered is retired, not re-used.**
+Shares remaining is read live from the pool, so buying the same name again before
+archiving the old plan would make it read as open — against entry facts that
+belong to the previous swing, with Target 1 still latched by the old winner and a
+trail carrying highs from months back. When the current holding streak began
+*after* the plan's entry date, the plan says so and asks to be archived, and it
+moves to *Plans to archive* rather than sitting among live positions. Archiving
+frees the position to be planned again.
 
 **An unknown ticker is discarded with a 404** and logged. An alert exists for
 something the account has never traded, so there is nothing to attach a bar to.

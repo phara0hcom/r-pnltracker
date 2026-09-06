@@ -22,13 +22,13 @@ import { eq } from 'drizzle-orm'
 import { db } from '~/db'
 import { backfillEntryAtrForBar, recordFeedBar } from '~/db/exit.service'
 import { instruments } from '~/db/schema'
-import { parseFeedBody, tradingDayFor, zoneFor } from '~/lib/exit/webhook'
-
-/**
- * Below this, a token is short enough to be worth guessing, and the endpoint
- * refuses to serve at all rather than pretending to be protected.
- */
-const MIN_SECRET_LENGTH = 24
+import {
+  MIN_SECRET_LENGTH,
+  parseFeedBody,
+  tradingDayFor,
+  webhookSecretUsable,
+  zoneFor,
+} from '~/lib/exit/webhook'
 
 const json = (body: unknown, status: number): Response =>
   new Response(JSON.stringify(body), {
@@ -53,7 +53,9 @@ function secretMatches(provided: string, expected: string): boolean {
 function authorise(secret: string): Response | null {
   const expected = process.env.TRADINGVIEW_WEBHOOK_SECRET
 
-  if (!expected || expected.length < MIN_SECRET_LENGTH) {
+  // The same predicate the Exit Rules screen reports with, so a too-short secret
+  // cannot 503 every payload while the screen shows the feed as configured.
+  if (!webhookSecretUsable(expected)) {
     console.error(
       '[tv] TRADINGVIEW_WEBHOOK_SECRET is unset or shorter than ' +
         `${String(MIN_SECRET_LENGTH)} characters — refusing to accept webhooks.`,

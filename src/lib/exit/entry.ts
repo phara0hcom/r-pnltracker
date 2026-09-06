@@ -14,7 +14,7 @@
  */
 import Decimal from 'decimal.js'
 import { CLOSING_SIDES, OPENING_SIDES, type AccountType, type NormalizedTrade } from '../domain/types'
-import { sortTradesForEngine } from '../pnl/engine'
+import { poolKey, sortTradesForEngine } from '../pnl/engine'
 
 export interface EntryStreak {
   symbol: string
@@ -41,8 +41,6 @@ export interface EntryStreak {
   sharesSold: Decimal
 }
 
-const key = (symbol: string, account: AccountType) => `${symbol}\0${account}`
-
 /**
  * The open streak for every pool that currently holds units, keyed
  * `symbol\0accountType`. Closed pools are absent.
@@ -52,15 +50,15 @@ export function openEntryStreaks(trades: NormalizedTrade[]): Map<string, EntrySt
   // Engine ordering, so a same-day round trip cannot look like it closed before
   // it opened — which would strand the streak on the wrong side of the flat.
   for (const trade of sortTradesForEngine(trades)) {
-    const poolKey = key(trade.symbol, trade.accountType)
-    const bucket = pools.get(poolKey)
+    const key = poolKey(trade.symbol, trade.accountType)
+    const bucket = pools.get(key)
     if (bucket) bucket.push(trade)
-    else pools.set(poolKey, [trade])
+    else pools.set(key, [trade])
   }
 
   const out = new Map<string, EntryStreak>()
 
-  for (const [poolKey, list] of pools) {
+  for (const [key, list] of pools) {
     let quantity = new Decimal(0)
     let streak: EntryStreak | null = null
 
@@ -109,7 +107,7 @@ export function openEntryStreaks(trades: NormalizedTrade[]): Map<string, EntrySt
       }
     }
 
-    if (streak && quantity.gt(0)) out.set(poolKey, streak)
+    if (streak && quantity.gt(0)) out.set(key, streak)
   }
 
   return out
@@ -120,4 +118,4 @@ export const streakFor = (
   streaks: Map<string, EntryStreak>,
   symbol: string,
   account: AccountType,
-): EntryStreak | null => streaks.get(key(symbol, account)) ?? null
+): EntryStreak | null => streaks.get(poolKey(symbol, account)) ?? null

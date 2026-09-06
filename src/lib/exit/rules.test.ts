@@ -29,6 +29,7 @@ const position = (overrides: Partial<ExitRulePosition> = {}): ExitRulePosition =
   sharesSold: d(0),
   supportLevel: d(950),
   entryAtr: d(20),
+  currentStreakEntryDate: '2026-06-01',
   entryStopAtrMultiple: d('1.5'),
   entryTargetMultiple: d('1.5'),
   lotSize: 100,
@@ -334,10 +335,38 @@ describe('assess — suggested action', () => {
     )
   })
 
-  it('formats US positions in dollars', () => {
+  it('formats US positions in dollars, grouped like the yen figures', () => {
     const us = position({ symbol: 'AAPL', assetClass: 'US_EQUITY', lotSize: 1 })
     const result = assess(us, [bar('2026-06-01', 1020)], settings(), '2026-06-01')
-    expect(result.action.message).toContain('$1020.00')
+    expect(result.action.message).toContain('$1,020.00')
+  })
+
+  it('refuses to advise on a plan whose swing ended and was re-entered', () => {
+    // The pool holds shares again, so `sharesRemaining` alone reads as open —
+    // but they are a different swing's, and every locked fact here describes the
+    // old one. The old Target 1 would otherwise latch from bars months back.
+    const superseded = position({ sharesRemaining: d(500), currentStreakEntryDate: '2026-08-20' })
+    const result = assess(superseded, [bar('2026-06-01', 1080)], settings(), '2026-08-25')
+    expect(result.action.kind).toBe('PLAN_SUPERSEDED')
+    expect(result.action.message).toContain('2026-08-20')
+  })
+
+  it('leaves a plan alone when the streak began on or before its entry date', () => {
+    // The prefilled entry date is the streak's own, and a plan may legitimately
+    // be dated after it — only a *later* streak means the swing was re-entered.
+    const dated = position({ currentStreakEntryDate: '2026-05-28' })
+    expect(assess(dated, [bar('2026-06-01', 1020)], settings(), '2026-06-01').action.kind).toBe(
+      'HOLD',
+    )
+  })
+
+  it('reports a closed position as closed, not as superseded', () => {
+    // Order matters: nothing is re-entered when the pool is flat, and "archive
+    // this rule" is the clearer of the two messages.
+    const closed = position({ sharesRemaining: d(0), currentStreakEntryDate: null })
+    expect(assess(closed, [bar('2026-06-01', 1080)], settings(), '2026-06-01').action.kind).toBe(
+      'POSITION_CLOSED',
+    )
   })
 })
 

@@ -104,6 +104,23 @@ export async function listExitRules(
 }
 
 /**
+ * One plan by id, archived or not, scoped to its owner.
+ *
+ * The `userId` condition is what makes this safe to call with an id straight
+ * from a request body: a plan belonging to someone else simply does not exist.
+ */
+export async function getExitRule(userId: string, id: string): Promise<ExitRuleRecord | null> {
+  const [row] = await db
+    .select({ rule: exitRules, instrument: instruments })
+    .from(exitRules)
+    .innerJoin(instruments, eq(exitRules.instrumentId, instruments.id))
+    .where(and(eq(exitRules.id, id), eq(exitRules.userId, userId)))
+    .limit(1)
+
+  return row ? toRecord(row) : null
+}
+
+/**
  * Creates a plan, taking the entry-date ATR from the feed if a bar for that day
  * has already arrived.
  *

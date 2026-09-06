@@ -100,8 +100,9 @@ function Exits() {
       */}
       {data.webhookConfigured ? null : (
         <p className={styles.warning}>
-          <strong>Webhook not configured.</strong> Set <code>TRADINGVIEW_WEBHOOK_SECRET</code> in the
-          environment, then point each TradingView alert at{' '}
+          <strong>Webhook not configured.</strong> Set <code>TRADINGVIEW_WEBHOOK_SECRET</code> to a
+          value of at least 24 characters — the endpoint refuses a shorter one — then point each
+          TradingView alert at{' '}
           <code>/api/tv/&lt;secret&gt;</code>. Until then no bars can arrive and every plan will read
           as stale. See <code>docs/exit-rules.md</code>.
         </p>
@@ -129,13 +130,13 @@ function Exits() {
         </div>
       )}
 
-      {data.closed.length === 0 ? null : (
+      {data.toArchive.length === 0 ? null : (
         <Section
-          title="Closed positions"
-          description="The holding is gone but the plan is still live. Archiving keeps the record without cluttering the list above."
+          title="Plans to archive"
+          description="The plan no longer describes a live swing — the holding is gone, or it was closed and re-entered after the plan was made. Archiving keeps the record, and frees the position to be planned again."
         >
           <ul className={styles.closedList}>
-            {data.closed.map((row) => (
+            {data.toArchive.map((row) => (
               <li key={row.id} className={styles.closedRow}>
                 <span className={styles.closedName}>
                   {row.symbol} · {row.name}
@@ -150,6 +151,15 @@ function Exits() {
                 >
                   Archive
                 </ConfirmButton>
+                {/*
+                  A superseded plan looks like an ordinary closed one in this
+                  list, and the difference matters: the position is still open,
+                  it just needs re-planning. The reason is spelled out rather
+                  than left to be inferred from the entry date.
+                */}
+                {row.actionKind === 'PLAN_SUPERSEDED' ? (
+                  <span className={styles.closedNote}>{row.actionMessage}</span>
+                ) : null}
               </li>
             ))}
           </ul>

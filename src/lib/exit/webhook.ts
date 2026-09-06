@@ -29,6 +29,22 @@ const EXCHANGE_ZONES: Record<string, string> = {
   CBOE: 'America/New_York',
 }
 
+/**
+ * Below this, a token is short enough to be worth guessing, and the endpoint
+ * refuses to serve at all rather than pretending to be protected.
+ */
+export const MIN_SECRET_LENGTH = 24
+
+/**
+ * Whether the configured secret is long enough for the endpoint to serve.
+ *
+ * Shared with the Exit Rules screen on purpose. The route 503s a secret that is
+ * merely too short, so a screen that only checked "is it set" would suppress the
+ * "not configured" warning while every payload was being silently rejected.
+ */
+export const webhookSecretUsable = (secret: string | undefined): secret is string =>
+  secret !== undefined && secret.length >= MIN_SECRET_LENGTH
+
 /** The timezone a bar's session date should be read in. */
 export function zoneFor(exchange: string | null, assetClass: AssetClass): string {
   const mapped = exchange === null ? undefined : EXCHANGE_ZONES[exchange.toUpperCase()]
@@ -94,7 +110,14 @@ export const feedPayloadSchema = z.object({
   ticker: z.string().trim().min(1).max(128),
   exchange: z.string().trim().max(32).optional(),
   /** Bar open, Unix milliseconds. */
-  time: z.union([z.number().int().positive(), z.string().regex(/^\d+$/)]).transform(Number),
+  time: z
+    .union([z.number().int().positive(), z.string().regex(/^\d+$/)])
+    .transform(Number)
+    // Checked after the transform because `.positive()` guards the number branch
+    // only: the string branch matches "0", and a long enough run of digits parses
+    // to Infinity. Either one files a bar at an impossible date instead of being
+    // rejected — "0" lands it on 1970-01-01, where it matches no plan ever.
+    .refine((value) => Number.isFinite(value) && value > 0, 'bar time must be positive'),
   close: numeric,
   sma10: numeric,
   sma20: numeric,

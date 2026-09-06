@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { parseFeedBody, repairPineJson, tradingDayFor, zoneFor } from './webhook'
+import {
+  parseFeedBody,
+  repairPineJson,
+  tradingDayFor,
+  webhookSecretUsable,
+  zoneFor,
+} from './webhook'
 
 const validBody = JSON.stringify({
   ticker: '7203',
@@ -110,5 +116,40 @@ describe('parseFeedBody', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error).toContain('close')
+  })
+
+  it('accepts a bar time sent as a string, which is what Pine emits', () => {
+    const result = parseFeedBody(validBody.replace('1780272000000', '"1780272000000"'))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.payload.time).toBe(1_780_272_000_000)
+  })
+
+  it('rejects a non-positive bar time whichever shape it arrives in', () => {
+    // "0" matches the digits-only string branch, which carries no `.positive()`
+    // of its own. It would file a bar on 1970-01-01, matching no plan ever.
+    for (const time of ['"0"', '0']) {
+      const result = parseFeedBody(validBody.replace('1780272000000', time))
+      expect(result.ok).toBe(false)
+    }
+  })
+
+  it('rejects a bar time too long to be a finite number', () => {
+    // A 400-digit run of digits satisfies the regex and parses to Infinity,
+    // which reaches `new Date()` as an invalid date rather than a rejection.
+    const result = parseFeedBody(validBody.replace('1780272000000', `"${'9'.repeat(400)}"`))
+    expect(result.ok).toBe(false)
+  })
+})
+
+describe('webhookSecretUsable', () => {
+  it('rejects an unset or too-short secret, so the screen and the route agree', () => {
+    // The route 503s anything under 24 characters. If the screen only asked
+    // "is it set", a short secret would suppress the warning while every
+    // payload was being rejected.
+    expect(webhookSecretUsable(undefined)).toBe(false)
+    expect(webhookSecretUsable('')).toBe(false)
+    expect(webhookSecretUsable('a'.repeat(23))).toBe(false)
+    expect(webhookSecretUsable('a'.repeat(24))).toBe(true)
   })
 })

@@ -96,6 +96,17 @@ export interface ExitRulePosition {
    * would be exactly the retroactive recalculation the framework forbids.
    */
   entryAtr: Decimal | null
+  /**
+   * Entry date of the position's *current* holding streak, or null when none
+   * could be identified.
+   *
+   * Carried only to detect that this plan has been outlived. `sharesRemaining`
+   * is the engine's live pool quantity, so a position that was closed in full
+   * and then re-bought before the old plan was archived reads as open again —
+   * and every locked fact above would then be applied to a swing it says nothing
+   * about. A streak that began *after* `entryDate` is exactly that case.
+   */
+  currentStreakEntryDate: string | null
   /** Board-lot size: 100 on 東証, 1 for US shares. */
   lotSize: number
   /** Per-position override; null defers to the global setting. */
@@ -144,6 +155,8 @@ export type ExitActionKind =
   | 'DATA_STALE'
   | 'AWAITING_FEED'
   | 'POSITION_CLOSED'
+  /** The plan describes a swing that ended; the pool has since been re-entered. */
+  | 'PLAN_SUPERSEDED'
 
 export interface ExitAction {
   kind: ExitActionKind
