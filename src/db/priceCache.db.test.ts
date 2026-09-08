@@ -75,6 +75,14 @@ let exits: typeof ExitService | undefined
 let servicePool: { end: () => Promise<void> } | undefined
 
 const INSTRUMENT = 'i-test-1'
+/**
+ * A US equity, so the asset class the write branches on takes both its values.
+ *
+ * The trading day is computed under both zones and chosen in SQL from the row
+ * the statement has already resolved — the one piece of this path that exists
+ * only in Postgres, and so the one piece only a real one can check.
+ */
+const US_INSTRUMENT = 'i-test-2'
 /** Exit plans are user-scoped, so the backfill needs an owner to hang one on. */
 const USER = 'u-test-1'
 
@@ -96,8 +104,9 @@ beforeAll(async () => {
   )
   await sql.query(
     `insert into instruments (id, symbol, name, asset_class, currency)
-     values ($1, '7203', 'トヨタ自動車', 'JP_EQUITY', 'JPY')`,
-    [INSTRUMENT],
+     values ($1, '7203', 'トヨタ自動車', 'JP_EQUITY', 'JPY'),
+            ($2, 'AAPL', 'Apple Inc.', 'US_EQUITY', 'USD')`,
+    [INSTRUMENT, US_INSTRUMENT],
   )
   await sql.query(
     `insert into "user" (id, name, email, email_verified, created_at, updated_at)
@@ -277,10 +286,16 @@ describe.skipIf(!available)('price cache, against a real Postgres', () => {
 })
 
 describe.skipIf(!available)('feed bars, against a real Postgres', () => {
-  const delivery = (tradingDay: string, close: string, ticker = '7203') => ({
-    ticker,
-    // Both zones agree here, so these tests are about the write rather than
-    // about which day the bar belongs to — `webhook.test.ts` covers that.
+  const delivery = (
+    tradingDay: string,
+    close: string,
+    over: Partial<ExitService.FeedBarDelivery> = {},
+  ) => ({
+    ticker: '7203',
+    // Both zones agree unless a test says otherwise, so these are about the
+    // write rather than about which day the bar belongs to. The two that do
+    // disagree are the ones that pin the choice — `webhook.test.ts` covers how
+    // the pair is arrived at.
     tradingDay: { jp: tradingDay, us: tradingDay },
     barTime: new Date(`${tradingDay}T06:00:00Z`),
     exchange: 'TSE',
@@ -292,15 +307,29 @@ describe.skipIf(!available)('feed bars, against a real Postgres', () => {
     macdSignal: '-10',
     macdHist: '-2',
     atr14: '88',
+    ...over,
   })
 
+  /**
+   * One bar-open instant, read in each zone — a day apart.
+   *
+   * 15:00Z is midnight in Tokyo and still the previous afternoon in New York,
+   * which is the case that makes the choice matter at all; `webhook.test.ts`
+   * derives the same pair from that instant through `tradingDayCandidates`.
+   */
+  const SPLIT = { jp: '2026-06-01', us: '2026-05-31' }
+
   /** The plan the ATR backfill is aimed at, with its entry ATR still missing. */
-  async function plan(entryDate: string, entryAtr: string | null = null): Promise<void> {
+  async function plan(
+    entryDate: string,
+    entryAtr: string | null = null,
+    instrumentId = INSTRUMENT,
+  ): Promise<void> {
     await sql!.query(
       `insert into exit_rules (id, user_id, instrument_id, account_type, entry_date,
          entry_price, total_shares, support_level, entry_atr, lot_size)
        values ('rule-1', $1, $2, 'SPECIFIC', $3, '2500', '100', '2400', $4, 100)`,
-      [USER, INSTRUMENT, entryDate, entryAtr],
+      [USER, instrumentId, entryDate, entryAtr],
     )
   }
 
@@ -329,6 +358,51 @@ describe.skipIf(!available)('feed bars, against a real Postgres', () => {
     expect(await entryAtr()).toBe('88.00000000')
   })
 
+  it('files each bar under the day its own asset class selects', async () => {
+    /*
+     * The one decision this statement makes that no other test can see.
+     *
+     * `zoneFor` falls back to the asset class, and only the database holds it,
+     * so both candidate days are computed up front and chosen between in SQL.
+     * Every other delivery here sets the pair to the same day — which means a
+     * `case` written the wrong way round would pass all of them and quietly
+     * file every US bar a day late.
+     */
+    await exits!.storeFeedBar(delivery('2026-06-01', '2684', { tradingDay: SPLIT }))
+    await exits!.storeFeedBar(
+      delivery('2026-06-01', '201', { ticker: 'AAPL', tradingDay: SPLIT }),
+    )
+
+    const { rows } = await sql!.query<{ id: string; day: string }>(
+      'select instrument_id as id, trading_day::text as day from exit_feed_bars order by id',
+    )
+    expect(rows).toEqual([
+      { id: INSTRUMENT, day: SPLIT.jp },
+      { id: US_INSTRUMENT, day: SPLIT.us },
+    ])
+  })
+
+  it('backfills against the day it selected, not the other candidate', async () => {
+    // The chosen day is reused as the join key for the ATR backfill, so a wrong
+    // branch does not merely misfile the bar — it completes the plan for a day
+    // the position was not opened on, which is the recalculation the framework
+    // forbids wearing the clothes of a backfill.
+    await plan(SPLIT.us, null, US_INSTRUMENT)
+
+    const stored = await exits!.storeFeedBar(
+      delivery('2026-06-01', '201', { ticker: 'AAPL', tradingDay: SPLIT }),
+    )
+
+    expect(stored).toMatchObject({
+      instrumentId: US_INSTRUMENT,
+      symbol: 'AAPL',
+      assetClass: 'US_EQUITY',
+      tradingDay: SPLIT.us,
+      backfilled: 1,
+    })
+    expect(await entryAtr()).toBe('88.00000000')
+  })
+
   it('writes the bar even though nothing reads the CTE back', async () => {
     // A data-modifying CTE runs to completion whether or not the outer query
     // selects from it. That is a claim about Postgres, and the fused statement
@@ -340,6 +414,45 @@ describe.skipIf(!available)('feed bars, against a real Postgres', () => {
       [INSTRUMENT],
     )
     expect(rows).toEqual([{ close: '2684.00000000' }])
+  })
+
+  it('files both of its timestamps as UTC, not in the local zone', async () => {
+    /*
+     * `bar_time` and `received_at` are `timestamp without time zone`, and the
+     * values reach this insert through a `select` rather than `values` — so
+     * each one is bound through its own column to be encoded the way `values()`
+     * would have. A `Date` handed to the driver unencoded is serialised in the
+     * process's own zone and the offset is then dropped on the way into the
+     * column, which would put every reading hours out on any machine but a UTC
+     * one. Silently, and worst of all in `bar_time`, the column kept for the
+     * express purpose of settling a timezone dispute.
+     */
+    await exits!.storeFeedBar(delivery('2026-09-04', '2684'))
+
+    const { rows } = await sql!.query<{ at: string; drift: string }>(
+      `select to_char(bar_time, 'YYYY-MM-DD HH24:MI:SS') as at,
+              abs(extract(epoch from (received_at - (now() at time zone 'utc'))))::int::text as drift
+       from exit_feed_bars where instrument_id = $1`,
+      [INSTRUMENT],
+    )
+    expect(rows[0]?.at).toBe('2026-09-04 06:00:00')
+    // Same hazard, same statement: a locally-encoded stamp sits a whole UTC
+    // offset out, so any window shorter than an hour catches it.
+    expect(Number(rows[0]?.drift)).toBeLessThan(60)
+  })
+
+  it('accepts a delivery that names no exchange', async () => {
+    // `syminfo.exchange` is optional and the route passes the gap through. The
+    // values reach this insert through a `select` rather than `values`, so an
+    // untyped null has to take its type from the target column — which is a
+    // claim about the server's parameter inference, not about drizzle.
+    await exits!.storeFeedBar(delivery('2026-09-04', '2684', { exchange: null }))
+
+    const { rows } = await sql!.query<{ exchange: string | null }>(
+      'select exchange from exit_feed_bars where instrument_id = $1',
+      [INSTRUMENT],
+    )
+    expect(rows).toEqual([{ exchange: null }])
   })
 
   it('corrects a resent bar rather than duplicating it', async () => {
@@ -358,7 +471,7 @@ describe.skipIf(!available)('feed bars, against a real Postgres', () => {
   })
 
   it('writes nothing at all for a ticker no instrument carries', async () => {
-    expect(await exits!.storeFeedBar(delivery('2026-09-04', '2684', 'NOPE'))).toBeNull()
+    expect(await exits!.storeFeedBar(delivery('2026-09-04', '2684', { ticker: 'NOPE' }))).toBeNull()
 
     const { rows } = await sql!.query<{ count: string }>(
       'select count(*)::text as count from exit_feed_bars',
