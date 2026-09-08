@@ -18,17 +18,13 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { createFileRoute } from '@tanstack/react-router'
-import { eq } from 'drizzle-orm'
-import { db } from '~/db'
-import { backfillEntryAtrForBar, recordFeedBar } from '~/db/exit.service'
+import { storeFeedBar } from '~/db/exit.service'
 import { cacheFeedClose } from '~/db/prices.service'
-import { instruments } from '~/db/schema'
 import {
   MIN_SECRET_LENGTH,
   parseFeedBody,
-  tradingDayFor,
+  tradingDayCandidates,
   webhookSecretUsable,
-  zoneFor,
 } from '~/lib/exit/webhook'
 
 const json = (body: unknown, status: number): Response =>
@@ -101,34 +97,37 @@ export const Route = createFileRoute('/api/tv/$secret')({
 
         const { ticker, exchange, time, ...indicators } = parsed.payload
 
-        // The symbol is the tracker's own identity for the instrument: a 4-digit
-        // code for 東証 names, the bare ticker for US ones — which is exactly what
-        // `syminfo.ticker` emits for both.
-        const [instrument] = await db
-          .select()
-          .from(instruments)
-          .where(eq(instruments.symbol, ticker))
+        /*
+         * Two statements, and deliberately not five.
+         *
+         * Every alert of the day fires at the same close, so this route is only
+         * ever hit in bursts — one delivery per open position, all at once.
+         * Each round trip is paid per delivery against a database on another
+         * continent (~75ms; see the region note in `vite.config.ts`) and holds
+         * a pooled connection for the whole of it, so the number of statements,
+         * not the work inside them, is what decides how many alerts can land
+         * together. Resolving the instrument, upserting the bar and backfilling
+         * the entry ATR are therefore one statement, and publishing the close
+         * is the other.
+         */
+        const stored = await storeFeedBar({
+          ticker,
+          // Both candidates, because which one applies depends on the asset
+          // class — which the statement below resolves and picks with.
+          tradingDay: tradingDayCandidates(time, exchange ?? null),
+          barTime: new Date(time),
+          exchange: exchange ?? null,
+          ...indicators,
+        })
 
-        if (!instrument) {
+        if (!stored) {
           // Not an error worth retrying: an alert exists for something this
           // account has never traded, so there is nothing to attach a bar to.
           console.error(`[tv] no instrument for ticker ${ticker} — bar discarded`)
           return json({ error: `unknown instrument ${ticker}` }, 404)
         }
 
-        const tradingDay = tradingDayFor(time, zoneFor(exchange ?? null, instrument.assetClass))
-
-        const { isLatest } = await recordFeedBar({
-          instrumentId: instrument.id,
-          tradingDay,
-          barTime: new Date(time),
-          exchange: exchange ?? null,
-          ...indicators,
-        })
-
-        // If a plan was created before its entry-day bar existed, this is the
-        // moment that gap closes.
-        const backfilled = await backfillEntryAtrForBar(instrument.id, tradingDay, indicators.atr14)
+        const { symbol, tradingDay, backfilled } = stored
 
         /*
          * The close is also the best price anyone has for this instrument at
@@ -139,6 +138,9 @@ export const Route = createFileRoute('/api/tv/$secret')({
          *
          * Only when the bar is the newest one held: a replayed bar carries an
          * old trading day, and an old close must not become the current price.
+         * That test lives inside the write now rather than in a statement of
+         * its own — it is a condition on the row, so asking it separately cost
+         * a round trip and still left a gap for a later bar to commit in.
          *
          * `asOf` is delivery time, not the payload's `time`, which is the bar's
          * *open*. Filing a close under its opening timestamp would date every
@@ -147,34 +149,33 @@ export const Route = createFileRoute('/api/tv/$secret')({
          * correct and permanently unable to publish itself.
          */
         let priced = false
-        if (isLatest) {
-          try {
-            priced = await cacheFeedClose({
-              instrumentId: instrument.id,
-              assetClass: instrument.assetClass,
-              close: indicators.close,
-              asOf: new Date(),
-            })
-          } catch (error) {
-            /*
-             * Publishing the price is a bonus; recording the bar is the job.
-             * A throw here would 500 a request whose bar has already been
-             * stored, and TradingView retries a 5xx — so a pricing fault would
-             * present as the exit feed being down, which is the one failure
-             * this feature most needs to report honestly.
-             *
-             * The likely cause is the `price_source` enum missing 'FEED',
-             * i.e. drizzle/0004 not yet applied, so the message says so.
-             */
-            console.error(
-              `[tv] bar stored, price not published for ${instrument.symbol}: ${
-                error instanceof Error ? error.message : String(error)
-              } — is drizzle/0004_price_source_feed.sql applied?`,
-            )
-          }
+        try {
+          priced = await cacheFeedClose({
+            instrumentId: stored.instrumentId,
+            assetClass: stored.assetClass,
+            close: indicators.close,
+            asOf: new Date(),
+            tradingDay,
+          })
+        } catch (error) {
+          /*
+           * Publishing the price is a bonus; recording the bar is the job.
+           * A throw here would 500 a request whose bar has already been
+           * stored, and TradingView retries a 5xx — so a pricing fault would
+           * present as the exit feed being down, which is the one failure
+           * this feature most needs to report honestly.
+           *
+           * The likely cause is the `price_source` enum missing 'FEED',
+           * i.e. drizzle/0004 not yet applied, so the message says so.
+           */
+          console.error(
+            `[tv] bar stored, price not published for ${symbol}: ${
+              error instanceof Error ? error.message : String(error)
+            } — is drizzle/0004_price_source_feed.sql applied?`,
+          )
         }
 
-        return json({ ok: true, symbol: instrument.symbol, tradingDay, backfilled, priced }, 200)
+        return json({ ok: true, symbol, tradingDay, backfilled, priced }, 200)
       },
     },
   },

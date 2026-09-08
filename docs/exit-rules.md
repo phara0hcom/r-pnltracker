@@ -229,10 +229,11 @@ stops showing a staler figure than the Exit Rules card beside it.
 
 Three conditions, each closing a way the price could go backwards or sideways:
 
-- **Only the newest bar held.** `recordFeedBar` reports whether the day it just
-  stored is the latest for that instrument. TradingView resends bars after a
-  chart reload, and a replayed bar carries an old trading day — recording it is
-  right, publishing its close as *current* is not.
+- **Only the newest bar held.** The write itself refuses a day that an already
+  stored session has passed. TradingView resends bars after a chart reload, and
+  a replayed bar carries an old trading day — recording it is right, publishing
+  its close as *current* is not. The test lives inside the insert rather than in
+  a query before it, so no later bar can land between the answer and the write.
 - **Only forward in time.** The upsert carries `setWhere as_of < excluded.as_of`,
   so a delivery that was slow in flight cannot overwrite a quote fetched while it
   travelled. Two writers touch this row and neither reads before writing.
@@ -253,6 +254,38 @@ make TradingView retry a delivery that already succeeded.
 **This needs `drizzle/0004_price_source_feed.sql` applied** (`npm run db:push`).
 Without it the enum has no `FEED` value, and the price write fails on every bar —
 logged, not fatal.
+
+---
+
+## 4.2 Two statements, because deliveries arrive all at once
+
+The alert setup is "repeat once per open position", and every one of them fires
+at the same daily close. So this endpoint is never hit at a steady rate — it is
+idle all day and then takes one delivery per open position in the same second.
+
+What decides how many of those can land together is the **number of statements
+per delivery**, not the work inside them. Each round trip is paid per delivery
+against a database on another continent — the function is pinned to `hnd1` and
+the Neon project is in `ap-southeast-1`, about 75ms apart (see the region note in
+`vite.config.ts`) — and a pooled connection is held for the whole of it.
+
+A delivery therefore sends two:
+
+1. **Resolve, store, backfill.** One statement with three CTEs: find the
+   instrument by ticker, upsert the bar, and fill in any entry ATR that bar
+   completes. The bar insert is written but never read back, which is safe —
+   a data-modifying CTE runs to completion whether or not the outer query
+   selects from it.
+2. **Publish the close**, guarded as §4.1 describes. Skipped entirely for a
+   fund, so those deliveries cost one statement.
+
+The trading day is the one thing that has to cross between them: `zoneFor` falls
+back to the instrument's asset class, which only the database holds. Rather than
+spend a round trip learning it, `tradingDayCandidates` computes the day under
+both zones and the statement picks with the row it has already resolved.
+
+Measured against a Postgres 75ms away, 30 simultaneous deliveries: ~1150ms for
+the burst before, ~480ms after.
 
 ## 5. Edge cases handled
 

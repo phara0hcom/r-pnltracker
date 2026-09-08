@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   parseFeedBody,
   repairPineJson,
+  tradingDayCandidates,
   tradingDayFor,
   webhookSecretUsable,
   zoneFor,
@@ -52,6 +53,37 @@ describe('zoneFor', () => {
     // TradingView happened to send.
     expect(zoneFor(null, 'JP_EQUITY')).toBe('Asia/Tokyo')
     expect(zoneFor('SOMETHING', 'US_EQUITY')).toBe('America/New_York')
+  })
+})
+
+describe('tradingDayCandidates', () => {
+  // The webhook resolves the instrument and writes the bar in one statement, so
+  // the day has to be computed before the asset class is known and chosen
+  // between in SQL. These are the two sides of that choice, and they have to
+  // stay exactly what `zoneFor` would have produced on its own.
+  const barOpen = Date.parse('2026-05-31T15:00:00Z')
+
+  it('agrees with zoneFor under each asset class', () => {
+    const days = tradingDayCandidates(barOpen, null)
+
+    expect(days.jp).toBe(tradingDayFor(barOpen, zoneFor(null, 'JP_EQUITY')))
+    expect(days.us).toBe(tradingDayFor(barOpen, zoneFor(null, 'US_EQUITY')))
+    // The instant is midnight JST, which is still the previous day in New York.
+    expect(days).toEqual({ jp: '2026-06-01', us: '2026-05-31' })
+  })
+
+  it('gives one answer when the exchange already settles the zone', () => {
+    // `zoneFor` never consults the asset class for a venue it knows, so the SQL
+    // side of the choice cannot pick the wrong day however the row is filed.
+    expect(tradingDayCandidates(barOpen, 'TSE')).toEqual({ jp: '2026-06-01', us: '2026-06-01' })
+    expect(tradingDayCandidates(barOpen, 'NASDAQ')).toEqual({ jp: '2026-05-31', us: '2026-05-31' })
+  })
+
+  it('falls back to both zones for an exchange it does not know', () => {
+    expect(tradingDayCandidates(barOpen, 'SOMETHING')).toEqual({
+      jp: '2026-06-01',
+      us: '2026-05-31',
+    })
   })
 })
 

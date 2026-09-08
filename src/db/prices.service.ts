@@ -9,8 +9,8 @@
  * A hand-entered `price_overrides` row still wins, because the screens resolve
  * `override ?? cached`. Nothing here has to know about overrides.
  */
-import { lt } from 'drizzle-orm'
-import { priceCache } from './schema'
+import { eq, lt, sql } from 'drizzle-orm'
+import { exitFeedBars, priceCache } from './schema'
 import { db } from './index'
 import type { AssetClass } from '~/lib/domain/types'
 import { feedCurrencyFor } from '~/lib/prices/feed'
@@ -50,34 +50,67 @@ export interface CachedQuote {
  * time a few seconds earlier. Guarding refresh would make a press of the button
  * immediately after a bar landed skip, count nothing updated, and so look
  * broken while behaving correctly.
+ *
+ * `onlyIfNewestBar` is the feed's second guard, and is described where it is
+ * used. Both are conditions on the row being written, which is why the values
+ * go in through a `select` rather than `values` — one statement shape, gated or
+ * not, so the two callers cannot drift apart in what a cached price consists
+ * of.
  */
 export async function cacheQuote(
   quote: CachedQuote,
-  { onlyIfNewer = false }: { onlyIfNewer?: boolean } = {},
+  {
+    onlyIfNewer = false,
+    onlyIfNewestBar,
+  }: { onlyIfNewer?: boolean; onlyIfNewestBar?: string } = {},
 ): Promise<boolean> {
   const written = await db
     .insert(priceCache)
-    .values({
-      instrumentId: quote.instrumentId,
-      price: quote.price,
-      currency: quote.currency,
-      asOf: quote.asOf,
-      source: quote.source,
-    })
+    .select(
+      // Column for column, in table order — `insert … select` requires it. Each
+      // value is bound through its own column so it is encoded exactly as
+      // `values()` would have: a bare `Date` reaches the driver as local time,
+      // and lands in a `timestamp` column shifted by the process's UTC offset.
+      db
+        .select({
+          instrumentId: sql`${sql.param(quote.instrumentId, priceCache.instrumentId)}`.as('instrument_id'),
+          price: sql`${sql.param(quote.price, priceCache.price)}`.as('price'),
+          currency: sql`${sql.param(quote.currency, priceCache.currency)}`.as('currency'),
+          asOf: sql`${sql.param(quote.asOf, priceCache.asOf)}`.as('as_of'),
+          source: sql`${sql.param(quote.source, priceCache.source)}`.as('source'),
+          fetchedAt: sql`${sql.param(new Date(), priceCache.fetchedAt)}`.as('fetched_at'),
+        })
+        .from(sql`(select 1) as row`)
+        .where(onlyIfNewestBar === undefined ? undefined : newestBarIs(quote.instrumentId, onlyIfNewestBar)),
+    )
     .onConflictDoUpdate({
       target: priceCache.instrumentId,
       set: {
-        price: quote.price,
-        currency: quote.currency,
-        asOf: quote.asOf,
-        source: quote.source,
-        fetchedAt: new Date(),
+        price: sql`excluded.price`,
+        currency: sql`excluded.currency`,
+        asOf: sql`excluded.as_of`,
+        source: sql`excluded.source`,
+        fetchedAt: sql`excluded.fetched_at`,
       },
-      setWhere: onlyIfNewer ? lt(priceCache.asOf, quote.asOf) : undefined,
+      setWhere: onlyIfNewer ? lt(priceCache.asOf, sql`excluded.as_of`) : undefined,
     })
     .returning({ instrumentId: priceCache.instrumentId })
 
   return written.length > 0
+}
+
+/**
+ * True when no bar later than `tradingDay` is held for the instrument.
+ *
+ * Asked inside the write rather than before it. The webhook used to read the
+ * newest day back in a statement of its own and then decide, which cost a round
+ * trip and still left a gap: a later bar could commit between the read and the
+ * write. Here the two are one statement, so the answer cannot go stale between
+ * being given and being used.
+ */
+function newestBarIs(instrumentId: string, tradingDay: string) {
+  return sql`${tradingDay}::date >= coalesce((select max(${exitFeedBars.tradingDay}) from ${exitFeedBars}
+    where ${eq(exitFeedBars.instrumentId, sql`${sql.param(instrumentId, exitFeedBars.instrumentId)}`)}), ${tradingDay}::date)`
 }
 
 export interface FeedClose {
@@ -86,15 +119,19 @@ export interface FeedClose {
   close: string
   /** When the bar closed — see the caller for why this is delivery time. */
   asOf: Date
+  /** The bar's own session date, which decides whether its close is current. */
+  tradingDay: string
 }
 
 /**
  * Publishes a daily bar's close as the instrument's current price.
  *
- * Guarded, unlike the refresh path: a replayed bar is a thing that actually
- * happens here — TradingView resends after a chart reload — and its close must
- * not become the current price. A skipped write means something fresher was
- * already there, which is a correct outcome rather than a failure.
+ * Guarded twice, unlike the refresh path, because a replayed bar is a thing
+ * that actually happens here — TradingView resends after a chart reload — and
+ * its close must not become the current price. `onlyIfNewestBar` refuses a bar
+ * that a later session has already superseded; `onlyIfNewer` refuses a delivery
+ * that a fresher quote has overtaken. A skipped write means something better
+ * was already there, which is a correct outcome rather than a failure.
  */
 export async function cacheFeedClose(input: FeedClose): Promise<boolean> {
   const currency = feedCurrencyFor(input.assetClass)
@@ -108,6 +145,6 @@ export async function cacheFeedClose(input: FeedClose): Promise<boolean> {
       asOf: input.asOf,
       source: 'FEED',
     },
-    { onlyIfNewer: true },
+    { onlyIfNewer: true, onlyIfNewestBar: input.tradingDay },
   )
 }
