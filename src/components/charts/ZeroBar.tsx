@@ -14,10 +14,10 @@ import { cx } from '~/lib/cx'
  *
  * Renders only the track. Callers supply their own flanking label/value —
  * the column widths around it differ too much per screen (a month row, a day
- * row, a table cell) to bake one row layout in here.
+ * row, an SP card) to bake one row layout in here.
  *
- * `size="compact"` is the 12px table-cell track; the default 16px suits a
- * standalone row list, where there's a full line height to fill.
+ * `size="compact"` is the 12px track for a dense list row; the default 16px
+ * suits a standalone row list, where there's a full line height to fill.
  */
 export function ZeroBar({
   value,
