@@ -9,12 +9,13 @@
  */
 import { randomUUID } from 'node:crypto'
 import Decimal from 'decimal.js'
-import { and, asc, eq, inArray, isNull, max } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { idFor } from './mappers'
 import { exitFeedBars, exitRules, exitSettings, instruments } from './schema'
 import { db } from './index'
 import type { AccountType, AssetClass } from '~/lib/domain/types'
 import { DEFAULT_EXIT_SETTINGS, type ExitSettings, type FeedBar, type TrailingMethod } from '~/lib/exit/types'
+import type { TradingDayCandidates } from '~/lib/exit/webhook'
 
 /** One stored plan, with the instrument it belongs to resolved. */
 export interface ExitRuleRecord {
@@ -260,9 +261,11 @@ export async function barsFor(instrumentIds: string[]): Promise<Map<string, Feed
   return out
 }
 
-export interface FeedBarInput {
-  instrumentId: string
-  tradingDay: string
+export interface FeedBarDelivery {
+  /** The tracker's own symbol, as `syminfo.ticker` emits it. */
+  ticker: string
+  /** Both candidate session dates — see `tradingDayCandidates`. */
+  tradingDay: TradingDayCandidates
   barTime: Date
   exchange: string | null
   close: string
@@ -275,83 +278,149 @@ export interface FeedBarInput {
   atr14: string
 }
 
+/** What the delivery resolved to, once the row it belongs to is known. */
+export interface StoredFeedBar {
+  instrumentId: string
+  symbol: string
+  assetClass: AssetClass
+  /** The candidate the instrument's asset class selected. */
+  tradingDay: string
+  /** Plans whose entry-date ATR this bar completed. */
+  backfilled: number
+}
+
 /**
- * Stores one payload, and reports whether it is the newest bar held for that
- * instrument.
+ * Stores one payload: resolves the ticker, upserts the bar, and fills in any
+ * entry ATR the bar completes — in a single statement.
+ *
+ * One statement rather than three because every alert of the day fires at the
+ * same close, and each round trip is paid per delivery against a database on
+ * another continent (see the region note in `vite.config.ts`). Three sequential
+ * lookups meant a burst of open positions queued behind ~225ms of latency each,
+ * and held a pooled connection for all of it.
  *
  * Upsert on (instrument, day): TradingView can fire twice for the same close
  * after a chart reload, and a resent bar should correct the row rather than
  * duplicate it — a duplicated bar would distort the five-reading momentum
  * window that the time stop reads.
  *
- * The same resend is why the return value exists. A replayed bar carries an old
- * trading day, and the caller uses this to decide whether the close is fit to
- * publish as the instrument's current price — `false` means an older day
- * arrived late and must not drag that price backwards.
+ * The backfill is not a recalculation — the framework forbids those. It
+ * completes a value that was missing because the alert was created after the
+ * position was opened, and only ever from the bar for the plan's own entry
+ * date, so the stop it yields is the one that would have been set at entry had
+ * the feed existed then. Plans that already carry an ATR are left alone. It
+ * belongs on this path rather than a page load because this is the exact moment
+ * the missing data appears, and it keeps the read path free of writes.
+ *
+ * Null when no instrument carries the ticker: an alert exists for something
+ * this account has never traded, and there is nothing to attach a bar to.
  */
-export async function recordFeedBar(input: FeedBarInput): Promise<{ isLatest: boolean }> {
-  await db
-    .insert(exitFeedBars)
-    .values(input)
-    .onConflictDoUpdate({
-      target: [exitFeedBars.instrumentId, exitFeedBars.tradingDay],
-      // The key columns are the conflict target, so only the readings update.
-      set: {
-        barTime: input.barTime,
-        exchange: input.exchange,
-        close: input.close,
-        sma10: input.sma10,
-        sma20: input.sma20,
-        rsi14: input.rsi14,
-        macd: input.macd,
-        macdSignal: input.macdSignal,
-        macdHist: input.macdHist,
-        atr14: input.atr14,
-        receivedAt: new Date(),
-      },
+export async function storeFeedBar(input: FeedBarDelivery): Promise<StoredFeedBar | null> {
+  /*
+   * One stamp for the whole delivery, bound rather than left to `now()`. The
+   * columns are `timestamp without time zone`, so `now()` — a timestamptz —
+   * would be cast through whatever TimeZone the server session happens to
+   * carry, while every other write in this codebase files UTC.
+   */
+  const at = new Date()
+
+  /*
+   * The instrument decides which candidate day is the bar's own, because
+   * `zoneFor` falls back to the asset class and only the database holds it.
+   * Choosing here rather than in a prior query is what removes that round trip;
+   * the discriminator is `zoneFor`'s own, and `webhook.test.ts` pins the two
+   * sides against each other.
+   */
+  const target = db.$with('target').as(
+    db
+      .select({
+        id: instruments.id,
+        symbol: instruments.symbol,
+        assetClass: instruments.assetClass,
+        tradingDay: sql<string>`case when ${instruments.assetClass} = 'US_EQUITY'
+          then ${input.tradingDay.us}::date else ${input.tradingDay.jp}::date end`.as('trading_day'),
+      })
+      .from(instruments)
+      .where(eq(instruments.symbol, input.ticker)),
+  )
+
+  const bar = db.$with('bar').as(
+    db
+      .insert(exitFeedBars)
+      .select(
+        // Column for column, in table order — `insert … select` requires it, and
+        // it is checked at build time rather than by the server.
+        db
+          .select({
+            instrumentId: target.id,
+            tradingDay: target.tradingDay,
+            barTime: sql`${sql.param(input.barTime, exitFeedBars.barTime)}`.as('bar_time'),
+            exchange: sql`${sql.param(input.exchange, exitFeedBars.exchange)}`.as('exchange'),
+            close: sql`${sql.param(input.close, exitFeedBars.close)}`.as('close'),
+            sma10: sql`${sql.param(input.sma10, exitFeedBars.sma10)}`.as('sma10'),
+            sma20: sql`${sql.param(input.sma20, exitFeedBars.sma20)}`.as('sma20'),
+            rsi14: sql`${sql.param(input.rsi14, exitFeedBars.rsi14)}`.as('rsi14'),
+            macd: sql`${sql.param(input.macd, exitFeedBars.macd)}`.as('macd'),
+            macdSignal: sql`${sql.param(input.macdSignal, exitFeedBars.macdSignal)}`.as('macd_signal'),
+            macdHist: sql`${sql.param(input.macdHist, exitFeedBars.macdHist)}`.as('macd_hist'),
+            atr14: sql`${sql.param(input.atr14, exitFeedBars.atr14)}`.as('atr14'),
+            receivedAt: sql`${sql.param(at, exitFeedBars.receivedAt)}`.as('received_at'),
+          })
+          .from(target),
+      )
+      .onConflictDoUpdate({
+        target: [exitFeedBars.instrumentId, exitFeedBars.tradingDay],
+        // The key columns are the conflict target, so only the readings update.
+        set: {
+          barTime: sql`excluded.bar_time`,
+          exchange: sql`excluded.exchange`,
+          close: sql`excluded.close`,
+          sma10: sql`excluded.sma10`,
+          sma20: sql`excluded.sma20`,
+          rsi14: sql`excluded.rsi14`,
+          macd: sql`excluded.macd`,
+          macdSignal: sql`excluded.macd_signal`,
+          macdHist: sql`excluded.macd_hist`,
+          atr14: sql`excluded.atr14`,
+          receivedAt: sql`excluded.received_at`,
+        },
+      })
+      .returning({ instrumentId: exitFeedBars.instrumentId }),
+  )
+
+  const filled = db.$with('filled').as(
+    db
+      .update(exitRules)
+      .set({ entryAtr: input.atr14, updatedAt: at })
+      .from(target)
+      .where(
+        and(
+          eq(exitRules.instrumentId, target.id),
+          eq(exitRules.entryDate, target.tradingDay),
+          isNull(exitRules.entryAtr),
+        ),
+      )
+      .returning({ id: exitRules.id }),
+  )
+
+  /*
+   * `bar` is written but never read back, which is deliberate and safe: a
+   * data-modifying CTE runs exactly once and to completion whether or not the
+   * outer query selects from it.
+   */
+  const [row] = await db
+    .with(target, bar, filled)
+    .select({
+      instrumentId: target.id,
+      symbol: target.symbol,
+      assetClass: target.assetClass,
+      tradingDay: target.tradingDay,
+      // Cast because `count(*)` is a bigint, which `pg` hands back as a string.
+      backfilled: sql<number>`(select count(*) from ${filled})::int`,
     })
+    .from(target)
 
-  // Read back rather than compared against a prior read: the row above is
-  // already committed, so the maximum includes it and the answer cannot be
-  // invalidated by a concurrent delivery for a later day.
-  const [newest] = await db
-    .select({ tradingDay: max(exitFeedBars.tradingDay) })
-    .from(exitFeedBars)
-    .where(eq(exitFeedBars.instrumentId, input.instrumentId))
-
-  return { isLatest: newest?.tradingDay === input.tradingDay }
-}
-
-/**
- * Fills in the entry ATR for any plan whose entry-date bar has just arrived.
- *
- * Not a recalculation — the framework forbids those. It completes a value that
- * was missing because the alert was created after the position was opened, and
- * only ever from the bar for the plan's own entry date, so the stop it yields is
- * the one that would have been set at entry had the feed existed then. Plans
- * that already carry an ATR are left alone.
- *
- * Driven from the webhook rather than a page load: this is the exact moment the
- * missing data appears, and it keeps the read path free of writes.
- */
-export async function backfillEntryAtrForBar(
-  instrumentId: string,
-  tradingDay: string,
-  atr14: string,
-): Promise<number> {
-  const filled = await db
-    .update(exitRules)
-    .set({ entryAtr: atr14, updatedAt: new Date() })
-    .where(
-      and(
-        eq(exitRules.instrumentId, instrumentId),
-        eq(exitRules.entryDate, tradingDay),
-        isNull(exitRules.entryAtr),
-      ),
-    )
-    .returning({ id: exitRules.id })
-
-  return filled.length
+  return row ?? null
 }
 
 // ── Settings ────────────────────────────────────────────────────────────────

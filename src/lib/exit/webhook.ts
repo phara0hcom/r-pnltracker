@@ -62,13 +62,63 @@ export function zoneFor(exchange: string | null, assetClass: AssetClass): string
  * in the exchange's zone is what makes the date mean what the chart shows.
  */
 export function tradingDayFor(timeMs: number, zone: string): string {
+  return formatterFor(zone).format(new Date(timeMs))
+}
+
+/**
+ * One `Intl.DateTimeFormat` per zone, built once.
+ *
+ * Constructing one is not free — it resolves a locale and a timezone database
+ * entry — and there are exactly two zones in play for the life of the process.
+ * The webhook builds a date on every delivery and every alert of the day fires
+ * within the same second, so this is on the hot path rather than beside it.
+ */
+const formatters = new Map<string, Intl.DateTimeFormat>()
+
+function formatterFor(zone: string): Intl.DateTimeFormat {
+  const cached = formatters.get(zone)
+  if (cached) return cached
+
   // `en-CA` renders as YYYY-MM-DD, which is the shape stored everywhere else.
-  return new Intl.DateTimeFormat('en-CA', {
+  const made = new Intl.DateTimeFormat('en-CA', {
     timeZone: zone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date(timeMs))
+  })
+  formatters.set(zone, made)
+  return made
+}
+
+/**
+ * The session date under each zone the bar could belong to.
+ *
+ * `zoneFor` needs the instrument's asset class, and the database is the only
+ * thing that holds it — so resolving the day used to require a round trip
+ * before the bar could even be written. Both answers are cheap to compute here,
+ * and the insert then picks between them in SQL from the row it has already
+ * resolved, which is what collapses the lookup and the write into one
+ * statement.
+ *
+ * Derived by asking `zoneFor` itself under each asset class rather than
+ * restating its rules: when TradingView names a venue the zone is settled
+ * without the asset class at all, and both fields hold the same day.
+ */
+export interface TradingDayCandidates {
+  /** The day for an instrument whose fallback zone is Asia/Tokyo. */
+  jp: string
+  /** The day for a US equity, whose fallback zone is America/New_York. */
+  us: string
+}
+
+export function tradingDayCandidates(
+  timeMs: number,
+  exchange: string | null,
+): TradingDayCandidates {
+  return {
+    jp: tradingDayFor(timeMs, zoneFor(exchange, 'JP_EQUITY')),
+    us: tradingDayFor(timeMs, zoneFor(exchange, 'US_EQUITY')),
+  }
 }
 
 /**

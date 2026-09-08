@@ -62,17 +62,36 @@ describe('cacheQuote', () => {
     expect(only().sql).not.toContain('where')
   })
 
+  it('sends the same statement whether or not it is guarded', async () => {
+    // The guards are conditions on the row, so the values go in through a
+    // `select`. One shape for both callers is the point of the file: the
+    // alternative is two writes that can disagree about what a cached price
+    // consists of.
+    await cacheQuote(QUOTE)
+    const unguarded = only().sql
+
+    recorder.sent.length = 0
+    await cacheQuote(QUOTE, { onlyIfNewer: true, onlyIfNewestBar: '2026-09-04' })
+    const guarded = only().sql
+
+    // Everything up to the `from` is the columns and the values they are given.
+    const written = (statement: string) => statement.slice(0, statement.indexOf(' from '))
+    expect(written(unguarded)).toBe(written(guarded))
+    expect(written(unguarded)).toContain('insert into "price_cache"')
+  })
+
   it('adds an as_of comparison when asked not to go backwards', async () => {
     await cacheQuote(QUOTE, { onlyIfNewer: true })
     const { sql, params } = only()
     expect(sql).toContain('on conflict')
     expect(sql).toContain('where "price_cache"."as_of" <')
-    // The comparison is against the incoming timestamp, and the last parameter
-    // is that bound. Worth asserting separately from the clause: bound to
+    // The comparison is against the row being written, not a second copy of
+    // the timestamp. Worth asserting separately from the clause: bound to
     // `now()` instead — a plausible slip, since `fetchedAt` is right beside it
     // in the same statement — the guard would still read correctly in the SQL
     // and would let every late delivery through.
-    expect(params.at(-1)).toBe(QUOTE.asOf.toISOString())
+    expect(sql).toContain('where "price_cache"."as_of" < excluded.as_of')
+    expect(params).toContain(QUOTE.asOf.toISOString())
   })
 
   it('reports whether the row actually moved', async () => {
@@ -87,11 +106,24 @@ describe('cacheFeedClose', () => {
     instrumentId: 'i1',
     close: '2684',
     asOf: new Date('2026-09-04T06:00:00Z'),
+    tradingDay: '2026-09-04',
   }
 
   it('is always guarded — a replayed bar must not become the current price', async () => {
     await cacheFeedClose({ ...BAR, assetClass: 'JP_EQUITY' })
     expect(only().sql).toContain('where "price_cache"."as_of" <')
+  })
+
+  it('refuses a bar a later session has already superseded, in the same statement', async () => {
+    // The webhook used to read the newest day back in a statement of its own
+    // and then decide. That cost a round trip on a route only ever hit in
+    // bursts, and still left a gap for a later bar to commit in between the
+    // answer and the write.
+    await cacheFeedClose({ ...BAR, assetClass: 'JP_EQUITY' })
+
+    const { sql, params } = only()
+    expect(sql).toContain('max("exit_feed_bars"."trading_day")')
+    expect(params).toContain('2026-09-04')
   })
 
   it('files the close under the market its instrument trades in', async () => {
