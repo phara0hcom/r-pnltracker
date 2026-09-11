@@ -18,7 +18,7 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { createFileRoute } from '@tanstack/react-router'
-import { storeFeedBar } from '~/db/exit.service'
+import { recordFeedDelivery, storeFeedBar, type FeedDeliveryOutcome } from '~/db/exit.service'
 import { cacheFeedClose } from '~/db/prices.service'
 import {
   MIN_SECRET_LENGTH,
@@ -87,18 +87,70 @@ export const Route = createFileRoute('/api/tv/$secret')({
         const denied = authorise(params.secret)
         if (denied) return denied
 
+        /*
+         * The clock starts once the secret is accepted, and every path from
+         * here files a row in `exit_feed_deliveries`.
+         *
+         * Nothing else can see this endpoint work. TradingView reports a
+         * delivery as a status code on a screen nobody watches, and a bar that
+         * arrives looks identical in `exit_feed_bars` whether it took 80ms or
+         * timed the alert out at 8s. The log is what separates "never arrived"
+         * from "arrived, was stored, and answered too late to be waited for" —
+         * and only the second of those is fixed by making the route faster.
+         *
+         * Deliberately *after* `authorise`: a wrong secret is answered with a
+         * 404 and no write. Anyone can POST here, and a table an unauthenticated
+         * caller can append to is a table an unauthenticated caller can fill.
+         */
+        const receivedAt = new Date()
+        const startedAt = performance.now()
+
+        /** Files the delivery, then answers. Logging never fails the request. */
+        const finish = async (
+          status: number,
+          outcome: FeedDeliveryOutcome,
+          body: Record<string, unknown>,
+          fields: Partial<Parameters<typeof recordFeedDelivery>[0]> = {},
+        ): Promise<Response> => {
+          try {
+            await recordFeedDelivery({
+              receivedAt,
+              // Measured to here, so the log's own write is not counted as time
+              // the delivery spent — see `recordFeedDelivery`.
+              durationMs: Math.round(performance.now() - startedAt),
+              outcome,
+              status,
+              ticker: null,
+              exchange: null,
+              instrumentId: null,
+              tradingDay: null,
+              backfilled: null,
+              priced: null,
+              detail: null,
+              ...fields,
+            })
+          } catch (error) {
+            // The bar is the job and it is already stored. A logging fault must
+            // not turn a delivery that succeeded into a 5xx TradingView retries.
+            console.error(
+              `[tv] delivery not logged: ${error instanceof Error ? error.message : String(error)}`,
+            )
+          }
+          return json(body, status)
+        }
+
         const parsed = parseFeedBody(await request.text())
         if (!parsed.ok) {
           // Logged as well as returned: TradingView shows delivery failures only
           // as a status code, so the reason has to be findable server-side.
           console.error(`[tv] rejected payload: ${parsed.error}`)
-          return json({ error: parsed.error }, 400)
+          return finish(400, 'INVALID_PAYLOAD', { error: parsed.error }, { detail: parsed.error })
         }
 
         const { ticker, exchange, time, ...indicators } = parsed.payload
 
         /*
-         * Two statements, and deliberately not five.
+         * Two statements for the work, and deliberately not five.
          *
          * Every alert of the day fires at the same close, so this route is only
          * ever hit in bursts — one delivery per open position, all at once.
@@ -124,7 +176,12 @@ export const Route = createFileRoute('/api/tv/$secret')({
           // Not an error worth retrying: an alert exists for something this
           // account has never traded, so there is nothing to attach a bar to.
           console.error(`[tv] no instrument for ticker ${ticker} — bar discarded`)
-          return json({ error: `unknown instrument ${ticker}` }, 404)
+          return finish(
+            404,
+            'UNKNOWN_TICKER',
+            { error: `unknown instrument ${ticker}` },
+            { ticker, exchange: exchange ?? null },
+          )
         }
 
         const { symbol, tradingDay, backfilled } = stored
@@ -149,6 +206,7 @@ export const Route = createFileRoute('/api/tv/$secret')({
          * correct and permanently unable to publish itself.
          */
         let priced = false
+        let pricingFault: string | null = null
         try {
           priced = await cacheFeedClose({
             instrumentId: stored.instrumentId,
@@ -166,16 +224,31 @@ export const Route = createFileRoute('/api/tv/$secret')({
            * this feature most needs to report honestly.
            *
            * The likely cause is the `price_source` enum missing 'FEED',
-           * i.e. drizzle/0004 not yet applied, so the message says so.
+           * i.e. drizzle/0004 not yet applied, so the message says so. It is
+           * carried into the delivery log as well: the console is not somewhere
+           * anyone looks, which is how this could fail quietly for a week.
            */
+          pricingFault = error instanceof Error ? error.message : String(error)
           console.error(
-            `[tv] bar stored, price not published for ${symbol}: ${
-              error instanceof Error ? error.message : String(error)
-            } — is drizzle/0004_price_source_feed.sql applied?`,
+            `[tv] bar stored, price not published for ${symbol}: ${pricingFault}` +
+              ' — is drizzle/0004_price_source_feed.sql applied?',
           )
         }
 
-        return json({ ok: true, symbol, tradingDay, backfilled, priced }, 200)
+        return finish(
+          200,
+          'STORED',
+          { ok: true, symbol, tradingDay, backfilled, priced },
+          {
+            ticker,
+            exchange: exchange ?? null,
+            instrumentId: stored.instrumentId,
+            tradingDay,
+            backfilled,
+            priced,
+            detail: pricingFault,
+          },
+        )
       },
     },
   },

@@ -287,6 +287,47 @@ both zones and the statement picks with the row it has already resolved.
 Measured against a Postgres 75ms away, 30 simultaneous deliveries: ~1150ms for
 the burst before, ~480ms after.
 
+---
+
+## 4.3 The feed says what it did
+
+Every delivery that gets past the secret files a row in `exit_feed_deliveries`,
+and the Exit Rules screen shows them under **Feed deliveries**.
+
+This exists because the endpoint answers a machine. TradingView reports a
+delivery as a status code on a page nobody watches, and a bar that arrives looks
+identical in `exit_feed_bars` whether it took 80ms or timed the alert out. Three
+different problems all presented the same way — as every plan quietly reading
+*stale*:
+
+| What you see | What happened | Where the fix is |
+|---|---|---|
+| No row at all | The alert never fired, or never pointed here | TradingView |
+| `Payload refused` (400) | It fired; the body was not usable | The Pine script |
+| `Unknown ticker` (404) | It fired; nothing here trades that name | The alert, or the import |
+| `Stored, slow` (200) | The bar landed, and the answer may have come too late for the alert to wait | This route |
+| `Stored, price failed` | The bar landed; publishing its close threw | Usually a missing migration |
+
+Only the fourth is fixed by making the route faster, which is why the duration
+gets a column of its own. It is server-side handling time and stops before the
+log row is written — the cost of observing is not charged to the delivery — and
+no server can measure the reply travelling back, so a delivery TradingView gave
+up on still shows a 200 here. That asymmetry is the point: a 200 in this table
+beside a failure in TradingView's alert log *is* the diagnosis.
+
+**A wrong secret is answered with a 404 and never recorded.** Anyone can POST at
+this URL, and a table an unauthenticated caller can append to is a table an
+unauthenticated caller can fill.
+
+The log costs one round trip per delivery, which is a third of the route's
+throughput under a burst (measured against a Postgres 75ms away, 30 simultaneous
+deliveries: ~490ms without it, ~740ms with). That is the deliberate trade — a
+feed that cannot be observed cannot be fixed — and it is reversible: folding the
+insert into the price write as a second data-modifying CTE would make it free.
+
+Rows are never pruned. One per alert per day is a few thousand a year, which is
+nothing; the screen reads the newest 100 and tallies the last 24 hours.
+
 ## 5. Edge cases handled
 
 **Opening gaps are approximated, not observed.** The payload carries `close`
@@ -354,6 +395,7 @@ a zero-share sale.
 | `src/lib/exit/entry.ts` | Current holding streak, for prefill |
 | `src/lib/exit/webhook.ts` | Payload parsing, timezone and Pine-JSON repair |
 | `src/routes/api/tv/$secret.ts` | The webhook endpoint (no session — see §1.1) |
+| `src/components/exits/FeedDeliveryLog.tsx` | The delivery log on screen — see §4.3 |
 | `src/db/exit.service.ts` | Plans, settings, bar storage |
 | `src/db/prices.service.ts` | Publishing a bar close into the shared price cache |
 | `src/lib/prices/feed.ts` | Which asset classes a feed close may be published for |

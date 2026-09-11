@@ -15,6 +15,7 @@
  * and it skips itself when no container runtime is present.
  */
 import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -65,6 +66,14 @@ function findContainerRuntime(): boolean {
   return true
 }
 
+/** The schema, in the order `drizzle/meta/_journal.json` says it was built. */
+function migrationFiles(): string[] {
+  const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8')) as {
+    entries: { tag: string }[]
+  }
+  return journal.entries.map((entry) => join('drizzle', `${entry.tag}.sql`))
+}
+
 const available = findContainerRuntime()
 
 let container: StartedPostgreSqlContainer | undefined
@@ -91,9 +100,16 @@ beforeAll(async () => {
   process.env.DATABASE_URL = container.getConnectionUri()
 
   sql = new Pool({ connectionString: container.getConnectionUri() })
-  await sql.query(
-    readFileSync('drizzle/0000_baseline.sql', 'utf8').replaceAll('--> statement-breakpoint', ''),
-  )
+  /*
+   * The baseline plus every migration after it, in the journal's own order.
+   * Reading only the baseline was enough while it was the whole schema, and
+   * stopped being enough the moment one table arrived in a later file — the
+   * suite then failed on a table the application had and the test database did
+   * not, which reads as a code fault rather than a fixture one.
+   */
+  for (const file of migrationFiles()) {
+    await sql.query(readFileSync(file, 'utf8').replaceAll('--> statement-breakpoint', ''))
+  }
   await sql.query(
     `insert into instruments (id, symbol, name, asset_class, currency)
      values ($1, '7203', 'トヨタ自動車', 'JP_EQUITY', 'JPY')`,
@@ -164,6 +180,7 @@ beforeEach(async () => {
   await sql!.query('delete from price_cache')
   await sql!.query('delete from exit_feed_bars')
   await sql!.query('delete from exit_rules')
+  await sql!.query('delete from exit_feed_deliveries')
 })
 
 describe.skipIf(!available)('price cache, against a real Postgres', () => {
@@ -419,5 +436,114 @@ describe.skipIf(!available)('feed bars, against a real Postgres', () => {
       }),
     ).toBe(true)
     expect((await cached())?.price).toBe('2684.00000000')
+  })
+})
+
+describe.skipIf(!available)('the delivery log, against a real Postgres', () => {
+  const delivery = (over: Partial<Parameters<typeof ExitService.recordFeedDelivery>[0]> = {}) => ({
+    receivedAt: new Date('2026-09-04T06:00:00Z'),
+    durationMs: 120,
+    outcome: 'STORED' as const,
+    status: 200,
+    ticker: '7203',
+    exchange: 'TSE',
+    instrumentId: INSTRUMENT,
+    tradingDay: '2026-09-04',
+    backfilled: 0,
+    priced: true,
+    detail: null,
+    ...over,
+  })
+
+  it('files a delivery and reads it back with its instrument resolved', async () => {
+    await exits!.recordFeedDelivery(delivery())
+
+    const [row] = await exits!.recentFeedDeliveries(10)
+    expect(row).toMatchObject({
+      ticker: '7203',
+      symbol: '7203',
+      name: 'トヨタ自動車',
+      outcome: 'STORED',
+      status: 200,
+      durationMs: 120,
+      tradingDay: '2026-09-04',
+      priced: true,
+    })
+    // Stamped in UTC, like every other timestamp this app writes — the screen
+    // renders it in the reader's zone and would be an hour out either way.
+    expect(row?.receivedAt.toISOString()).toBe('2026-09-04T06:00:00.000Z')
+  })
+
+  it('keeps a ticker that matched nothing, which is the whole finding', async () => {
+    await exits!.recordFeedDelivery(
+      delivery({
+        outcome: 'UNKNOWN_TICKER',
+        status: 404,
+        ticker: 'NOPE',
+        instrumentId: null,
+        tradingDay: null,
+        backfilled: null,
+        priced: null,
+      }),
+    )
+
+    const [row] = await exits!.recentFeedDeliveries(10)
+    // The left join has to survive the unresolved case: an inner one would have
+    // hidden exactly the rows worth looking at.
+    expect(row).toMatchObject({ ticker: 'NOPE', symbol: null, name: null, outcome: 'UNKNOWN_TICKER' })
+  })
+
+  it('records two deliveries of the same bar as two events', async () => {
+    // A resend is the thing this log makes visible. An id derived from the
+    // payload would have collapsed the pair and erased it.
+    await exits!.recordFeedDelivery(delivery())
+    await exits!.recordFeedDelivery(delivery({ durationMs: 5000 }))
+
+    expect(await exits!.recentFeedDeliveries(10)).toHaveLength(2)
+  })
+
+  it('returns the newest first, and no more than asked for', async () => {
+    for (const [index, minute] of ['01', '02', '03'].entries()) {
+      await exits!.recordFeedDelivery(
+        delivery({ receivedAt: new Date(`2026-09-04T06:${minute}:00Z`), durationMs: index }),
+      )
+    }
+
+    const rows = await exits!.recentFeedDeliveries(2)
+    expect(rows.map((row) => row.durationMs)).toEqual([2, 1])
+  })
+
+  it('tallies only the window asked about', async () => {
+    const now = new Date('2026-09-04T12:00:00Z')
+    await exits!.recordFeedDelivery(delivery({ receivedAt: new Date('2026-09-04T11:00:00Z') }))
+    await exits!.recordFeedDelivery(
+      delivery({
+        receivedAt: new Date('2026-09-04T11:30:00Z'),
+        outcome: 'UNKNOWN_TICKER',
+        status: 404,
+        durationMs: 900,
+      }),
+    )
+    // Outside the window — must not be counted, or "today's feed" quietly
+    // becomes "every delivery ever".
+    await exits!.recordFeedDelivery(delivery({ receivedAt: new Date('2026-09-01T11:00:00Z') }))
+
+    expect(await exits!.feedDeliveryTally(new Date(now.getTime() - 24 * 3600 * 1000))).toEqual({
+      total: 2,
+      stored: 1,
+      failed: 1,
+      slowestMs: 900,
+    })
+  })
+
+  it('reports an empty window as zeroes rather than nulls', async () => {
+    // `count(*)` over no rows is 0, but `max()` is null, and the screen renders
+    // the pair — a null total would print as blank where a 0 is the answer.
+    expect(await exits!.feedDeliveryTally(new Date('2030-01-01T00:00:00Z'))).toEqual({
+      total: 0,
+      stored: 0,
+      failed: 0,
+      slowestMs: null,
+    })
   })
 })

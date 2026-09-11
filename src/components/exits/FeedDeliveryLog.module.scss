@@ -1,0 +1,65 @@
+@use '../../styles/mixins' as m;
+
+.num {
+  @include m.tabular-nums;
+
+  text-align: right;
+}
+
+/* Timestamps and session dates line up down the column, like money does. */
+.stamp {
+  @include m.tabular-nums;
+
+  white-space: nowrap;
+}
+
+/* Long enough to be worth a look — see `SLOW_MS`. */
+.slow {
+  color: var(--color-warn);
+}
+
+.name {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 0.6875rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-full);
+}
+
+.ok {
+  color: var(--color-profit);
+  background-color: var(--color-profit-dim);
+}
+
+.warn {
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+}
+
+.bad {
+  color: var(--color-loss);
+  background-color: var(--color-loss-dim);
+}
+
+/* The HTTP status, beside the verdict it produced rather than instead of it. */
+.status {
+  @include m.tabular-nums;
+
+  margin-left: var(--space-2);
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.detail {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}

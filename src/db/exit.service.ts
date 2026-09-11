@@ -9,9 +9,9 @@
  */
 import { randomUUID } from 'node:crypto'
 import Decimal from 'decimal.js'
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm'
 import { idFor } from './mappers'
-import { exitFeedBars, exitRules, exitSettings, instruments } from './schema'
+import { exitFeedBars, exitFeedDeliveries, exitRules, exitSettings, instruments } from './schema'
 import { db } from './index'
 import type { AccountType, AssetClass } from '~/lib/domain/types'
 import { DEFAULT_EXIT_SETTINGS, type ExitSettings, type FeedBar, type TrailingMethod } from '~/lib/exit/types'
@@ -421,6 +421,85 @@ export async function storeFeedBar(input: FeedBarDelivery): Promise<StoredFeedBa
     .from(target)
 
   return row ?? null
+}
+
+// ── Delivery log ────────────────────────────────────────────────────────────
+
+/** How a delivery ended — see the enum on the table for what each means. */
+export type FeedDeliveryOutcome = (typeof exitFeedDeliveries.$inferInsert)['outcome']
+
+export interface FeedDeliveryRecord {
+  receivedAt: Date
+  durationMs: number
+  outcome: FeedDeliveryOutcome
+  status: number
+  ticker: string | null
+  exchange: string | null
+  instrumentId: string | null
+  tradingDay: string | null
+  backfilled: number | null
+  priced: boolean | null
+  detail: string | null
+}
+
+/**
+ * Files what happened to one delivery.
+ *
+ * A fresh random id rather than anything derived from the payload: two
+ * deliveries of the same bar are two events, and collapsing them would erase
+ * exactly the resend this log exists to make visible.
+ *
+ * This costs a round trip the webhook did not previously pay, and that is the
+ * deliberate trade: without it the feed reports nothing but an HTTP status to a
+ * machine, so a delivery that was processed and answered a moment too late is
+ * indistinguishable from one that never arrived. The cost is measured in the
+ * log itself — `durationMs` stops before this write, so the difference between
+ * it and the gap to the next delivery is the price of keeping the record.
+ */
+export async function recordFeedDelivery(input: FeedDeliveryRecord): Promise<void> {
+  await db.insert(exitFeedDeliveries).values({ id: idFor('delivery', randomUUID()), ...input })
+}
+
+/** A logged delivery with the instrument it resolved to, where it resolved. */
+export type FeedDeliveryRow = typeof exitFeedDeliveries.$inferSelect & {
+  symbol: string | null
+  name: string | null
+}
+
+/** The most recent deliveries, newest first — what the Exit Rules screen shows. */
+export async function recentFeedDeliveries(limit: number): Promise<FeedDeliveryRow[]> {
+  const rows = await db
+    .select({
+      delivery: exitFeedDeliveries,
+      symbol: instruments.symbol,
+      name: instruments.name,
+    })
+    .from(exitFeedDeliveries)
+    .leftJoin(instruments, eq(exitFeedDeliveries.instrumentId, instruments.id))
+    .orderBy(desc(exitFeedDeliveries.receivedAt))
+    .limit(limit)
+
+  return rows.map(({ delivery, symbol, name }) => ({ ...delivery, symbol, name }))
+}
+
+/** Deliveries since a cutoff, for the counts the screen leads with. */
+export async function feedDeliveryTally(since: Date): Promise<{
+  total: number
+  stored: number
+  failed: number
+  slowestMs: number | null
+}> {
+  const [row] = await db
+    .select({
+      total: sql<number>`count(*)::int`,
+      stored: sql<number>`count(*) filter (where ${exitFeedDeliveries.outcome} = 'STORED')::int`,
+      failed: sql<number>`count(*) filter (where ${exitFeedDeliveries.outcome} <> 'STORED')::int`,
+      slowestMs: sql<number | null>`max(${exitFeedDeliveries.durationMs})::int`,
+    })
+    .from(exitFeedDeliveries)
+    .where(gte(exitFeedDeliveries.receivedAt, since))
+
+  return row ?? { total: 0, stored: 0, failed: 0, slowestMs: null }
 }
 
 // ── Settings ────────────────────────────────────────────────────────────────
