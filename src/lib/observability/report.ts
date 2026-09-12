@@ -28,6 +28,7 @@ import {
   captureException,
   captureMessage,
   getClient,
+  metrics,
   withScope,
 } from '@sentry/tanstackstart-react'
 
@@ -113,6 +114,37 @@ export function breadcrumb(message: string, data: ReportTags = {}): void {
     addBreadcrumb({ message, level: 'info', data: compact(data) })
   } catch {
     // As above.
+  }
+}
+
+/**
+ * Records a measurement as a measurement.
+ *
+ * A duration or a web vital is a number, not a fault, and modelling one as an
+ * error event was the wrong instrument: it spends the error budget, puts a
+ * reading in the Issues stream, and keeps only the fact that a threshold was
+ * crossed rather than the value that crossed it. A distribution keeps the shape —
+ * percentiles rather than a count of complaints — and is billed separately from
+ * both errors and spans.
+ *
+ * This does not replace the threshold alarms. A metric is a chart; an event is
+ * the thing that reaches you. The alarms stay until metric alerting is confirmed
+ * on the project, and they are rare by construction, so keeping both costs almost
+ * nothing.
+ *
+ * `unit` takes Sentry's names — `millisecond`, `ratio`, `none`.
+ */
+export function reportMeasurement(
+  name: string,
+  value: number,
+  unit: string,
+  attributes: ReportTags = {},
+): void {
+  if (!enabled()) return
+  try {
+    metrics.distribution(name, value, { unit, attributes: compact(attributes) })
+  } catch {
+    // As above: measuring must not be able to fail the thing it measures.
   }
 }
 

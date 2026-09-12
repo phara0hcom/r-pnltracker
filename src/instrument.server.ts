@@ -20,7 +20,12 @@
  * spans. What time the database costs, we measure by hand.
  */
 import * as Sentry from '@sentry/tanstackstart-react'
-import { scrubBreadcrumb, scrubEvent, scrubTransaction } from '~/lib/observability/scrub'
+import {
+  scrubBreadcrumb,
+  scrubEvent,
+  scrubMetric,
+  scrubTransaction,
+} from '~/lib/observability/scrub'
 
 /*
  * An empty DSN counts as no DSN.
@@ -88,6 +93,17 @@ Sentry.init({
    * allowlist.
    */
   ignoreErrors: ['Unauthorised', 'Cross-origin request rejected'],
+
+  /*
+   * Durations are recorded as metrics, not as events.
+   *
+   * Off by default in the SDK, so without this every `metrics.distribution` call
+   * is silently a no-op. Billed separately from errors and spans, which is what
+   * makes it affordable to record *every* server function rather than only the
+   * ones that breached a threshold.
+   */
+  enableMetrics: true,
+  beforeSendMetric: (metric) => scrubMetric(metric),
 
   sendDefaultPii: false,
 })

@@ -27,11 +27,26 @@ budget in days.
 
 A 5% sample cannot be relied on to catch a regression, and `tracesSampler`
 decides at span *start*, before there is a duration to judge — so "always sample
-the slow ones" is not expressible as sampling. Two always-on alarms cover that
-instead, and both are billed as **error events** against the roomier 5,000:
+the slow ones" is not expressible as sampling.
 
-- `src/start.ts` reports any server function slower than `SLOW_SERVER_FN_MS`.
-- `src/components/VitalsAlarm.tsx` reports a web vital in the "poor" band.
+Two channels cover it, because a duration is two different things:
+
+- **Every** server-function duration and **every** web vital is recorded as a
+  `metrics.distribution`, billed separately from both errors and spans — which is
+  what makes it affordable to record all of them rather than only the bad ones. A
+  percentile over every call is what shows `getDashboard` drifting from 300ms to
+  900ms; a count of times it was already slow cannot.
+- Only a **slow** call (`SLOW_SERVER_FN_MS`) or a **poor** vital is *also* sent as
+  an error event. The metric is the chart; the event is the part that reaches
+  someone.
+
+Metrics are **off by default in the SDK**. Without `enableMetrics: true` in both
+instrument files, every `metrics.distribution` call is silently a no-op.
+
+The threshold events are kept rather than replaced: metric-based alerting has not
+been confirmed on the free plan, and a chart nobody is paged by is not an alarm.
+They are rare by construction, so keeping both costs almost nothing. If metric
+alerts do work there, the events can go.
 
 ## There are no automatic database spans
 
@@ -54,9 +69,10 @@ set to `--import=@sentry/tanstackstart-react/import`. Treat as an experiment.
 ## What may leave the machine
 
 `src/lib/observability/scrub.ts` is the single gate, and it is pure so that the
-guarantee is a unit test rather than a claim. It is wired into all three hooks —
-`beforeSend`, `beforeSendTransaction` and `beforeBreadcrumb` — because each is
-called for a different kind of payload and wiring one leaves the other two open.
+guarantee is a unit test rather than a claim. It is wired into all four hooks —
+`beforeSend`, `beforeSendTransaction`, `beforeBreadcrumb` and `beforeSendMetric` —
+because each is called for a different kind of payload and wiring one leaves the
+others open.
 
 Removed: request bodies, cookies, headers, the user object entirely, `extra`,
 `contexts.state`, and every URL query string. Kept: messages, stack traces,

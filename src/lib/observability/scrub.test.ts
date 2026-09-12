@@ -1,6 +1,13 @@
 import type { ErrorEvent } from '@sentry/tanstackstart-react'
 import { describe, expect, it } from 'vitest'
-import { redactTvSecret, scrubBreadcrumb, scrubEvent, scrubTransaction, stripQuery } from './scrub'
+import {
+  redactTvSecret,
+  scrubBreadcrumb,
+  scrubEvent,
+  scrubMetric,
+  scrubTransaction,
+  stripQuery,
+} from './scrub'
 
 /**
  * An event shaped like the ones this app actually produces: a screen request
@@ -195,5 +202,61 @@ describe('stripQuery', () => {
     const event = { url: 'https://x/positions', type: 'vital' as const }
 
     expect(stripQuery(event)).toBe(event)
+  })
+})
+
+describe('scrubMetric', () => {
+  it('redacts a secret from the metric name and its attributes', () => {
+    const metric = scrubMetric({
+      name: 'webhook./api/tv/8f3a9c2b1d4e5f60',
+      value: 1234,
+      type: 'distribution',
+      unit: 'millisecond',
+      attributes: { serverFn: 'getDashboard', path: '/api/tv/8f3a9c2b1d4e5f60' },
+    })
+
+    expect(metric.name).toBe('webhook./api/tv/[redacted]')
+    expect(metric.attributes?.path).toBe('/api/tv/[redacted]')
+  })
+
+  it('over-redacts a dotted suffix rather than risk under-redacting', () => {
+    /*
+     * `[^/?#\s]+` does not stop at a dot, because a dot is an ordinary character
+     * in a URL path segment and stopping there would leave the tail of a secret
+     * exposed. In a *metric name* that means a suffix after the secret is eaten
+     * too. That is the right direction to be wrong in, and it is asserted so the
+     * behaviour is a decision rather than a surprise.
+     */
+    expect(redactTvSecret('webhook./api/tv/abc123.duration')).toBe('webhook./api/tv/[redacted]')
+  })
+
+  it('leaves the reading itself alone', () => {
+    // The value and unit are the entire point of a measurement.
+    const metric = scrubMetric({
+      name: 'web_vital.lcp',
+      value: 4200,
+      type: 'distribution',
+      unit: 'millisecond',
+      attributes: { vital: 'LCP', rating: 'poor', navigationType: 'navigate' },
+    })
+
+    expect(metric.value).toBe(4200)
+    expect(metric.unit).toBe('millisecond')
+    expect(metric.attributes).toEqual({
+      vital: 'LCP',
+      rating: 'poor',
+      navigationType: 'navigate',
+    })
+  })
+
+  it('passes through non-string attribute values untouched', () => {
+    const metric = scrubMetric({
+      name: 'server_fn.duration',
+      value: 12,
+      type: 'distribution',
+      attributes: { durationMs: 12, cached: false },
+    })
+
+    expect(metric.attributes).toEqual({ durationMs: 12, cached: false })
   })
 })

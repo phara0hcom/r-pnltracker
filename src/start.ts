@@ -72,6 +72,25 @@ const timing = createMiddleware({ type: 'function' }).server(async ({ next, serv
     return await next()
   } finally {
     const durationMs = Math.round(performance.now() - startedAt)
+    /*
+     * Every call is measured; only a slow one is announced.
+     *
+     * The distribution is billed as a metric rather than against the 10,000
+     * spans, which is what makes it affordable to record all of them — and a
+     * percentile over every call is the thing that shows `getDashboard` drifting
+     * from 300ms to 900ms. The threshold event below cannot: it says only that a
+     * line was crossed, and says nothing at all until it is.
+     */
+    try {
+      const { reportMeasurement } = await import('~/lib/observability/report')
+      reportMeasurement('server_fn.duration', durationMs, 'millisecond', {
+        serverFn: serverFnMeta.name,
+        filename: serverFnMeta.filename,
+      })
+    } catch {
+      // See below — this is a `finally`.
+    }
+
     if (durationMs > SLOW_SERVER_FN_MS) {
       /*
        * Wrapped because this is a `finally`.

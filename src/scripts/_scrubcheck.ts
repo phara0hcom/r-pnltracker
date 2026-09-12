@@ -12,7 +12,12 @@
  * Run: `npx tsx --env-file=.env src/scripts/_scrubcheck.ts`
  */
 import * as Sentry from '@sentry/tanstackstart-react'
-import { scrubBreadcrumb, scrubEvent, scrubTransaction } from '~/lib/observability/scrub'
+import {
+  scrubBreadcrumb,
+  scrubEvent,
+  scrubMetric,
+  scrubTransaction,
+} from '~/lib/observability/scrub'
 
 const parts = {
   email: ['tamer', '@', 'example', '.com'].join(''),
@@ -35,6 +40,8 @@ Sentry.init({
   integrations: (defaults) => defaults.filter((i) => i.name !== 'Console'),
   ignoreErrors: ['Unauthorised', 'Cross-origin request rejected'],
   sendDefaultPii: false,
+  enableMetrics: true,
+  beforeSendMetric: (metric) => scrubMetric(metric),
   transport: () => ({
     send: (envelope: unknown) => {
       sent.push(envelope)
@@ -81,6 +88,12 @@ Sentry.withScope((scope) => {
 Sentry.captureException(new Error('Unauthorised'))
 Sentry.captureException(new Error('Cross-origin request rejected'))
 
+// A measurement, through the same gate, with a secret smuggled into its attributes.
+Sentry.metrics.distribution('server_fn.duration', 1234, {
+  unit: 'millisecond',
+  attributes: { serverFn: 'getDashboard', probe: `/api/tv/${parts.secret}` },
+})
+
 await Sentry.flush(2000)
 
 const serialised = JSON.stringify(sent)
@@ -96,6 +109,24 @@ const forbidden: Record<string, string> = {
 }
 
 console.log(`envelopes captured: ${String(sent.length)}\n`)
+// The metric envelope item is not plain JSON at the top level, so inspect the
+// item payload rather than substring-searching the serialised envelope.
+interface MetricItem { items?: { name?: string; attributes?: Record<string, unknown> }[] }
+const metricPayloads: MetricItem[] = []
+for (const envelope of sent as [unknown, [{ type?: string }, MetricItem][]][]) {
+  for (const [header, payload] of envelope[1]) {
+    if (header.type === 'trace_metric') metricPayloads.push(payload)
+  }
+}
+const metricJson = JSON.stringify(metricPayloads)
+console.log(`metric items on the wire: ${String(metricPayloads[0]?.items?.length ?? 0)}`)
+console.log(`  name: ${JSON.stringify(metricPayloads[0]?.items?.[0]?.name)}`)
+console.log(
+  `  attributes scrubbed: ${metricJson.includes(parts.secret) ? 'NO — secret in attributes' : 'yes'}`,
+)
+console.log(
+  `  redaction present:   ${metricJson.includes('[redacted]') ? 'yes' : 'no marker found'}\n`,
+)
 let leaked = 0
 for (const [label, needle] of Object.entries(forbidden)) {
   const at = serialised.indexOf(needle)

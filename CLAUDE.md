@@ -202,7 +202,8 @@ rationale.
   same contract `lib/prices/providers.ts` has: reporting a failure must not become
   one, least of all on the TradingView route where a 5xx is retried.
 - **Everything reported passes through `src/lib/observability/scrub.ts`**, wired
-  into all three hooks — `beforeSend`, `beforeSendTransaction`, `beforeBreadcrumb`.
+  into all four hooks — `beforeSend`, `beforeSendTransaction`, `beforeBreadcrumb`
+  and `beforeSendMetric`.
   No bodies, cookies, headers, user, `extra`, or URL query strings (filter state
   describes the holdings). The TradingView secret is in the URL *path*, so it is
   redacted by path segment — Sentry names transactions after the URL and it would
@@ -216,9 +217,10 @@ rationale.
 - **There are no automatic database spans.** Nitro inlines `pg`, so OpenTelemetry
   has nothing to patch. Database and engine time is measured by hand in
   `src/server/engine.ts`; if you want a new hot path visible, add the span.
-- Tracing is sampled at 5% to fit 10,000 spans/month. The guarantee that a slow
-  call is *never* missed is the threshold alarm in `src/start.ts`, billed as an
-  error instead. Web vitals stay in Vercel Speed Insights; Sentry only gets the
-  ones in the "poor" band.
+- Tracing is sampled at 5% to fit 10,000 spans/month. Durations are **not** spans:
+  every server function and every web vital is a `metrics.distribution`, which is
+  billed separately — and metrics are off unless `enableMetrics: true` is set in
+  both instrument files. The threshold alarms in `src/start.ts` and `VitalsAlarm`
+  stay as error events on top, because a chart does not page anyone.
 
 `PLAN.md` is the original design document with the full rationale and validation strategy.

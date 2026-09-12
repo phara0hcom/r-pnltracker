@@ -31,7 +31,7 @@
  * both hooks pass anyway.
  */
 
-import type { Breadcrumb, Event } from '@sentry/tanstackstart-react'
+import type { Breadcrumb, Event, Metric } from '@sentry/tanstackstart-react'
 
 /** A server function slower than this is reported, not merely sampled. */
 export const SLOW_SERVER_FN_MS = 2000
@@ -177,6 +177,30 @@ export function scrubBreadcrumb(crumb: Breadcrumb): Breadcrumb {
   if (scrubbed.data) {
     const url = scrubUrl(scrubbed.data.url)
     scrubbed.data = url === undefined ? scrubbed.data : { ...scrubbed.data, url }
+  }
+
+  return scrubbed
+}
+
+/**
+ * The fourth hook.
+ *
+ * Metric names and attributes are written by this app rather than assembled by
+ * the SDK, so there is far less here to go wrong than in an event — but that was
+ * equally true of `request.url` before `query_string` turned up beside it. A
+ * measurement passes the same gate as everything else, and a name or attribute
+ * that ever carries a webhook path is redacted like any other.
+ */
+export function scrubMetric(metric: Metric): Metric {
+  const scrubbed: Metric = { ...metric, name: redactTvSecret(metric.name) }
+
+  if (scrubbed.attributes) {
+    scrubbed.attributes = Object.fromEntries(
+      Object.entries(scrubbed.attributes).map(([key, value]) => [
+        key,
+        typeof value === 'string' ? redactTvSecret(value) : value,
+      ]),
+    )
   }
 
   return scrubbed

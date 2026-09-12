@@ -16,7 +16,7 @@
  * phone, which until now showed `ErrorPage` and was forgotten.
  */
 import * as Sentry from '@sentry/tanstackstart-react'
-import { scrubBreadcrumb, scrubEvent } from '~/lib/observability/scrub'
+import { scrubBreadcrumb, scrubEvent, scrubMetric } from '~/lib/observability/scrub'
 
 /*
  * `VITE_` prefix is what lets this reach the browser at all, and it is inlined at
@@ -36,6 +36,10 @@ Sentry.init({
 
   beforeSend: (event) => scrubEvent(event),
   beforeBreadcrumb: (crumb) => scrubBreadcrumb(crumb),
+
+  // Web vitals are recorded as metrics — see `VitalsAlarm`. Off by default.
+  enableMetrics: true,
+  beforeSendMetric: (metric) => scrubMetric(metric),
 
   sendDefaultPii: false,
 })
