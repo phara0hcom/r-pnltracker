@@ -97,8 +97,38 @@ export function scrubEvent<E extends Event>(event: E): E {
   const scrubbed = rest as E
 
   if (scrubbed.request) {
-    const { data: _data, cookies: _cookies, headers: _headers, ...request } = scrubbed.request
+    /*
+     * `query_string` and `env` are separate fields, not parts of `url`.
+     *
+     * Stripping the query from `url` alone left the filter state intact in
+     * `query_string` — the exact thing this file exists to remove — and `env`
+     * carries the server's environment, `DATABASE_URL` included. Both are
+     * populated by the SDK's own HTTP instrumentation rather than by us, which
+     * is why neither showed up until a probe set them deliberately.
+     */
+    const {
+      data: _data,
+      cookies: _cookies,
+      headers: _headers,
+      query_string: _queryString,
+      env: _env,
+      ...request
+    } = scrubbed.request
     scrubbed.request = { ...request, url: scrubUrl(scrubbed.request.url) }
+  }
+
+  /*
+   * `sdkProcessingMetadata` looks internal and is not: it reaches the wire
+   * verbatim, and its `normalizedRequest` holds a second, unstripped copy of the
+   * request — full URL, query string and headers.
+   *
+   * Only that key is removed. `dynamicSamplingContext` lives here too and is read
+   * when the envelope header is built, so dropping the whole object would break
+   * trace propagation to buy nothing.
+   */
+  if (scrubbed.sdkProcessingMetadata) {
+    const { normalizedRequest: _normalizedRequest, ...metadata } = scrubbed.sdkProcessingMetadata
+    scrubbed.sdkProcessingMetadata = metadata
   }
 
   if (typeof scrubbed.transaction === 'string') {

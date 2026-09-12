@@ -73,12 +73,25 @@ const timing = createMiddleware({ type: 'function' }).server(async ({ next, serv
   } finally {
     const durationMs = Math.round(performance.now() - startedAt)
     if (durationMs > SLOW_SERVER_FN_MS) {
-      const { reportWarning } = await import('~/lib/observability/report')
-      reportWarning(
-        `slow server function: ${serverFnMeta.name}`,
-        { serverFn: serverFnMeta.name, filename: serverFnMeta.filename, durationMs },
-        ['slow-server-fn', serverFnMeta.name],
-      )
+      /*
+       * Wrapped because this is a `finally`.
+       *
+       * An `await` that rejects inside `finally` does not merely fail to report —
+       * it *replaces* the exception already in flight, so a failed dynamic import
+       * would surface to the caller instead of the real error. `reportWarning`
+       * cannot throw, but `import()` can, and the whole point of this block is
+       * that measuring a request must never change its outcome.
+       */
+      try {
+        const { reportWarning } = await import('~/lib/observability/report')
+        reportWarning(
+          `slow server function: ${serverFnMeta.name}`,
+          { serverFn: serverFnMeta.name, filename: serverFnMeta.filename, durationMs },
+          ['slow-server-fn', serverFnMeta.name],
+        )
+      } catch {
+        // Nothing to do, and nothing worth losing the caller's error over.
+      }
     }
   }
 })

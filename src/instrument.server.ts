@@ -22,7 +22,17 @@
 import * as Sentry from '@sentry/tanstackstart-react'
 import { scrubBreadcrumb, scrubEvent, scrubTransaction } from '~/lib/observability/scrub'
 
-const dsn = process.env.SENTRY_DSN
+/*
+ * An empty DSN counts as no DSN.
+ *
+ * `.env.example` ships `SENTRY_DSN=""`, and an empty string is still a string —
+ * so a bare `!== undefined` read a copied template as a configured DSN and
+ * enabled the client with nowhere to send. Written out rather than with `||`
+ * because `??` would not do this and the lint rule prefers `??`: the empty-string
+ * case is the whole point, so it is worth stating.
+ */
+const configured = process.env.SENTRY_DSN?.trim()
+const dsn = configured === '' ? undefined : configured
 
 Sentry.init({
   dsn,

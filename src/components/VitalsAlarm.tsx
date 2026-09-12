@@ -27,21 +27,25 @@ export function VitalsAlarm() {
       const name = metric.name as VitalName
       if (!isPoorVital(name, metric.value)) return
 
-      void import('~/lib/observability/report').then(({ reportWarning }) => {
-        reportWarning(
-          `poor web vital: ${name}`,
-          {
-            vital: name,
-            // CLS is unitless and small; rounding it to an integer would report 0.
-            value: name === 'CLS' ? Number(metric.value.toFixed(3)) : Math.round(metric.value),
-            rating: metric.rating,
-            // The path only. `navigationType` says whether this was a fresh load
-            // or a restore, which changes what a bad LCP means.
-            navigationType: metric.navigationType,
-          },
-          ['poor-web-vital', name],
-        )
-      })
+      // `catch` below: a failed import must not become an unhandled rejection in
+      // the page, which is the opposite of what reporting is for.
+      void import('~/lib/observability/report')
+        .then(({ reportWarning }) => {
+          reportWarning(
+            `poor web vital: ${name}`,
+            {
+              vital: name,
+              // CLS is unitless and small; rounding it to an integer would report 0.
+              value: name === 'CLS' ? Number(metric.value.toFixed(3)) : Math.round(metric.value),
+              rating: metric.rating,
+              // The path only. `navigationType` says whether this was a fresh load
+              // or a restore, which changes what a bad LCP means.
+              navigationType: metric.navigationType,
+            },
+            ['poor-web-vital', name],
+          )
+        })
+        .catch(() => undefined)
     }
 
     /*

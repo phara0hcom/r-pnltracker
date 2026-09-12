@@ -77,6 +77,25 @@ Three leaks that were not obvious:
    `ignoreErrors`; without that, one crawler probing `_authed` is a burst of
    identical issues.
 
+### The request appears in four places, not one
+
+Stripping the query string from `event.request.url` removes almost none of it.
+The same data is also in:
+
+- **`request.query_string`** — a separate field, populated by the SDK's HTTP
+  instrumentation rather than by app code, which is why nothing in this repo ever
+  revealed it.
+- **`request.env`** — the server's environment, `DATABASE_URL` included.
+- **`sdkProcessingMetadata.normalizedRequest`** — a second, unstripped copy of url
+  and headers. The name suggests it is internal bookkeeping. It is not: it reaches
+  the wire verbatim. Only that one key is removed, because
+  `dynamicSamplingContext` lives beside it and the envelope header is built from it.
+
+All three were live leaks in the first version of this feature, and the
+verification script passed anyway — it only populated the fields `scrub.ts`
+already handled. It now sets them the way the SDK would, and
+`scrub.test.ts` asserts each one.
+
 ### Source code travels with the stack trace
 
 Sentry's `contextLines` integration reads the source file around every stack frame

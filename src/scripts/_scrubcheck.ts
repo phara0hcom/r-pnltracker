@@ -20,6 +20,8 @@ const parts = {
   symbol: String(8000 + 411),
   balance: String(4831200),
   costBasis: String(1200) + '.00',
+  dbUrl: ['postgresql://u', ':', 'p', '@host/db'].join(''),
+  session: Array.from({ length: 2 }, () => 'f9e8d7c6b5a49382').join(''),
 }
 
 const sent: unknown[] = []
@@ -50,6 +52,26 @@ Sentry.addBreadcrumb({
 
 Sentry.withScope((scope) => {
   scope.setUser({ id: 'usr_1', email: parts.email, username: 'tamer' })
+  /*
+   * Set the way the SDK's HTTP instrumentation would, not the way app code does.
+   * The first version of this probe only set what `scrub.ts` already handled, so
+   * it reported PASS while `query_string`, `env` and the second copy of the
+   * request inside `sdkProcessingMetadata` all went out untouched.
+   */
+  scope.addEventProcessor((event) => {
+    event.request = {
+      method: 'GET',
+      url: `https://pnl.example.com/positions?symbol=${parts.symbol}`,
+      query_string: `symbol=${parts.symbol}&account=NISA`,
+      env: { DATABASE_URL: parts.dbUrl },
+      cookies: { 'better-auth.session_token': parts.session },
+    }
+    event.sdkProcessingMetadata = {
+      ...event.sdkProcessingMetadata,
+      normalizedRequest: { url: `https://pnl.example.com/api/tv/${parts.secret}` },
+    }
+    return event
+  })
   scope.setExtra('balance', parts.balance)
   scope.setContext('state', { state: { type: 'x', value: { costBasis: parts.costBasis } } })
   scope.setTransactionName(`POST /api/tv/${parts.secret}`)
@@ -68,6 +90,9 @@ const forbidden: Record<string, string> = {
   'query string (holdings)': `symbol=${parts.symbol}`,
   'extra (balance)': parts.balance,
   'contexts.state (cost basis)': parts.costBasis,
+  'request.query_string': `symbol=${parts.symbol}&account=NISA`,
+  'request.env (DATABASE_URL)': parts.dbUrl,
+  'request.cookies (session)': parts.session,
 }
 
 console.log(`envelopes captured: ${String(sent.length)}\n`)

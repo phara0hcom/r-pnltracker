@@ -23,7 +23,9 @@ import { scrubBreadcrumb, scrubEvent } from '~/lib/observability/scrub'
  * build time — so setting it on Vercel after a deploy needs a redeploy to take
  * effect. A DSN is not a secret; it is public by design and already in the bundle.
  */
-const dsn = import.meta.env.VITE_SENTRY_DSN
+const configured = import.meta.env.VITE_SENTRY_DSN?.trim()
+// An empty string is still a string — see `instrument.server.ts`.
+const dsn = configured === '' ? undefined : configured
 
 Sentry.init({
   dsn,

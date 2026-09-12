@@ -15,6 +15,8 @@ function realisticEvent(): ErrorEvent {
     request: {
       method: 'POST',
       url: 'https://pnl.example.com/positions?symbol=8411&from=2026-01-01&account=NISA',
+      query_string: 'symbol=8411&from=2026-01-01&account=NISA',
+      env: { DATABASE_URL: 'postgresql://user:pass@host/db' },
       data: { symbol: '8411', price: '1234.5', quantity: '300' },
       cookies: { 'better-auth.session_token': 'abc123' },
       headers: {
@@ -29,6 +31,13 @@ function realisticEvent(): ErrorEvent {
       trace: { trace_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', span_id: 'abc', op: 'function.server' },
     },
     tags: { fn: 'getPositions', accountType: 'NISA', durationMs: 2400 },
+    sdkProcessingMetadata: {
+      normalizedRequest: {
+        url: 'https://pnl.example.com/positions?symbol=8411',
+        headers: { cookie: 'better-auth.session_token=abc123' },
+      },
+      dynamicSamplingContext: { trace_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+    },
   }
 }
 
@@ -66,6 +75,29 @@ describe('scrubEvent', () => {
     const event = scrubEvent(realisticEvent())
 
     expect(event.request?.url).toBe('https://pnl.example.com/positions')
+  })
+
+  it('also removes query_string, which is a separate field from url', () => {
+    // Stripping the query from `url` alone left the filter state fully intact
+    // here. The SDK's HTTP instrumentation populates it, not us, so nothing in
+    // the app's own code ever revealed the gap.
+    expect(scrubEvent(realisticEvent()).request?.query_string).toBeUndefined()
+  })
+
+  it('removes request.env, which carries DATABASE_URL on the server', () => {
+    expect(scrubEvent(realisticEvent()).request?.env).toBeUndefined()
+  })
+
+  it('removes the second copy of the request hidden in sdkProcessingMetadata', () => {
+    // `sdkProcessingMetadata` is not internal-only: it reaches the wire verbatim,
+    // and `normalizedRequest` is an unstripped url + headers.
+    const event = scrubEvent(realisticEvent())
+
+    expect(event.sdkProcessingMetadata?.normalizedRequest).toBeUndefined()
+    // The sampling context must survive, or trace propagation breaks.
+    expect(event.sdkProcessingMetadata?.dynamicSamplingContext).toEqual({
+      trace_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    })
   })
 
   it('keeps the domain shape a failure has to be debugged from', () => {
