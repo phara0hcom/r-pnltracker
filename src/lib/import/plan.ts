@@ -10,8 +10,36 @@
  * The ordinal is safe across partial re-exports because the hashed key includes
  * the trade date — any date-filtered export contains either all executions of a
  * given key or none, so the ordinals it assigns match those of the full export.
+ *
+ * ## Restatements
+ *
+ * The trade date is in that hash, and for US trades Rakuten changes it. An
+ * export taken before settlement dates the fill by its *US* trading day; once
+ * it settles, later exports date the same fill by the JST day it executed on,
+ * one day later, and carry the settlement FX rate rather than the provisional
+ * one. Three fills were affected in production (CAG, BABA, SEDG, all 2026-09):
+ * the hash no longer matched, so the sell was inserted a second time and the
+ * engine warned `close with no open position` on the copy. Had the pool been
+ * larger than the fill, both copies would have booked and realized P&L would
+ * have been double-counted instead.
+ *
+ * So `planImport` makes a second pass. A row whose hash is unknown, but which
+ * matches a stored row on everything the broker does *not* restate — symbol,
+ * account, side, quantity, price and 受渡日 — and differs only by a day in the
+ * trade date, is the same execution. Settlement is T+n business days from the
+ * trade date, so two genuinely distinct fills of one instrument cannot share a
+ * 受渡日; equal 受渡日 with a different 約定日 is a restatement by construction.
+ * The later date wins, being the one Rakuten settles on and reports on the
+ * 年間取引報告書; an older export arriving afterwards is skipped rather than
+ * allowed to revert the row.
  */
-import type { NormalizedDividend, NormalizedTrade, ParseResult } from '../domain/types'
+import type {
+  AccountType,
+  NormalizedDividend,
+  NormalizedTrade,
+  ParseResult,
+  TradeSide,
+} from '../domain/types'
 import { decodeShiftJis } from './decode'
 import { detectFormat } from './tradeHistory'
 
@@ -41,10 +69,44 @@ export function orderFilesForImport<T extends { bytes: Uint8Array }>(files: T[])
     .map(({ file }) => file)
 }
 
+/**
+ * A stored trade, as the planner needs to see it.
+ *
+ * Deliberately not the database row type: `src/lib/` stays DB-free, and the
+ * planner needs only identity — enough to recognise the same execution
+ * arriving back under a different 約定日.
+ */
+export interface StoredTrade {
+  id: string
+  sourceRowHash: string
+  symbol: string
+  accountType: AccountType
+  side: TradeSide
+  /** Canonical `Decimal` notation, so `250` and `250.00000000` compare equal. */
+  quantity: string
+  unitPrice: string
+  tradeDate: string
+  settleDate: string
+  /** A hand-correction outranks the export; an import must not revert it. */
+  isEdited: boolean
+  /** Manual rows are never matched, overwritten, or removed by an import. */
+  origin: 'IMPORT' | 'MANUAL'
+}
+
+/** A stored row the broker restated — updated in place rather than inserted. */
+export interface RestatedTrade {
+  /** The stored row's id. Updating in place keeps its memo and journal. */
+  id: string
+  previousTradeDate: string
+  trade: NormalizedTrade
+}
+
 export interface ImportPlan {
   /** Rows not already stored — these would be inserted. */
   newTrades: NormalizedTrade[]
   newDividends: NormalizedDividend[]
+  /** Stored rows the file re-dates — these would be updated, not inserted. */
+  restatedTrades: RestatedTrade[]
   /** Rows already stored, skipped. */
   duplicateTrades: number
   duplicateDividends: number
@@ -53,30 +115,103 @@ export interface ImportPlan {
 }
 
 /**
+ * Everything about a fill that a restatement leaves alone.
+ *
+ * 受渡日 is in the key rather than 約定日 precisely because it is the half that
+ * survives: the settlement date is fixed at execution and never moves, while
+ * the trade date is rewritten from the US day to the JST one.
+ */
+function executionKey(row: {
+  symbol: string
+  accountType: AccountType
+  side: TradeSide
+  quantity: string
+  unitPrice: string
+  settleDate: string
+}): string {
+  return [row.symbol, row.accountType, row.side, row.quantity, row.unitPrice, row.settleDate].join(
+    '\0',
+  )
+}
+
+const epochDays = (iso: string): number => Math.floor(Date.parse(`${iso}T00:00:00Z`) / 86_400_000)
+
+/**
  * Compare a parse result against what is already stored.
  *
- * `existingTradeHashes` / `existingDividendHashes` come from the DB's unique
- * index on `sourceRowHash`, so this mirrors exactly what the database would
- * accept — the preview cannot disagree with the commit.
+ * `stored` / `existingDividendHashes` come from the DB, so this mirrors exactly
+ * what the database would accept — the preview cannot disagree with the commit.
  */
 export function planImport(
   parsed: ParseResult,
-  existingTradeHashes: ReadonlySet<string>,
+  stored: readonly StoredTrade[],
   existingDividendHashes: ReadonlySet<string> = new Set(),
 ): ImportPlan {
-  const seenTrades = new Set(existingTradeHashes)
+  const storedByHash = new Map(stored.map((row) => [row.sourceRowHash, row]))
+  const seenTrades = new Set(storedByHash.keys())
   const newTrades: NormalizedTrade[] = []
+  const restatedTrades: RestatedTrade[] = []
   let duplicateTrades = 0
+
+  // Pass one, on the hash alone. A stored row matched here is spoken for, so
+  // pass two cannot also claim it as the restatement of some other row.
+  const unmatched: NormalizedTrade[] = []
+  const claimed = new Set<string>()
 
   for (const trade of parsed.trades) {
     // Guards both against re-importing a stored row and against the same row
     // appearing twice within one upload batch.
     if (seenTrades.has(trade.sourceRowHash)) {
       duplicateTrades++
+      const row = storedByHash.get(trade.sourceRowHash)
+      if (row) claimed.add(row.id)
       continue
     }
     seenTrades.add(trade.sourceRowHash)
-    newTrades.push(trade)
+    unmatched.push(trade)
+  }
+
+  // Pass two, on the fill itself. Candidates are consumed as they are paired
+  // off, so an order filled as several identical executions still matches
+  // one-for-one instead of collapsing onto whichever stored row comes first.
+  const candidates = new Map<string, StoredTrade[]>()
+  for (const row of stored) {
+    if (claimed.has(row.id) || row.origin === 'MANUAL') continue
+    const key = executionKey(row)
+    const bucket = candidates.get(key)
+    if (bucket) bucket.push(row)
+    else candidates.set(key, [row])
+  }
+
+  for (const trade of unmatched) {
+    const bucket = candidates.get(
+      executionKey({
+        symbol: trade.symbol,
+        accountType: trade.accountType,
+        side: trade.side,
+        quantity: trade.quantity.toFixed(),
+        unitPrice: trade.unitPrice.toFixed(),
+        settleDate: trade.settleDate,
+      }),
+    )
+    // Exactly one day, never zero: same trade date with a different hash is a
+    // further execution of a split order, which must be inserted, not merged.
+    const index =
+      bucket?.findIndex((row) => Math.abs(epochDays(trade.tradeDate) - epochDays(row.tradeDate)) === 1) ??
+      -1
+    if (index < 0) {
+      newTrades.push(trade)
+      continue
+    }
+
+    const [row] = bucket!.splice(index, 1)
+    if (row!.isEdited || trade.tradeDate < row!.tradeDate) {
+      // An older export, or a row the user has corrected by hand. Either way
+      // what is stored is the better answer; count it as already imported.
+      duplicateTrades++
+      continue
+    }
+    restatedTrades.push({ id: row!.id, previousTradeDate: row!.tradeDate, trade })
   }
 
   const seenDividends = new Set(existingDividendHashes)
@@ -95,6 +230,7 @@ export function planImport(
   return {
     newTrades,
     newDividends,
+    restatedTrades,
     duplicateTrades,
     duplicateDividends,
     errors: parsed.errors,
@@ -107,6 +243,7 @@ export function describePlan(plan: ImportPlan): string {
     `${plan.newTrades.length} new trade${plan.newTrades.length === 1 ? '' : 's'}`,
   ]
   if (plan.newDividends.length) parts.push(`${plan.newDividends.length} new dividends`)
+  if (plan.restatedTrades.length) parts.push(`${plan.restatedTrades.length} restated by the broker`)
   if (plan.duplicateTrades) parts.push(`${plan.duplicateTrades} already imported`)
   if (plan.duplicateDividends) parts.push(`${plan.duplicateDividends} dividends already imported`)
   if (plan.errors.length) parts.push(`${plan.errors.length} unreadable rows`)

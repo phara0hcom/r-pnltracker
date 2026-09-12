@@ -8,8 +8,9 @@
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, basename } from 'node:path'
-import { emptyParseResult, type ParseResult } from '../domain/types'
+import { emptyParseResult, type NormalizedTrade, type ParseResult } from '../domain/types'
 import { decodeShiftJis } from './decode'
+import type { StoredTrade } from './plan'
 import { parseTorizan } from './torizan'
 import { parseTradeHistory } from './tradeHistory'
 
@@ -75,4 +76,32 @@ export function loadAllStatements(): ParseResult {
     parseTorizan(readShiftJisFile(path), basename(path)),
   )
   return dedupeTrades(mergeResults(results))
+}
+
+/**
+ * Parsed trades as the database would hand them back to `planImport`.
+ *
+ * Tests use this rather than a bare set of hashes so the stored side carries
+ * real quantities and settlement dates — which is what the restatement pass
+ * matches on, and therefore the only way a test can show it does not fire on
+ * the genuine history.
+ */
+export function asStored(
+  trades: readonly NormalizedTrade[],
+  overrides: Partial<StoredTrade> = {},
+): StoredTrade[] {
+  return trades.map((trade, index) => ({
+    id: `stored-${String(index)}`,
+    sourceRowHash: trade.sourceRowHash,
+    symbol: trade.symbol,
+    accountType: trade.accountType,
+    side: trade.side,
+    quantity: trade.quantity.toFixed(),
+    unitPrice: trade.unitPrice.toFixed(),
+    tradeDate: trade.tradeDate,
+    settleDate: trade.settleDate,
+    isEdited: false,
+    origin: 'IMPORT' as const,
+    ...overrides,
+  }))
 }

@@ -63,6 +63,8 @@ export interface PreviewSummary {
   summary: string
   newTrades: number
   newDividends: number
+  /** Stored rows Rakuten re-dated — updated in place, not added. */
+  restated: number
   duplicates: number
   snapshots: number
   cash: number
@@ -100,6 +102,7 @@ export const previewFiles = createServerFn({ method: 'POST' })
         summary: preview.summary,
         newTrades: preview.plan.newTrades.length,
         newDividends: preview.plan.newDividends.length,
+        restated: preview.plan.restatedTrades.length,
         duplicates: preview.plan.duplicateTrades + preview.plan.duplicateDividends,
         snapshots: preview.snapshotCount,
         cash: preview.cashCount,
@@ -112,6 +115,7 @@ export const previewFiles = createServerFn({ method: 'POST' })
 export interface CommitSummary {
   filename: string
   tradesInserted: number
+  tradesRestated: number
   dividendsInserted: number
   snapshotsInserted: number
   duplicatesSkipped: number
@@ -132,6 +136,7 @@ export const commitFiles = createServerFn({ method: 'POST' })
       out.push({
         filename: file.filename,
         tradesInserted: result.tradesInserted,
+        tradesRestated: result.tradesRestated,
         dividendsInserted: result.dividendsInserted,
         snapshotsInserted: result.snapshotsInserted,
         duplicatesSkipped: result.duplicatesSkipped,

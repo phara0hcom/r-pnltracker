@@ -8,7 +8,7 @@
 import Decimal from 'decimal.js'
 import { describe, expect, it } from 'vitest'
 import { emptyParseResult } from '../domain/types'
-import { loadAllTrades } from '../import/loadFixtures'
+import { asStored, loadAllTrades } from '../import/loadFixtures'
 import { planImport } from '../import/plan'
 import { runEngine } from '../pnl/engine'
 import {
@@ -153,7 +153,7 @@ describe('interaction with CSV import', () => {
     // Manual trade already stored; importing the full CSV must not remove,
     // duplicate, or match it.
     const manual = buildManualTrade(parse())
-    const stored = new Set([manual.sourceRowHash])
+    const stored = asStored([manual], { origin: 'MANUAL' })
 
     const plan = planImport(imported, stored)
     expect(plan.newTrades).toHaveLength(315)
@@ -171,7 +171,7 @@ describe('interaction with CSV import', () => {
     expect(edited.quantity.toFixed()).toBe('999')
 
     // Re-importing the CSV therefore skips the row rather than reverting it.
-    const stored = new Set(imported.trades.map((trade) => trade.sourceRowHash))
+    const stored = asStored(imported.trades)
     const plan = planImport(loadAllTrades(), stored)
     expect(plan.newTrades).toHaveLength(0)
   })
@@ -180,7 +180,7 @@ describe('interaction with CSV import', () => {
     // Soft delete: the row stays with `deletedAt` set, so its hash is still
     // present and the importer recognises it as already seen.
     const deleted = imported.trades[5]!
-    const stored = new Set(imported.trades.map((trade) => trade.sourceRowHash))
+    const stored = asStored(imported.trades)
     const plan = planImport(loadAllTrades(), stored)
     expect(plan.newTrades.some((trade) => trade.sourceRowHash === deleted.sourceRowHash)).toBe(false)
   })
@@ -188,9 +188,7 @@ describe('interaction with CSV import', () => {
   it('would resurrect a hard-deleted row — the reason deletion is soft', () => {
     // Demonstrates the failure mode the tombstone prevents.
     const hardDeleted = imported.trades[5]!
-    const stored = new Set(
-      imported.trades.filter((trade) => trade !== hardDeleted).map((trade) => trade.sourceRowHash),
-    )
+    const stored = asStored(imported.trades.filter((trade) => trade !== hardDeleted))
     const plan = planImport(loadAllTrades(), stored)
     expect(plan.newTrades.some((trade) => trade.sourceRowHash === hardDeleted.sourceRowHash)).toBe(true)
   })

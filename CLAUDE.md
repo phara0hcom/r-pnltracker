@@ -157,6 +157,18 @@ Dedupe is `sourceRowHash`, unique per `(userId, sourceRowHash)`. The hash includ
 occurrence ordinal** because one order is often filled as several byte-identical executions —
 without it, real trades silently collapse into one. Re-importing an overlapping export is safe.
 
+**Rakuten restates US fills after settlement**, and the trade date is in that hash. A US trade
+exported before it settles is dated by its *US* trading day and priced at a provisional FX rate;
+later exports date the same fill by the JST day, one later, and carry the settlement rate. The
+hash therefore stops matching and the fill is stored twice — which is how CAG, BABA and SEDG
+each ended up with two identical sells in September 2026, and how the engine came to warn
+`close with no open position` on the copy. `planImport` makes a second pass for this: a row
+whose hash is unknown but which matches a stored row on symbol, account, side, quantity, price
+and **受渡日**, differing by exactly one day in 約定日, is the same execution and *updates* that
+row rather than being inserted. 受渡日 is the anchor because settlement is T+n business days
+from the trade date, so two genuinely distinct fills cannot share one. The later date wins; an
+older export arriving afterwards is skipped rather than allowed to revert the row.
+
 Deletes are soft (`deletedAt`), because a hard delete would let the next import resurrect the
 row via a hash that no longer exists. Manual trades are salted `MANUAL` so an import can never
 match one; editing an imported trade keeps its original hash so a re-import does not revert

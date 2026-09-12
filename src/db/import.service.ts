@@ -14,11 +14,17 @@ import * as Sentry from '@sentry/tanstackstart-react'
 import { and, eq, sql } from 'drizzle-orm'
 import { emptyParseResult, type ParseResult } from '../lib/domain/types'
 import { decodeShiftJis } from '../lib/import/decode'
-import { describePlan, planImport, type ImportPlan } from '../lib/import/plan'
+import {
+  describePlan,
+  planImport,
+  type ImportPlan,
+  type StoredTrade,
+} from '../lib/import/plan'
 import { parseTorizan } from '../lib/import/torizan'
 import { detectFormat, parseTradeHistory } from '../lib/import/tradeHistory'
 import { attributeDividends } from '../lib/tax/dividends'
 import {
+  dec,
   fromTradeRow,
   idFor,
   toCashRow,
@@ -78,17 +84,46 @@ export function parseFile(filename: string, bytes: Uint8Array): ParseResult {
   }
 }
 
-/** Hashes already stored, tombstones included, so deletions are respected. */
-async function existingHashes(userId: string): Promise<{
-  trades: Set<string>
+/**
+ * What is already stored, tombstones included, so deletions are respected.
+ *
+ * Trades come back as whole identities rather than bare hashes because the
+ * planner has to recognise a fill Rakuten has re-dated, whose hash therefore
+ * no longer matches. See the restatement note in `lib/import/plan.ts`.
+ */
+async function existingRows(userId: string): Promise<{
+  trades: StoredTrade[]
   dividends: Set<string>
 }> {
   const [tradeRows, dividendRows] = await Promise.all([
-    db.select({ h: trades.sourceRowHash }).from(trades).where(eq(trades.userId, userId)),
+    db
+      .select({
+        id: trades.id,
+        sourceRowHash: trades.sourceRowHash,
+        symbol: instruments.symbol,
+        accountType: trades.accountType,
+        side: trades.side,
+        quantity: trades.quantity,
+        unitPrice: trades.unitPrice,
+        tradeDate: trades.tradeDate,
+        settleDate: trades.settleDate,
+        isEdited: trades.isEdited,
+        origin: trades.origin,
+      })
+      .from(trades)
+      .innerJoin(instruments, eq(trades.instrumentId, instruments.id))
+      .where(eq(trades.userId, userId)),
     db.select({ h: dividends.sourceRowHash }).from(dividends).where(eq(dividends.userId, userId)),
   ])
   return {
-    trades: new Set(tradeRows.map((row) => row.h)),
+    // `numeric(24,8)` comes back as `250.00000000` while the parser's Decimal
+    // renders `250`. Both sides are normalised here or the planner's key never
+    // matches and every restatement looks like a new trade.
+    trades: tradeRows.map((row) => ({
+      ...row,
+      quantity: dec(row.quantity).toFixed(),
+      unitPrice: dec(row.unitPrice).toFixed(),
+    })),
     dividends: new Set(dividendRows.map((row) => row.h)),
   }
 }
@@ -112,12 +147,13 @@ export async function previewImport(
       const parsed = Sentry.startSpan({ name: 'parseFile', op: 'import.parse' }, () =>
         parseFile(filename, bytes),
       )
-      const existing = await Sentry.startSpan({ name: 'existingHashes', op: 'db.query' }, () =>
-        existingHashes(userId),
+      const existing = await Sentry.startSpan({ name: 'existingRows', op: 'db.query' }, () =>
+        existingRows(userId),
       )
       const plan = planImport(parsed, existing.trades, existing.dividends)
 
       span.setAttribute('newTrades', plan.newTrades.length)
+      span.setAttribute('restatedTrades', plan.restatedTrades.length)
       span.setAttribute('duplicateTrades', plan.duplicateTrades)
 
       return {
@@ -135,6 +171,8 @@ export async function previewImport(
 export interface ImportResult {
   batchId: string
   tradesInserted: number
+  /** Stored rows the broker re-dated, updated in place rather than added. */
+  tradesRestated: number
   dividendsInserted: number
   snapshotsInserted: number
   cashInserted: number
@@ -157,8 +195,8 @@ export async function commitImport(
   const parsed = Sentry.startSpan({ name: 'parseFile', op: 'import.parse' }, () =>
     parseFile(filename, bytes),
   )
-  const existing = await Sentry.startSpan({ name: 'existingHashes', op: 'db.query' }, () =>
-    existingHashes(userId),
+  const existing = await Sentry.startSpan({ name: 'existingRows', op: 'db.query' }, () =>
+    existingRows(userId),
   )
   const plan = planImport(parsed, existing.trades, existing.dividends)
 
@@ -281,6 +319,52 @@ export async function commitImport(
         })
     }
 
+    /*
+     * Fills the broker re-dated: updated in place, never inserted.
+     *
+     * `onConflictDoUpdate` above cannot reach these — its target is the hash,
+     * and the hash is exactly what a restatement changes. The new hash is
+     * written along with the rest so re-importing the *same* file afterwards
+     * is an ordinary duplicate, and the row id is deliberately left alone so
+     * its memo, journal and any open URL survive.
+     *
+     * `isEdited` is re-checked in the WHERE rather than trusted from the plan:
+     * the plan was made outside this transaction, and a hand-correction made
+     * in between must still win.
+     */
+    for (const restated of plan.restatedTrades) {
+      const row = toTradeRow({
+        userId,
+        trade: restated.trade,
+        importBatchId: batchId,
+        origin: 'IMPORT',
+      })
+      await tx
+        .update(trades)
+        .set({
+          tradeDate: row.tradeDate,
+          settleDate: row.settleDate,
+          fee: row.fee,
+          feeTax: row.feeTax,
+          otherCost: row.otherCost,
+          // The settlement rate, replacing the provisional one the
+          // pre-settlement export carried — and with it the JPY cost basis.
+          fxRate: row.fxRate,
+          grossAmount: row.grossAmount,
+          netAmount: row.netAmount,
+          netAmountJpy: row.netAmountJpy,
+          pointsUsed: row.pointsUsed,
+          isSettled: row.isSettled,
+          sourceRowHash: row.sourceRowHash,
+          sourceFile: row.sourceFile,
+          importBatchId: batchId,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(trades.userId, userId), eq(trades.id, restated.id), eq(trades.isEdited, false)),
+        )
+    }
+
     // Attribution needs every trade, not just this file's, to resolve which
     // account held the units on the pay date.
     if (plan.newDividends.length) {
@@ -322,6 +406,7 @@ export async function commitImport(
     return {
       batchId,
       tradesInserted: plan.newTrades.length,
+      tradesRestated: plan.restatedTrades.length,
       dividendsInserted: plan.newDividends.length,
       snapshotsInserted: parsed.snapshots.length,
       cashInserted: parsed.cashMovements.length,
