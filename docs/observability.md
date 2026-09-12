@@ -32,10 +32,17 @@ the slow ones" is not expressible as sampling.
 Two channels cover it, because a duration is two different things:
 
 - **Every** server-function duration and **every** web vital is recorded as a
-  `metrics.distribution`, billed separately from both errors and spans — which is
-  what makes it affordable to record all of them rather than only the bad ones. A
-  percentile over every call is what shows `getDashboard` drifting from 300ms to
-  900ms; a count of times it was already slow cannot.
+  `metrics.distribution`. A percentile over every call is what shows
+  `getDashboard` drifting from 300ms to 900ms; a count of the times it was already
+  slow cannot.
+
+  Recording all of them is affordable, but **not** because they are aggregated —
+  they are not. 500 `distribution` calls with an identical name and attributes
+  produce 500 items on the wire, measured: one batched envelope, ~0.55 KB per
+  item. It is affordable because the metrics quota is counted in **bytes**, not
+  events, and one user's traffic sits orders of magnitude under it. If this app
+  ever had real traffic, that arithmetic would need redoing — the volume scales
+  1:1 with calls.
 - Only a **slow** call (`SLOW_SERVER_FN_MS`) or a **poor** vital is *also* sent as
   an error event. The metric is the chart; the event is the part that reaches
   someone.

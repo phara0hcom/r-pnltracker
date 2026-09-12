@@ -217,10 +217,12 @@ rationale.
 - **There are no automatic database spans.** Nitro inlines `pg`, so OpenTelemetry
   has nothing to patch. Database and engine time is measured by hand in
   `src/server/engine.ts`; if you want a new hot path visible, add the span.
-- Tracing is sampled at 5% to fit 10,000 spans/month. Durations are **not** spans:
-  every server function and every web vital is a `metrics.distribution`, which is
-  billed separately — and metrics are off unless `enableMetrics: true` is set in
-  both instrument files. The threshold alarms in `src/start.ts` and `VitalsAlarm`
-  stay as error events on top, because a chart does not page anyone.
+- Tracing is sampled at 5% to fit the span quota. Durations are **not** spans:
+  every server function and every web vital is a `metrics.distribution`, and
+  metrics are off unless `enableMetrics: true` is set in both instrument files.
+  Metric items are *not* aggregated — volume scales 1:1 with calls, and it fits
+  only because that quota is counted in bytes. The threshold alarms in
+  `src/start.ts` and `VitalsAlarm` stay as error events on top, because a chart
+  does not page anyone.
 
 `PLAN.md` is the original design document with the full rationale and validation strategy.

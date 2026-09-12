@@ -73,44 +73,46 @@ const timing = createMiddleware({ type: 'function' }).server(async ({ next, serv
   } finally {
     const durationMs = Math.round(performance.now() - startedAt)
     /*
-     * Every call is measured; only a slow one is announced.
+     * One import, one guard, for both reports.
      *
-     * The distribution is billed as a metric rather than against the 10,000
-     * spans, which is what makes it affordable to record all of them — and a
-     * percentile over every call is the thing that shows `getDashboard` drifting
-     * from 300ms to 900ms. The threshold event below cannot: it says only that a
-     * line was crossed, and says nothing at all until it is.
+     * Both live in the same module, and this is a `finally`: an `await` that
+     * rejects here does not merely fail to report, it *replaces* the exception
+     * already in flight, so a failed dynamic import would reach the caller
+     * instead of the real error. Neither `report` function can throw, but
+     * `import()` can — and a block whose only job is to measure a request must
+     * never be able to change its outcome.
      */
     try {
-      const { reportMeasurement } = await import('~/lib/observability/report')
+      const { reportMeasurement, reportWarning } = await import('~/lib/observability/report')
+
+      /*
+       * Every call is measured; only a slow one is announced.
+       *
+       * Recording all of them is affordable because the metric quota is counted
+       * in bytes rather than events — a distribution item measures roughly half a
+       * kilobyte on the wire, so one user's traffic sits orders of magnitude under
+       * any of the published figures. Worth stating explicitly because the items
+       * are *not* aggregated: 500 calls send 500 items, so this does scale 1:1
+       * with traffic and the headroom is the only reason that is fine.
+       *
+       * The percentile over every call is what shows `getDashboard` drifting from
+       * 300ms to 900ms. The threshold event below cannot: it says only that a line
+       * was crossed, and says nothing at all until it is.
+       */
       reportMeasurement('server_fn.duration', durationMs, 'millisecond', {
         serverFn: serverFnMeta.name,
         filename: serverFnMeta.filename,
       })
-    } catch {
-      // See below — this is a `finally`.
-    }
 
-    if (durationMs > SLOW_SERVER_FN_MS) {
-      /*
-       * Wrapped because this is a `finally`.
-       *
-       * An `await` that rejects inside `finally` does not merely fail to report —
-       * it *replaces* the exception already in flight, so a failed dynamic import
-       * would surface to the caller instead of the real error. `reportWarning`
-       * cannot throw, but `import()` can, and the whole point of this block is
-       * that measuring a request must never change its outcome.
-       */
-      try {
-        const { reportWarning } = await import('~/lib/observability/report')
+      if (durationMs > SLOW_SERVER_FN_MS) {
         reportWarning(
           `slow server function: ${serverFnMeta.name}`,
           { serverFn: serverFnMeta.name, filename: serverFnMeta.filename, durationMs },
           ['slow-server-fn', serverFnMeta.name],
         )
-      } catch {
-        // Nothing to do, and nothing worth losing the caller's error over.
       }
+    } catch {
+      // Nothing to do, and nothing worth losing the caller's error over.
     }
   }
 })
