@@ -15,6 +15,7 @@ import { withNote } from '~/lib/calendarPatch'
 import { cx } from '~/lib/cx'
 import { thisMonthLocal } from '~/lib/localDate'
 import { monthGrid, shiftMonth } from '~/lib/monthGrid'
+import { reportError } from '~/lib/observability/report'
 import { removeNote, saveNote } from '~/server/notes'
 import { getCalendar, type CalendarDay } from '~/server/screens'
 
@@ -111,7 +112,8 @@ function Calendar() {
         }),
       }
     },
-    onError: (_error, variables, context) => {
+    onError: (error, variables, context) => {
+      reportError(error, { mutation: 'saveNote' })
       patchDay(variables.data.date, context?.previous ?? null)
     },
     // Only the calendar reads journal entries. Invalidating everything refetched
@@ -126,7 +128,8 @@ function Calendar() {
       setOpenDay(null)
       return { previous: patchDay(date, null) }
     },
-    onError: (_error, date, context) => {
+    onError: (error, date, context) => {
+      reportError(error, { mutation: 'removeNote' })
       patchDay(date, context?.previous ?? null)
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['calendar'] }),

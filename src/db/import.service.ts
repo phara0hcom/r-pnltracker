@@ -10,6 +10,7 @@
  * database untouched rather than half-imported, which matters because a partial
  * trade history produces confidently wrong cost basis.
  */
+import * as Sentry from '@sentry/tanstackstart-react'
 import { and, eq, sql } from 'drizzle-orm'
 import { emptyParseResult, type ParseResult } from '../lib/domain/types'
 import { decodeShiftJis } from '../lib/import/decode'
@@ -98,18 +99,37 @@ export async function previewImport(
   filename: string,
   bytes: Uint8Array,
 ): Promise<ImportPreview> {
-  const parsed = parseFile(filename, bytes)
-  const existing = await existingHashes(userId)
-  const plan = planImport(parsed, existing.trades, existing.dividends)
+  return Sentry.startSpan(
+    { name: 'previewImport', op: 'import.preview', attributes: { bytes: bytes.length } },
+    async (span) => {
+      /*
+       * `parseFile` decodes Shift-JIS and parses; `detectFormat` below decodes a
+       * second time. Both are CPU over the whole file and neither is measured
+       * anywhere else, so they get their own spans — a 40-file upload is 40
+       * sequential passes through here and it is worth knowing what that costs
+       * before deciding whether the duplicated decode matters.
+       */
+      const parsed = Sentry.startSpan({ name: 'parseFile', op: 'import.parse' }, () =>
+        parseFile(filename, bytes),
+      )
+      const existing = await Sentry.startSpan({ name: 'existingHashes', op: 'db.query' }, () =>
+        existingHashes(userId),
+      )
+      const plan = planImport(parsed, existing.trades, existing.dividends)
 
-  return {
-    filename,
-    format: detectFormat(decodeShiftJis(bytes)) ?? 'UNKNOWN',
-    plan,
-    summary: describePlan(plan),
-    snapshotCount: parsed.snapshots.length,
-    cashCount: parsed.cashMovements.length,
-  }
+      span.setAttribute('newTrades', plan.newTrades.length)
+      span.setAttribute('duplicateTrades', plan.duplicateTrades)
+
+      return {
+        filename,
+        format: detectFormat(decodeShiftJis(bytes)) ?? 'UNKNOWN',
+        plan,
+        summary: describePlan(plan),
+        snapshotCount: parsed.snapshots.length,
+        cashCount: parsed.cashMovements.length,
+      }
+    },
+  )
 }
 
 export interface ImportResult {
@@ -134,14 +154,33 @@ export async function commitImport(
   filename: string,
   bytes: Uint8Array,
 ): Promise<ImportResult> {
-  const parsed = parseFile(filename, bytes)
-  const existing = await existingHashes(userId)
+  const parsed = Sentry.startSpan({ name: 'parseFile', op: 'import.parse' }, () =>
+    parseFile(filename, bytes),
+  )
+  const existing = await Sentry.startSpan({ name: 'existingHashes', op: 'db.query' }, () =>
+    existingHashes(userId),
+  )
   const plan = planImport(parsed, existing.trades, existing.dividends)
 
   const format = detectFormat(decodeShiftJis(bytes)) ?? 'UNKNOWN'
   const batchId = idFor('batch', userId, filename, new Date().toISOString())
 
-  return db.transaction(async (tx) => {
+  /*
+   * One span for the whole transaction rather than one per statement.
+   *
+   * The statements inside are not independently interesting — they succeed or the
+   * transaction rolls back together — but the transaction holds a pooled
+   * connection to a database ~75ms away for its entire duration, and it re-reads
+   * every trade inside itself when dividends are present. That total is the
+   * number that decides whether a 40-file upload is tolerable.
+   */
+  return Sentry.startSpan(
+    {
+      name: 'commitImport.transaction',
+      op: 'db.transaction',
+      attributes: { format, newTrades: plan.newTrades.length },
+    },
+    () => db.transaction(async (tx) => {
     await tx.insert(importBatches).values({
       id: batchId,
       userId,
@@ -289,6 +328,7 @@ export async function commitImport(
       duplicatesSkipped: plan.duplicateTrades + plan.duplicateDividends,
       errors: plan.errors.length,
     }
-  })
+    }),
+  )
 }
 

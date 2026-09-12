@@ -73,13 +73,21 @@ export const previewFiles = createServerFn({ method: 'POST' })
   .middleware([authed])
   .validator((data: { files: UploadPayload[] }) => data)
   .handler(async ({ data, context }): Promise<PreviewSummary[]> => {
-    // Logged so a failed upload leaves a trace in the dev server output rather
-    // than only in the browser.
+    /*
+     * Logged so a failed upload leaves a trace in the dev server output rather
+     * than only in the browser.
+     *
+     * The filenames stay. They are how you tell which of forty files failed, and
+     * they are Rakuten's export names rather than anything about the account.
+     * What made them a question was Sentry's console integration, which would
+     * have turned this line into a breadcrumb on the next unrelated event — that
+     * is switched off in `instrument.server.ts`, which fixes the whole class
+     * rather than this one line. The base64 length is gone: it described the
+     * upload's size and answered nothing.
+     */
     console.warn(
       `[import] preview ${String(data.files.length)} file(s): ` +
-        data.files
-          .map((file) => `${file.filename} (${String(file.base64.length)} b64 chars)`)
-          .join(', '),
+        data.files.map((file) => file.filename).join(', '),
     )
     const out: PreviewSummary[] = []
     // Previewed in the order they will actually be committed, so the summary

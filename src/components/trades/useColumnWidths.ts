@@ -6,6 +6,7 @@
  * your filtered view should not inherit your column sizes.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { breadcrumb } from '~/lib/observability/report'
 
 const STORAGE_KEY = 'pnl.trades.columnWidths'
 const MIN_WIDTH = 56
@@ -22,6 +23,7 @@ function load(defaults: ColumnWidths): ColumnWidths {
     // Merge over defaults so a newly added column still gets a sensible width.
     return { ...defaults, ...(parsed as ColumnWidths) }
   } catch {
+    breadcrumb('localStorage read failed', { key: STORAGE_KEY })
     return defaults
   }
 }
@@ -46,6 +48,7 @@ export function useColumnWidths(defaults: ColumnWidths) {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
     } catch {
       // Private browsing or a full quota — resizing still works for this session.
+      breadcrumb('localStorage write failed', { key: STORAGE_KEY })
     }
   }, [])
 

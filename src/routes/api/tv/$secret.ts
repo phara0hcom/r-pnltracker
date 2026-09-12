@@ -26,6 +26,7 @@ import {
   tradingDayCandidates,
   webhookSecretUsable,
 } from '~/lib/exit/webhook'
+import { reportError } from '~/lib/observability/report'
 
 const json = (body: unknown, status: number): Response =>
   new Response(JSON.stringify(body), {
@@ -135,6 +136,9 @@ export const Route = createFileRoute('/api/tv/$secret')({
             console.error(
               `[tv] delivery not logged: ${error instanceof Error ? error.message : String(error)}`,
             )
+            // Nothing else records this one: the row that would have recorded it
+            // is the row that failed to write.
+            reportError(error, { route: 'tv-webhook', stage: 'delivery-log', status })
           }
           return json(body, status)
         }
@@ -233,6 +237,15 @@ export const Route = createFileRoute('/api/tv/$secret')({
             `[tv] bar stored, price not published for ${symbol}: ${pricingFault}` +
               ' — is drizzle/0004_price_source_feed.sql applied?',
           )
+          /*
+           * Also reported, not only logged and filed.
+           *
+           * The delivery log records this where someone can see it, but only if
+           * they open the Exit Rules screen — and the symptom it produces is a
+           * stale badge, which looks like nothing happening. This is the one
+           * fault on this route worth an alert.
+           */
+          reportError(error, { route: 'tv-webhook', symbol, tradingDay })
         }
 
         return finish(

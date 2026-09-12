@@ -21,6 +21,7 @@ import { toFieldErrors } from './fieldErrors'
 import { FormField } from '~/components/trades/FormField'
 import { cx } from '~/lib/cx'
 import { TRAILING_METHODS, type TrailingMethod } from '~/lib/exit/types'
+import { reportError } from '~/lib/observability/report'
 import { saveExitSettings, type ExitSettingsView } from '~/server/exit'
 
 const METHOD_LABEL: Record<TrailingMethod, string> = {
@@ -64,6 +65,7 @@ export function ExitSettingsForm({
       onSaved()
     },
     onError: (error: unknown) => {
+      reportError(error, { mutation: 'saveExitSettings' })
       setErrors(toFieldErrors(error))
     },
   })

@@ -27,6 +27,7 @@ import { ACCOUNT_LABEL } from '~/components/format'
 import { FormField } from '~/components/trades/FormField'
 import { cx } from '~/lib/cx'
 import { TRAILING_METHODS, type TrailingMethod } from '~/lib/exit/types'
+import { reportError } from '~/lib/observability/report'
 import {
   createExitRule,
   updateExitRule,
@@ -168,6 +169,7 @@ export function ExitRuleDialog({
       onSaved()
     },
     onError: (error: unknown) => {
+      reportError(error, { mutation: 'saveExitRule' })
       setErrors(toFieldErrors(error))
     },
   })

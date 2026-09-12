@@ -18,6 +18,7 @@ import { InstrumentLink } from '~/components/InstrumentLink'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { withTradeJournal } from '~/lib/calendarPatch'
 import { cx } from '~/lib/cx'
+import { reportError } from '~/lib/observability/report'
 import { saveTradeJournal } from '~/server/notes'
 import type { CalendarDay, CalendarTrade } from '~/server/screens'
 
@@ -78,7 +79,8 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
     // Re-applies the previous values rather than restoring a snapshot: a day
     // dialog runs one of these mutations per trade, so a snapshot taken before
     // this save would also wipe a sibling row saved while it was in flight.
-    onError: (_error, _journal, previous) => {
+    onError: (error, _journal, previous) => {
+      reportError(error, { mutation: 'saveTradeJournal' })
       if (!previous) return
       setSavedMemo(previous.memo ?? '')
       setSavedMotivation(previous.motivation)

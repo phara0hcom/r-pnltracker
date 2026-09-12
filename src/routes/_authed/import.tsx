@@ -5,6 +5,7 @@ import styles from './import.module.scss'
 import { PageHeader, Section, Table } from '~/components/screen'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
+import { reportError } from '~/lib/observability/report'
 import {
   commitFiles,
   previewFiles,
@@ -66,6 +67,7 @@ function Import() {
     // Without this a server error renders nothing at all and the screen simply
     // looks inert — which is exactly how this failed before.
     onError: (error: Error) => {
+      reportError(error, { mutation: 'previewFiles' })
       setFailure(
         `${error.message || 'The server rejected the upload.'} — if this persists, reload the page: a stale tab can hold a client build the dev server no longer recognises.`,
       )
@@ -83,6 +85,7 @@ function Import() {
       void queryClient.invalidateQueries()
     },
     onError: (error: Error) => {
+      reportError(error, { mutation: 'commitFiles' })
       setFailure(error.message || 'The import failed. Nothing was written.')
     },
   })

@@ -92,6 +92,8 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/lib/exit/calendar.ts` | JP/US trading-day calendars, derived from the statutory rules |
 | `src/routes/api/tv/$secret.ts` | TradingView webhook — the only unauthenticated route |
 | `src/server/middleware.ts` | `authed` (composes `sameOrigin`) — supplies typed `context.userId` |
+| `src/start.ts` | global request/function middleware — **holds CSRF**, plus tracing and the slow-call alarm |
+| `src/lib/observability/scrub.ts` | the single gate for everything reported to Sentry — pure, unit-tested |
 
 Every server function touching user data must `.middleware([authed])`. The typed
 `context.userId` means a handler that forgets the check does not compile.
@@ -177,7 +179,9 @@ See `SETUP.md` for the full checklist. `.env` keys: `DATABASE_URL` (Neon **poole
 host), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 `ALLOWED_EMAIL` (hard allowlist — empty fails closed), `FINNHUB_API_KEY`,
 `TRADINGVIEW_WEBHOOK_SECRET` (24+ chars; forms the `/api/tv/<secret>` path — unset disables
-the exit-rules feed rather than failing).
+the exit-rules feed rather than failing), `SENTRY_DSN` / `VITE_SENTRY_DSN` (unset disables
+reporting; the `VITE_` half is inlined at build time, so changing it on Vercel needs a
+redeploy), and build-only `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` for source maps.
 
 Price providers degrade rather than throw: Finnhub (US only) → JP scrape (Yahoo, then
 kabutan) → manual override → stale cache. Nothing in `src/lib/prices/providers.ts` may
@@ -186,5 +190,35 @@ throw; a pricing outage must never break a render. Yahoo rate-limits by IP and r
 `hasQuotableTicker` gates the whole chain — funds are named, not coded, in every Rakuten
 export, so they are skipped rather than attempted and never count as a provider failure. Settings → *Check connections* probes each source live and
 distinguishes a missing key from a rate limit.
+
+## Observability
+
+Errors and slow paths go to **Sentry**, never to Postgres. Vercel is on the hobby
+plan, where runtime logs last one hour — see `docs/observability.md` for the full
+rationale.
+
+- **Unset `SENTRY_DSN` disables it**, exactly as `TRADINGVIEW_WEBHOOK_SECRET`
+  disables the feed. Nothing in `src/lib/observability/report.ts` may throw, the
+  same contract `lib/prices/providers.ts` has: reporting a failure must not become
+  one, least of all on the TradingView route where a 5xx is retried.
+- **Everything reported passes through `src/lib/observability/scrub.ts`**, wired
+  into all three hooks — `beforeSend`, `beforeSendTransaction`, `beforeBreadcrumb`.
+  No bodies, cookies, headers, user, `extra`, or URL query strings (filter state
+  describes the holdings). The TradingView secret is in the URL *path*, so it is
+  redacted by path segment — Sentry names transactions after the URL and it would
+  otherwise appear in issue titles. Never put a monetary amount in a tag, span
+  attribute or message; amounts are excluded by construction, not by a filter.
+- **`src/start.ts` now owns CSRF protection.** `createStartHandler` applies its
+  own CSRF middleware *only* while no start instance exists, so creating that file
+  moved the responsibility to us for all 28 server functions — and dropping it is
+  silent in production. Keep the `filter`, or `/api/tv/$secret` starts answering
+  403 to every delivery. `src/start.test.ts` guards both.
+- **There are no automatic database spans.** Nitro inlines `pg`, so OpenTelemetry
+  has nothing to patch. Database and engine time is measured by hand in
+  `src/server/engine.ts`; if you want a new hot path visible, add the span.
+- Tracing is sampled at 5% to fit 10,000 spans/month. The guarantee that a slow
+  call is *never* missed is the threshold alarm in `src/start.ts`, billed as an
+  error instead. Web vitals stay in Vercel Speed Insights; Sentry only gets the
+  ones in the "poor" band.
 
 `PLAN.md` is the original design document with the full rationale and validation strategy.

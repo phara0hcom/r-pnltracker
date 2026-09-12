@@ -100,6 +100,14 @@ ALLOWED_EMAIL="t.elsay3d@gmail.com"
 FINNHUB_API_KEY="<your existing key>"
 ```
 
+Optional — error and performance reporting. Leave these out and reporting is off;
+nothing else changes. See `docs/observability.md`.
+
+```bash
+SENTRY_DSN="https://...@o000000.ingest.sentry.io/000000"
+VITE_SENTRY_DSN="<the same DSN>"
+```
+
 Generate the secret:
 ```bash
 openssl rand -base64 32

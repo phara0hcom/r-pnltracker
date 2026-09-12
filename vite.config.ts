@@ -1,3 +1,4 @@
+import { sentryTanstackStart } from '@sentry/tanstackstart-react/vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import react from '@vitejs/plugin-react'
 import { nitro } from 'nitro/vite'
@@ -17,6 +18,19 @@ const SERVER_ONLY = [
   // Not `better-auth`: its `dist/client` half is the browser SDK and belongs
   // in the client bundle. `src/lib/auth.ts` above is the server instance.
   /\/node_modules\/(pg|pg-pool|pg-protocol|pg-types|drizzle-orm|iconv-lite)\//,
+  /*
+   * Sentry's Node half, and the module-hook machinery OpenTelemetry patches with.
+   *
+   * `@sentry/tanstackstart-react` itself is deliberately *not* listed: it is
+   * isomorphic, and the client build resolves its `browser` condition to a
+   * barrel of `@sentry/react` plus two inert middleware stubs. What must never
+   * appear is the server half reached under the `node` condition — `@sentry/node`
+   * loads `node:module`, `node:diagnostics_channel` and `perf_hooks`, which is
+   * the same shape of failure as `iconv-lite` reading `Buffer.prototype`.
+   */
+  /\/node_modules\/@sentry\/(node|node-core|opentelemetry|profiling-node)\//,
+  /\/node_modules\/@opentelemetry\//,
+  /\/node_modules\/(import-in-the-middle|require-in-the-middle|shimmer)\//,
 ]
 
 /**
@@ -73,10 +87,38 @@ function noServerCodeInClient(): Plugin {
   }
 }
 
+/*
+ * Source maps are built and uploaded only when there is somewhere to upload them.
+ *
+ * Without a token a local `npm run build` must still work, so the plugin is
+ * omitted rather than left to fail. `'hidden'` emits the maps without a
+ * `//# sourceMappingURL` comment and `filesToDeleteAfterUpload` removes them
+ * afterwards: this is a private financial app, and publishing maps to
+ * `.output/public/assets` would serve the whole of `lib/auth.ts` and the exit-rule
+ * engine to anyone who asked.
+ *
+ * Client maps only. Nitro re-bundles the Vite SSR output and strips
+ * `sourcesContent`, so debug IDs injected during the Vite pass no longer match
+ * the shipped chunk — server frames stay raw, and that is a known limitation
+ * rather than something to chase.
+ */
+const uploadSourceMaps = process.env.SENTRY_AUTH_TOKEN !== undefined
+
 export default defineConfig({
   server: { port: 3000 },
+  build: { sourcemap: uploadSourceMaps ? 'hidden' : false },
   plugins: [
     tanstackStart(),
+    ...(uploadSourceMaps
+      ? [
+          sentryTanstackStart({
+            org: process.env.SENTRY_ORG,
+            project: process.env.SENTRY_PROJECT,
+            authToken: process.env.SENTRY_AUTH_TOKEN,
+            sourcemaps: { filesToDeleteAfterUpload: ['**/*.map'] },
+          }),
+        ]
+      : []),
     /*
      * Pin the function region.
      *
