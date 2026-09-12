@@ -119,6 +119,23 @@ verification script passed anyway — it only populated the fields `scrub.ts`
 already handled. It now sets them the way the SDK would, and
 `scrub.test.ts` asserts each one.
 
+### Source maps are stripped by a build step, not by Sentry
+
+`sentryTanstackStart` is configured with `filesToDeleteAfterUpload`, and that
+deletion is part of the **upload** step. When the upload fails, the maps stay —
+and the build still succeeds, because the plugin's errors are not fatal.
+
+The first deploy proved it: an invalid `SENTRY_AUTH_TOKEN` produced a green build
+that published **63 `.js.map` files** with full `sourcesContent`. `sourcemap:
+'hidden'` only omits the `//# sourceMappingURL` comment; the files still sit at a
+predictable URL beside each chunk.
+
+So `npm run build` ends with `node scripts/strip-sourcemaps.mjs`, which removes
+every `.map` from `.output/public` and `.vercel/output/static` unconditionally.
+A build step rather than a Vite plugin on purpose: a plugin would have to run
+after Sentry's upload hook, and would silently break uploads if that ordering ever
+changed.
+
 ### Source code travels with the stack trace
 
 Sentry's `contextLines` integration reads the source file around every stack frame
