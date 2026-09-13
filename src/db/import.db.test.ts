@@ -12,83 +12,39 @@
  * Not part of `npm test` — see `vitest.config.ts`. Run with `npm run test:db`,
  * and it skips itself when no container runtime is present.
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
 import iconv from 'iconv-lite'
-import { Pool } from 'pg'
+import type { Pool } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { runEngine } from '../lib/pnl/engine'
 import type * as ImportService from './import.service'
 import type * as TradesService from './trades.service'
+import {
+  containerAvailable,
+  startPostgres,
+  stopPostgres,
+  TEST_USER,
+} from '~/test/postgres'
 
-/** Same probe as `priceCache.db.test.ts`; see the long note there. */
-function findContainerRuntime(): boolean {
-  const home = process.env.HOME ?? ''
-  const host =
-    process.env.DOCKER_HOST ??
-    [
-      `${home}/.local/share/containers/podman/machine/podman.sock`,
-      `${home}/.docker/run/docker.sock`,
-      '/var/run/docker.sock',
-    ]
-      .filter((path) => existsSync(path))
-      .map((path) => `unix://${path}`)[0]
-
-  if (host === undefined) return false
-  process.env.DOCKER_HOST = host
-  if (host.includes('podman')) process.env.TESTCONTAINERS_RYUK_DISABLED ??= 'true'
-  return true
-}
-
-function migrationFiles(): string[] {
-  const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8')) as {
-    entries: { tag: string }[]
-  }
-  return journal.entries.map((entry) => join('drizzle', `${entry.tag}.sql`))
-}
-
-const available = findContainerRuntime()
-
-let container: StartedPostgreSqlContainer | undefined
 let sql: Pool | undefined
 let imports: typeof ImportService | undefined
 let tradesService: typeof TradesService | undefined
-let servicePool: { end: () => Promise<void> } | undefined
 
-const USER = 'u-test-1'
+const USER = TEST_USER
 
 beforeAll(async () => {
-  if (!available) return
+  sql = await startPostgres()
+  if (!sql) return
 
-  container = await new PostgreSqlContainer('postgres:17-alpine').start()
-  // Before the services are imported: `db/index.ts` builds its pool at module
-  // scope from whatever DATABASE_URL said at load.
-  process.env.DATABASE_URL = container.getConnectionUri()
-
-  sql = new Pool({ connectionString: container.getConnectionUri() })
-  for (const file of migrationFiles()) {
-    await sql.query(readFileSync(file, 'utf8').replaceAll('--> statement-breakpoint', ''))
-  }
-  await sql.query(
-    `insert into "user" (id, name, email, email_verified, created_at, updated_at)
-     values ($1, 'owner', 'owner@example.com', true, now(), now())`,
-    [USER],
-  )
-
+  // Imported here, not at module scope: `db/index.ts` binds its pool to
+  // DATABASE_URL on first load, which `startPostgres` has only just set.
   imports = await import('./import.service')
   tradesService = await import('./trades.service')
-  servicePool = (await import('./index')).db.$client
 })
 
-afterAll(async () => {
-  await sql?.end()
-  await servicePool?.end()
-  await container?.stop()
-})
+afterAll(stopPostgres)
 
 beforeEach(async () => {
-  if (!available) return
+  if (!containerAvailable) return
   await sql!.query('delete from trades')
   await sql!.query('delete from import_batches')
   await sql!.query('delete from instruments')
@@ -123,22 +79,26 @@ const AFTER = 'tradehistory(US)_20260910.csv'
 const beforeSettlement = () => exportBytes([...BUYS, sell('2026/9/3', '155.340')])
 const afterSettlement = () => exportBytes([...BUYS, sell('2026/9/4', '155.640')])
 
-async function storedSells() {
+/** Live sells by default; `withDeleted` includes tombstones. */
+async function storedSells({ withDeleted = false } = {}) {
   const { rows } = await sql!.query<{
     id: string
     trade_date: string
     net_amount_jpy: string
     source_row_hash: string
     source_file: string
+    deleted_at: Date | null
   }>(
     `select id, to_char(trade_date, 'YYYY-MM-DD') as trade_date, net_amount_jpy,
-            source_row_hash, source_file
-       from trades where side = 'SELL' and deleted_at is null order by trade_date`,
+            source_row_hash, source_file, deleted_at
+       from trades
+      where side = 'SELL' ${withDeleted ? '' : 'and deleted_at is null'}
+      order by trade_date`,
   )
   return rows
 }
 
-describe.skipIf(!available)('a fill the broker re-dated after settlement', () => {
+describe.skipIf(!containerAvailable)('a fill the broker re-dated after settlement', () => {
   it('updates the stored sell in place instead of storing a second one', async () => {
     await imports!.commitImport(USER, BEFORE, beforeSettlement())
     const [original] = await storedSells()
@@ -212,5 +172,81 @@ describe.skipIf(!available)('a fill the broker re-dated after settlement', () =>
     const sells = await storedSells()
     expect(sells).toHaveLength(1)
     expect(sells[0]!.trade_date).toBe('2026-09-03')
+  })
+})
+
+/**
+ * A fill that was deleted, then came back re-dated.
+ *
+ * Soft delete exists because a hard one lets the next import resurrect the row:
+ * dedupe matches on `sourceRowHash`, and a hash that is no longer in the table
+ * matches nothing. A restatement is the case that reaches past that guard on
+ * its own — the fill returns under a *different* hash, so the tombstone cannot
+ * recognise it however carefully it was kept.
+ *
+ * Which is why the restatement pass considers tombstoned rows at all, and why
+ * the update leaves `deleted_at` alone: the deleted fill absorbs its own
+ * restatement and stays deleted, instead of reappearing beside itself as a live
+ * sell. That is the whole of the guarantee, and none of it is visible without a
+ * database, so it is checked here.
+ */
+describe.skipIf(!containerAvailable)('a re-dated fill that was deleted', () => {
+  /** Import the pre-settlement export, then delete the sell it brought in. */
+  async function importThenDeleteTheSell(): Promise<string> {
+    await imports!.commitImport(USER, BEFORE, beforeSettlement())
+    const [sold] = await storedSells()
+    await tradesService!.deleteTrade(USER, sold!.id)
+    expect(await storedSells()).toHaveLength(0)
+    return sold!.id
+  }
+
+  it('stays deleted when the settled export re-dates it', async () => {
+    const deletedId = await importThenDeleteTheSell()
+
+    const result = await imports!.commitImport(USER, AFTER, afterSettlement())
+    // Absorbed by the tombstone, not inserted beside it.
+    expect(result.tradesInserted).toBe(0)
+    expect(result.tradesRestated).toBe(1)
+
+    const all = await storedSells({ withDeleted: true })
+    expect(all).toHaveLength(1)
+    expect(all[0]!.id).toBe(deletedId)
+    expect(all[0]!.deleted_at).not.toBeNull()
+    // Re-dated in place, so the tombstone now carries the hash a later import
+    // of the settled export will match — and the deletion goes on sticking.
+    expect(all[0]!.trade_date).toBe('2026-09-04')
+  })
+
+  it('leaves the engine with the position still open', async () => {
+    // The point of the deletion: 250 shares are held, not sold. A resurrected
+    // sell would close the pool and book a gain the user said was not theirs.
+    await importThenDeleteTheSell()
+    await imports!.commitImport(USER, AFTER, afterSettlement())
+
+    const records = await tradesService!.listTrades(USER)
+    const engine = runEngine(records.map((row) => row.trade))
+    expect(engine.warnings).toEqual([])
+    expect(engine.realized).toEqual([])
+    expect(engine.positions).toHaveLength(1)
+    expect(engine.positions[0]!.quantity.toFixed()).toBe('250')
+  })
+
+  it('goes on sticking when either export is uploaded again', async () => {
+    await importThenDeleteTheSell()
+    await imports!.commitImport(USER, AFTER, afterSettlement())
+
+    // The settled export matches the tombstone's new hash; the pre-settlement
+    // one is a day earlier than it, which the plan reads as older evidence.
+    for (const [name, bytes] of [
+      [AFTER, afterSettlement()],
+      [BEFORE, beforeSettlement()],
+    ] as const) {
+      const again = await imports!.commitImport(USER, name, bytes)
+      expect(again.tradesInserted).toBe(0)
+      expect(again.tradesRestated).toBe(0)
+    }
+
+    expect(await storedSells()).toHaveLength(0)
+    expect(await storedSells({ withDeleted: true })).toHaveLength(1)
   })
 })

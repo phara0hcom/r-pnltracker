@@ -8,136 +8,48 @@
  * arrives late is refused or quietly overwrites a newer quote. That is a claim
  * about the server, and the only honest way to test it is to ask one.
  *
- * The schema comes from `drizzle/0000_baseline.sql`, so this doubles as a check
- * that the baseline still builds a database from nothing.
+ * The schema comes from `drizzle/`, so this doubles as a check that the
+ * migrations still build a database from nothing.
  *
  * Not part of `npm test` — see `vitest.config.ts`. Run with `npm run test:db`,
  * and it skips itself when no container runtime is present.
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
-import { Pool } from 'pg'
+import type { Pool } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type * as ExitService from './exit.service'
 import type * as PricesService from './prices.service'
+import {
+  containerAvailable,
+  startPostgres,
+  stopPostgres,
+  TEST_USER,
+} from '~/test/postgres'
 
-/**
- * Finds a container runtime and points testcontainers at it.
- *
- * A socket check rather than a trial container: this decides whether the suite
- * reports "skipped" or spends two minutes timing out, so it has to be quick and
- * certain. Covers Docker and Podman, including the machine socket Podman
- * Desktop creates — testcontainers looks for Docker's paths only, so a Podman
- * socket has to be handed to it through `DOCKER_HOST` or it finds nothing.
- *
- * Returns whether the suite can run at all.
- */
-function findContainerRuntime(): boolean {
-  const home = process.env.HOME ?? ''
-
-  // An explicit DOCKER_HOST is the developer's decision; never second-guess it.
-  const host =
-    process.env.DOCKER_HOST ??
-    [
-      `${home}/.local/share/containers/podman/machine/podman.sock`,
-      `${home}/.docker/run/docker.sock`,
-      '/var/run/docker.sock',
-    ]
-      .filter((path) => existsSync(path))
-      .map((path) => `unix://${path}`)[0]
-
-  if (host === undefined) return false
-  process.env.DOCKER_HOST = host
-
-  /*
-   * Ryuk is testcontainers' reaper: a sidecar that bind-mounts the container
-   * socket and removes anything left behind if the run is killed. On macOS a
-   * Podman machine socket cannot be bind-mounted at all — the daemon answers
-   * `statfs … operation not supported` — so with Podman the reaper is not
-   * optional to skip, it simply cannot start.
-   *
-   * The cost is the safety net, not correctness: `afterAll` stops the container
-   * on any normal finish, including a failing test. Only a hard kill mid-run
-   * can strand one, and `podman ps` / `podman rm` clears it.
-   */
-  if (host.includes('podman')) process.env.TESTCONTAINERS_RYUK_DISABLED ??= 'true'
-
-  return true
-}
-
-/** The schema, in the order `drizzle/meta/_journal.json` says it was built. */
-function migrationFiles(): string[] {
-  const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8')) as {
-    entries: { tag: string }[]
-  }
-  return journal.entries.map((entry) => join('drizzle', `${entry.tag}.sql`))
-}
-
-const available = findContainerRuntime()
-
-let container: StartedPostgreSqlContainer | undefined
 let sql: Pool | undefined
 let prices: typeof PricesService | undefined
 let exits: typeof ExitService | undefined
-/** The pool the services share, so teardown can close it before the server goes. */
-let servicePool: { end: () => Promise<void> } | undefined
 
 const INSTRUMENT = 'i-test-1'
 /** Exit plans are user-scoped, so the backfill needs an owner to hang one on. */
-const USER = 'u-test-1'
+const USER = TEST_USER
 
 beforeAll(async () => {
-  if (!available) return
+  sql = await startPostgres()
+  if (!sql) return
 
-  container = await new PostgreSqlContainer('postgres:17-alpine').start()
-
-  /*
-   * Set before the services are imported, not after: `db/index.ts` reads
-   * DATABASE_URL at module scope and builds its pool once, so a static import
-   * would have already connected to whatever the environment said at load.
-   */
-  process.env.DATABASE_URL = container.getConnectionUri()
-
-  sql = new Pool({ connectionString: container.getConnectionUri() })
-  /*
-   * The baseline plus every migration after it, in the journal's own order.
-   * Reading only the baseline was enough while it was the whole schema, and
-   * stopped being enough the moment one table arrived in a later file — the
-   * suite then failed on a table the application had and the test database did
-   * not, which reads as a code fault rather than a fixture one.
-   */
-  for (const file of migrationFiles()) {
-    await sql.query(readFileSync(file, 'utf8').replaceAll('--> statement-breakpoint', ''))
-  }
   await sql.query(
     `insert into instruments (id, symbol, name, asset_class, currency)
      values ($1, '7203', 'トヨタ自動車', 'JP_EQUITY', 'JPY')`,
     [INSTRUMENT],
   )
-  await sql.query(
-    `insert into "user" (id, name, email, email_verified, created_at, updated_at)
-     values ($1, 'owner', 'owner@example.com', true, now(), now())`,
-    [USER],
-  )
 
+  // Imported here, not at module scope: `db/index.ts` binds its pool to
+  // DATABASE_URL on first load, which `startPostgres` has only just set.
   prices = await import('./prices.service')
   exits = await import('./exit.service')
-  servicePool = (await import('./index')).db.$client
 })
 
-afterAll(async () => {
-  /*
-   * Order matters. `db/index.ts` opens a pool at module scope and keeps its
-   * connections open; stopping the container first severs them mid-flight and
-   * `pg` raises "Connection terminated unexpectedly" with no test to attach it
-   * to. Vitest reports that as an unhandled error and warns it may be masking a
-   * real failure — so the clients are closed before the server they point at.
-   */
-  await sql?.end()
-  await servicePool?.end()
-  await container?.stop()
-})
+afterAll(stopPostgres)
 
 /** The single cached row, or undefined. */
 async function cached(): Promise<{ price: string; source: string; currency: string } | undefined> {
@@ -176,14 +88,14 @@ async function seed(price: string, asOf: Date): Promise<void> {
  * does with a failure is re-run that one test on its own.
  */
 beforeEach(async () => {
-  if (!available) return
+  if (!containerAvailable) return
   await sql!.query('delete from price_cache')
   await sql!.query('delete from exit_feed_bars')
   await sql!.query('delete from exit_rules')
   await sql!.query('delete from exit_feed_deliveries')
 })
 
-describe.skipIf(!available)('price cache, against a real Postgres', () => {
+describe.skipIf(!containerAvailable)('price cache, against a real Postgres', () => {
   it('accepts the FEED source, proving the enum migration landed', async () => {
     // If drizzle/0004 had not been applied this insert is what would fail, and
     // it is the failure the webhook catches and logs rather than 500s on.
@@ -293,7 +205,7 @@ describe.skipIf(!available)('price cache, against a real Postgres', () => {
   })
 })
 
-describe.skipIf(!available)('feed bars, against a real Postgres', () => {
+describe.skipIf(!containerAvailable)('feed bars, against a real Postgres', () => {
   const delivery = (tradingDay: string, close: string, ticker = '7203') => ({
     ticker,
     // Both zones agree here, so these tests are about the write rather than
@@ -439,7 +351,7 @@ describe.skipIf(!available)('feed bars, against a real Postgres', () => {
   })
 })
 
-describe.skipIf(!available)('the delivery log, against a real Postgres', () => {
+describe.skipIf(!containerAvailable)('the delivery log, against a real Postgres', () => {
   const delivery = (over: Partial<Parameters<typeof ExitService.recordFeedDelivery>[0]> = {}) => ({
     receivedAt: new Date('2026-09-04T06:00:00Z'),
     durationMs: 120,
