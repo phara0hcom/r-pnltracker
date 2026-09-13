@@ -28,20 +28,6 @@ import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
 import type { TableColumn } from '~/lib/table/columns'
 import { getPositions, type PositionRow } from '~/server/screens'
 
-/**
- * What a cell needs beyond its own row.
- *
- * Only the unrealized bar uses it, but it goes through the same `cell`
- * signature as everything else: a column that renders itself is worth more
- * than one the table body has to special-case, because the special case is
- * what leaves the column's own `cell` sitting there unreachable.
- */
-interface CellContext {
-  /** Largest gain and loss across every row, so all bars share one scale. */
-  maxPos: number
-  maxNeg: number
-}
-
 interface PositionColumn extends SortColumn<PositionRow> {
   label: string
   numeric?: boolean
@@ -52,7 +38,7 @@ interface PositionColumn extends SortColumn<PositionRow> {
    */
   locked?: boolean
   /** The cell's content. */
-  cell: (row: PositionRow, context: CellContext) => React.ReactNode
+  cell: (row: PositionRow) => React.ReactNode
   /** Profit/loss tint, for the columns that carry one. */
   tone?: (row: PositionRow) => string | undefined
 }
@@ -65,6 +51,19 @@ const ACCOUNT_COLOR: Record<string, string> = {
 }
 
 const signedPct = (value: number) => `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}%`
+
+/**
+ * The tint class for a signed figure, or nothing where it has no direction.
+ *
+ * `tone` answers 'flat' for a zero and for a missing figure alike, and there is
+ * no `.flat` rule for it to match — handing it to a cell's `className` puts a
+ * class in the DOM that styles nothing. A column's `tone` is typed to return
+ * `undefined` for exactly that case, so the flat name stops here.
+ */
+const toneClass = (value: string | number | null | undefined): string | undefined => {
+  const name = tone(value)
+  return name === 'flat' ? undefined : name
+}
 
 /**
  * Label, alignment, sort value and cell for each column, keyed by its sort key.
@@ -148,13 +147,12 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
     value: (row) => row.marketValueJpy,
     cell: (row) => yen(row.marketValueJpy),
   },
-  // The bar is measured off a zero line, so it needs the whole table's extents
-  // rather than just this row — hence the context argument.
   unrealizedJpy: {
     label: 'Unrealized',
     numeric: true,
     value: (row) => row.unrealizedJpy,
-    cell: (row, context) => <UnrealizedCell row={row} maxPos={context.maxPos} maxNeg={context.maxNeg} />,
+    cell: (row) => yenSigned(row.unrealizedJpy),
+    tone: (row) => toneClass(row.unrealizedJpy),
   },
   unrealizedPct: {
     label: '%',
@@ -163,7 +161,7 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
     cell: (row) => pct(row.unrealizedPct),
     // Tinted off the yen figure, not the percentage, so the two cells always
     // agree — `pct` shows a dash where `unrealizedPct` is null.
-    tone: (row) => tone(row.unrealizedJpy),
+    tone: (row) => toneClass(row.unrealizedJpy),
   },
 }
 
@@ -209,35 +207,6 @@ export const Route = createFileRoute('/_authed/positions')({
   loader: ({ deps }) => getPositions({ data: { account: deps.account } }),
   component: Positions,
 })
-
-/** The zero-origin bar and the signed figure it measures, in one cell. */
-function UnrealizedCell({
-  row,
-  maxPos,
-  maxNeg,
-}: {
-  row: PositionRow
-  maxPos: number
-  maxNeg: number
-}) {
-  if (row.unrealizedJpy == null) return <span className={styles.dim}>—</span>
-
-  const value = Number(row.unrealizedJpy)
-  const rowTone = tone(value)
-
-  return (
-    <div className={styles.unrealCell}>
-      <div className={styles.unrealTrack}>
-        <ZeroBar value={value} maxPos={maxPos} maxNeg={maxNeg} size="compact" />
-      </div>
-      <span
-        className={cx(styles.unrealValue, rowTone === 'profit' && styles.profit, rowTone === 'loss' && styles.loss)}
-      >
-        {yenSigned(value)}
-      </span>
-    </div>
-  )
-}
 
 /** Segmented allocation-by-account bar, with a legend on PC. */
 function AllocationBar({
@@ -401,8 +370,8 @@ function Positions() {
       byAccount.set(row.accountType, (byAccount.get(row.accountType) ?? 0) + Number(row.marketValueJpy))
     }
 
-    // The bar scale spans every row, sorted or not, so re-sorting the table
-    // never rescales the bars underneath it.
+    // The SP cards' bar scale spans every row, sorted or not, so re-sorting
+    // the list never rescales the bars underneath it.
     const unrealizedValues = rows.map((row) =>
       row.unrealizedJpy == null ? 0 : Number(row.unrealizedJpy),
     )
@@ -562,7 +531,7 @@ function Positions() {
                   const column = COLUMNS[key]
                   return (
                     <td key={key} data-numeric={column.numeric ? '' : undefined} className={column.tone?.(row)}>
-                      {column.cell(row, barScale)}
+                      {column.cell(row)}
                     </td>
                   )
                 })}

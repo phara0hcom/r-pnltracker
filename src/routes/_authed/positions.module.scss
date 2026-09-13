@@ -22,44 +22,11 @@
   color: var(--color-loss);
 }
 
-.dim {
-  color: var(--color-text-subtle);
-}
-
 /* ── Table cells ──────────────────────────────────────────────────────────── */
 
 .accountCell {
   display: inline-flex;
   align-items: center;
-}
-
-.unrealCell {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-}
-
-.unrealTrack {
-  flex: 1;
-  min-width: 0;
-}
-
-.unrealValue {
-  flex: none;
-  width: 74px;
-  font-weight: var(--weight-medium);
-  text-align: right;
-
-  @include m.tabular-nums;
-}
-
-.unrealPct {
-  flex: none;
-  width: 48px;
-  font-size: var(--text-xs);
-  text-align: right;
-
-  @include m.tabular-nums;
 }
 
 /* ── Allocation ───────────────────────────────────────────────────────────── */
