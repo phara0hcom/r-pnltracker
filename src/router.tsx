@@ -2,7 +2,7 @@ import { MutationCache, QueryClient } from '@tanstack/react-query'
 import { createRouter as createTanStackRouter } from '@tanstack/react-router'
 import { routerWithQueryClient } from '@tanstack/react-router-with-query'
 import { routeTree } from './routeTree.gen'
-import { noteNothingSaved } from '~/components/offline/offlineStore'
+import { noteActionFailed } from '~/components/offline/offlineStore'
 import { isNetworkFailure } from '~/lib/offline/messages'
 
 /** A request that failed because this device has no network at all. */
@@ -11,13 +11,14 @@ const failedOffline = (error: unknown): boolean => isNetworkFailure(error) && !n
 export function getRouter() {
   const queryClient = new QueryClient({
     /*
-     * The one place every edit that could not be sent is announced. Each
-     * screen's own error handling still runs; this adds the reason, which no
-     * screen knows.
+     * The one place every action that could not reach the server is announced.
+     * Each screen's own error handling still runs; this adds the reason, which
+     * no screen knows. Not every mutation is an edit — refreshing prices saves
+     * nothing — so the notice says the action failed, not that nothing was saved.
      */
     mutationCache: new MutationCache({
       onError: (error) => {
-        if (isNetworkFailure(error)) noteNothingSaved(navigator.onLine ? 'unreachable' : 'offline')
+        if (isNetworkFailure(error)) noteActionFailed(navigator.onLine ? 'unreachable' : 'offline')
       },
     }),
     defaultOptions: {

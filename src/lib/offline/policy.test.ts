@@ -96,6 +96,24 @@ describe('stamp and savedAtOf', () => {
     expect(saved.headers.get('content-encoding')).toBeNull()
   })
 
+  it('drops every header that described the delivery rather than the body', async () => {
+    const delivery = {
+      'content-encoding': 'gzip',
+      'content-length': '4096',
+      'transfer-encoding': 'chunked',
+      connection: 'keep-alive',
+      'keep-alive': 'timeout=5',
+    }
+    const names = Object.keys(delivery)
+    const original = new Response('{"ok":true}', { headers: delivery })
+    // Guards against a test that passes because `Response` never kept them.
+    expect(names.filter((name) => original.headers.has(name))).toEqual(names)
+
+    const saved = await stamp(original, 1_789_000_000_000)
+
+    expect(names.filter((name) => saved.headers.has(name))).toEqual([])
+  })
+
   it('reads no time from a response without a usable stamp', () => {
     expect(savedAtOf(new Response('x'))).toBeNull()
     expect(savedAtOf(new Response('x', { headers: { [SAVED_AT_HEADER]: 'soon' } }))).toBeNull()

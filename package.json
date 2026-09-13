@@ -22,7 +22,8 @@
     "report": "vite-node src/scripts/report.ts",
     "icons": "node scripts/generate-icons.mjs",
     "preview": "npm run build && npm run start",
-    "test:db": "vitest run --project db"
+    "test:db": "vitest run --project db",
+    "check:offline": "npm run build && node scripts/check-offline.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",

@@ -3,8 +3,8 @@
  *
  * Scoped to the current screen: each navigation starts it clean, and it clears
  * when the network returns and the screen reloads live. It is also where an
- * edit that could not be sent says so — the app has no toasts, and this is the
- * place already given to "the network is the problem".
+ * action that could not reach the server says so — the app has no toasts, and
+ * this is the place already given to "the network is the problem".
  */
 import { useQueryClient } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
@@ -14,7 +14,7 @@ import { getOffline, getServerOffline, resetSavedCopy, subscribeOffline } from '
 import { savedAtLabel } from '~/lib/offline/messages'
 
 export function OfflineBanner() {
-  const { savedAt, nothingSaved } = useSyncExternalStore(
+  const { savedAt, actionFailed } = useSyncExternalStore(
     subscribeOffline,
     getOffline,
     getServerOffline,
@@ -52,11 +52,11 @@ export function OfflineBanner() {
   // message arrives; empty, it takes no space.
   return (
     <div role="status" className={styles.region}>
-      {nothingSaved ? (
+      {actionFailed ? (
         <p className={styles.banner}>
-          {nothingSaved === 'offline'
-            ? 'You’re offline — nothing was saved.'
-            : 'Couldn’t reach the server — nothing was saved.'}
+          {actionFailed === 'offline'
+            ? 'You’re offline — that didn’t go through.'
+            : 'Couldn’t reach the server — that didn’t go through.'}
         </p>
       ) : null}
       {savedAt === null ? null : (

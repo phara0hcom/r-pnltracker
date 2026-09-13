@@ -19,10 +19,19 @@
   color: var(--color-text-muted);
 }
 
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: center;
+}
+
+/* Both the link and the retry button — they are the same weight of choice. */
 .link {
   padding: var(--space-2) var(--space-4);
   font-size: var(--text-sm);
   color: var(--color-text);
+  cursor: pointer;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
 

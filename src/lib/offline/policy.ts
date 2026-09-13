@@ -94,18 +94,30 @@ export const SAVED_AT_HEADER = 'x-pnl-saved-at'
 export const MAX_SAVED_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
 /**
+ * Headers that described how the original response was delivered, not its body.
+ *
+ * The body read here is already decoded, so serving it back under the original
+ * `content-encoding` or `content-length` would describe bytes that no longer
+ * exist; the hop-by-hop headers belonged to a connection that is gone.
+ */
+const DELIVERY_HEADERS = [
+  'content-encoding',
+  'content-length',
+  'transfer-encoding',
+  'connection',
+  'keep-alive',
+]
+
+/**
  * A copy of `response` carrying the time it was saved.
  *
- * Built anew because a fetched response's headers are immutable. The encoding
- * and length headers are dropped: the body read here is already decoded, and
- * serving it back under the original `content-encoding` would describe bytes
- * that no longer exist.
+ * Built anew because a fetched response's headers are immutable, and without
+ * the headers that described its delivery — see `DELIVERY_HEADERS`.
  */
 export async function stamp(response: Response, now: number): Promise<Response> {
   const headers = new Headers(response.headers)
   headers.set(SAVED_AT_HEADER, String(now))
-  headers.delete('content-encoding')
-  headers.delete('content-length')
+  for (const name of DELIVERY_HEADERS) headers.delete(name)
   return new Response(await response.blob(), {
     status: response.status,
     statusText: response.statusText,

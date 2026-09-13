@@ -12,6 +12,7 @@ npm start            # serve the build (node .output/server/index.mjs)
 npm test             # vitest run — the fast suite, run after every change
 npm run test:watch
 npm run test:db      # real Postgres in a container; needs Docker or Podman
+npm run check:offline  # builds, then drives the service worker in Chromium; needs .env
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint . (type-aware; must be clean)
 npm run lint:fix
@@ -264,11 +265,18 @@ rules are strict:
   'always'` and the `MutationCache` in `router.tsx` announces the failure.
   Queries use `'offlineFirst'` so they reach the worker instead of pausing, and
   one with no saved copy and no data throws to `ErrorPage`, which says the
-  screen was not saved — rendering on would show a false empty state.
+  screen was not saved — rendering on would show a false empty state — and
+  reloads it when the connection returns.
 - **The worker is its own bundle**, emitted by the `serviceWorker()` plugin in
   `vite.config.ts`, with its own `src/sw/tsconfig.json` for WebWorker types —
   `npm run typecheck` checks both. It is not registered under `npm run dev`;
   try it with `npm run build && npm start` on localhost.
+- **`npm run check:offline` is the worker's end-to-end check**, and manual for
+  the reason `test:db` is: it builds, serves `.output` with `.env`, and drives
+  Chromium (`npx playwright install chromium` once), stopping the server
+  mid-run so offline is a real refused connection. The unit tests pin the
+  policy; only this shows the worker applying it — run it after touching
+  `src/sw/`, `src/lib/offline/` or the plugin.
 - Icons are drawn by `npm run icons` (`scripts/generate-icons.mjs`). Change the
   mark there, not in the PNGs.
 

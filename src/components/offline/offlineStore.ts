@@ -1,6 +1,6 @@
 /**
- * Whether the figures on screen came from the device, and whether an edit just
- * failed for want of a network.
+ * Whether the figures on screen came from the device, and whether an action
+ * just failed for want of a network.
  *
  * A store, like `screen/pageTitle.ts`, because both facts arrive from outside
  * React — a service-worker message, the page's own render time read before
@@ -14,11 +14,11 @@ import { isSavedCopyCache } from '~/lib/offline/policy'
 export interface OfflineState {
   /** The oldest saved copy behind the current screen; null while all of it is live. */
   savedAt: number | null
-  /** Set for a few seconds after an edit fails because no server answered. */
-  nothingSaved: 'offline' | 'unreachable' | null
+  /** Set for a few seconds after a mutation fails because no server answered. */
+  actionFailed: 'offline' | 'unreachable' | null
 }
 
-const LIVE: OfflineState = { savedAt: null, nothingSaved: null }
+const LIVE: OfflineState = { savedAt: null, actionFailed: null }
 const NOTICE_MS = 8000
 
 let state: OfflineState = LIVE
@@ -27,7 +27,7 @@ const listeners = new Set<() => void>()
 
 /** A new object only when something changed — `useSyncExternalStore` compares by identity. */
 function set(next: OfflineState): void {
-  if (next.savedAt === state.savedAt && next.nothingSaved === state.nothingSaved) return
+  if (next.savedAt === state.savedAt && next.actionFailed === state.actionFailed) return
   state = next
   for (const listener of listeners) listener()
 }
@@ -51,12 +51,21 @@ export function resetSavedCopy(): void {
   set({ ...state, savedAt: null })
 }
 
-export function noteNothingSaved(reason: 'offline' | 'unreachable'): void {
-  set({ ...state, nothingSaved: reason })
+export function noteActionFailed(reason: 'offline' | 'unreachable'): void {
+  set({ ...state, actionFailed: reason })
   clearTimeout(noticeTimer)
   noticeTimer = setTimeout(() => {
-    set({ ...state, nothingSaved: null })
+    set({ ...state, actionFailed: null })
   }, NOTICE_MS)
+}
+
+/**
+ * Loads the current screen again from the top, through the worker.
+ *
+ * An export of its own only so tests can stand in for it: jsdom cannot navigate.
+ */
+export function reloadScreen(): void {
+  window.location.reload()
 }
 
 /**

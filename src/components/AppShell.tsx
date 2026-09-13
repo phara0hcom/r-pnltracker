@@ -141,15 +141,16 @@ export function AppShell({
         </button>
       </nav>
 
-      {/* Dimmed while a navigation is in flight, so the figures on screen are
-          visibly the previous route's rather than the one being opened. */}
-      <main
-        id="main"
-        className={cx(styles.content, loading && styles.contentBusy)}
-        aria-busy={loading}
-      >
+      <main id="main" className={styles.content}>
+        {/* Outside the busy region: a screen reader may hold back what changes
+            inside `aria-busy`, and the banner is news about the network, not
+            part of the screen being loaded. */}
         <OfflineBanner />
-        {children}
+        {/* Dimmed while a navigation is in flight, so the figures on screen are
+            visibly the previous route's rather than the one being opened. */}
+        <div className={cx(loading && styles.contentBusy)} aria-busy={loading}>
+          {children}
+        </div>
       </main>
     </div>
   )

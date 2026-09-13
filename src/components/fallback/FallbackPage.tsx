@@ -6,14 +6,30 @@
  */
 import styles from './FallbackPage.module.scss'
 
-export function FallbackPage({ title, message }: { title: string; message: string }) {
+export function FallbackPage({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string
+  message: string
+  /** Offered only where trying again can work — a lost connection, not a bug. */
+  onRetry?: () => void
+}) {
   return (
     <div className={styles.page}>
       <h1 className={styles.title}>{title}</h1>
       <p className={styles.message}>{message}</p>
-      <a href="/dashboard" className={styles.link}>
-        Back to dashboard
-      </a>
+      <div className={styles.actions}>
+        {onRetry ? (
+          <button type="button" className={styles.link} onClick={onRetry}>
+            Try again
+          </button>
+        ) : null}
+        <a href="/dashboard" className={styles.link}>
+          Back to dashboard
+        </a>
+      </div>
     </div>
   )
 }

@@ -7,7 +7,7 @@
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OfflineBanner } from './OfflineBanner'
-import { getOffline, noteNothingSaved, noteSavedCopy, resetSavedCopy } from './offlineStore'
+import { getOffline, noteActionFailed, noteSavedCopy, resetSavedCopy } from './offlineStore'
 
 type NavigateListener = (event: { fromLocation?: object; hrefChanged: boolean }) => void
 
@@ -101,18 +101,20 @@ describe('OfflineBanner', () => {
     expect(router.invalidate).not.toHaveBeenCalled()
   })
 
-  it('says an edit was not saved, and why, then lets it go', () => {
+  it('says an action did not go through, and why, then lets it go', () => {
     render(<OfflineBanner />)
 
+    // Not "nothing was saved": refreshing prices or checking connections saves
+    // nothing either way.
     act(() => {
-      noteNothingSaved('offline')
+      noteActionFailed('offline')
     })
-    expect(banner()).toBe('You’re offline — nothing was saved.')
+    expect(banner()).toBe('You’re offline — that didn’t go through.')
 
     act(() => {
-      noteNothingSaved('unreachable')
+      noteActionFailed('unreachable')
     })
-    expect(banner()).toBe('Couldn’t reach the server — nothing was saved.')
+    expect(banner()).toBe('Couldn’t reach the server — that didn’t go through.')
 
     act(() => {
       vi.advanceTimersByTime(8_000)
