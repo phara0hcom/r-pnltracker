@@ -12,6 +12,7 @@ import { useRouter } from '@tanstack/react-router'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import styles from './AppShell.module.scss'
 import { SidebarNav } from './SidebarNav'
+import { OfflineBanner } from '~/components/offline/OfflineBanner'
 import {
   getPageTitle,
   getServerPageTitle,
@@ -147,6 +148,7 @@ export function AppShell({
         className={cx(styles.content, loading && styles.contentBusy)}
         aria-busy={loading}
       >
+        <OfflineBanner />
         {children}
       </main>
     </div>

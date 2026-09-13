@@ -1,6 +1,8 @@
 import { captureException } from '@sentry/tanstackstart-react'
 import { useEffect } from 'react'
 import { FallbackPage } from './FallbackPage'
+import { useOnline } from '~/components/offline/offlineStore'
+import { isNetworkFailure } from '~/lib/offline/messages'
 
 /** The root route's `errorComponent`. */
 export function ErrorPage({ error }: { error: Error }) {
@@ -20,6 +22,20 @@ export function ErrorPage({ error }: { error: Error }) {
   useEffect(() => {
     captureException(error)
   }, [error])
+
+  const online = useOnline()
+
+  // Opening a screen offline that was never saved fails in its loader or its
+  // first query (see `throwOnError` in `router.tsx`). Nothing went wrong, and
+  // "Failed to fetch" would not say what did happen.
+  if (!online && isNetworkFailure(error)) {
+    return (
+      <FallbackPage
+        title="You’re offline"
+        message="This screen hasn’t been saved on this device yet. Screens are saved each time you open them with a connection."
+      />
+    )
+  }
 
   // The message is shown because this is a single-user personal app — there is
   // no other user whose data could leak through an error string.

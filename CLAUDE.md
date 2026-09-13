@@ -94,6 +94,8 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/server/middleware.ts` | `authed` (composes `sameOrigin`) — supplies typed `context.userId` |
 | `src/start.ts` | global request/function middleware — **holds CSRF**, plus tracing and the slow-call alarm |
 | `src/lib/observability/scrub.ts` | the single gate for everything reported to Sentry — pure, unit-tested |
+| `src/lib/offline/policy.ts` | what the service worker saves, never touches, and expires — pure, unit-tested |
+| `src/sw/sw.ts` | the service worker's event glue; bundled by the `serviceWorker()` plugin |
 
 Every server function touching user data must `.middleware([authed])`. The typed
 `context.userId` means a handler that forgets the check does not compile.
@@ -236,5 +238,38 @@ rationale.
   only because that quota is counted in bytes. The threshold alarms in
   `src/start.ts` and `VitalsAlarm` stay as error events on top, because a chart
   does not page anyone.
+
+## Offline (PWA)
+
+The app installs to a home screen and keeps a copy of each screen opened, for
+reading offline. Holdings stored on a device are a privacy decision, so the
+rules are strict:
+
+- **`src/lib/offline/policy.ts` decides, and is unit-tested**; `src/sw/sw.ts`
+  is event glue. Only GET page loads and GET `/_serverFn` calls are saved.
+  POSTs and `/api/*` (Better Auth, the TradingView webhook) are never
+  intercepted, and a redirect is never saved — it would file the sign-in page
+  under a screen.
+- **A saved copy is used only when the fetch rejects**, never for a slow or 5xx
+  answer, and whatever it shows must say so. `OfflineBanner` shows the saved
+  time. Data learns it from a worker message; a page, which the worker serves
+  unmodified, from the render time the root loader puts in every page
+  (`pnl-rendered-at`) — read before hydration, a page rendered over two minutes
+  ago by the phone's clock is a saved copy.
+- **Saved copies are wiped** on sign-out (before calling `signOut`, so it works
+  with no network), whenever `/signin` renders, whenever the app's code changes
+  (cache names carry a hash of the build's asset list), and past 30 days — swept
+  each time the worker starts, and refused on read.
+- **Edits fail offline rather than queue.** Mutations use `networkMode:
+  'always'` and the `MutationCache` in `router.tsx` announces the failure.
+  Queries use `'offlineFirst'` so they reach the worker instead of pausing, and
+  one with no saved copy and no data throws to `ErrorPage`, which says the
+  screen was not saved — rendering on would show a false empty state.
+- **The worker is its own bundle**, emitted by the `serviceWorker()` plugin in
+  `vite.config.ts`, with its own `src/sw/tsconfig.json` for WebWorker types —
+  `npm run typecheck` checks both. It is not registered under `npm run dev`;
+  try it with `npm run build && npm start` on localhost.
+- Icons are drawn by `npm run icons` (`scripts/generate-icons.mjs`). Change the
+  mark there, not in the PNGs.
 
 `PLAN.md` is the original design document with the full rationale and validation strategy.

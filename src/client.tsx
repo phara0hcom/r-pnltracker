@@ -1,7 +1,7 @@
 /**
- * Client entry, added solely to initialise Sentry before hydration.
+ * Client entry, added to initialise Sentry and the offline copy before hydration.
  *
- * Everything below the import is a verbatim copy of Start's default client entry
+ * The `hydrateRoot` block is a verbatim copy of Start's default client entry
  * (`@tanstack/react-start/dist/plugin/default-entry/client.tsx`). Adding this file
  * takes over an entry the framework was generating, so it has to reproduce that
  * default exactly — including hydrating `document` rather than a root element,
@@ -15,6 +15,10 @@ import './instrument.client'
 import { StartClient } from '@tanstack/react-start/client'
 import { StrictMode, startTransition } from 'react'
 import { hydrateRoot } from 'react-dom/client'
+import { registerServiceWorker, startOfflineListener } from '~/components/offline/offlineStore'
+
+// Before hydration — see `startOfflineListener`.
+startOfflineListener()
 
 startTransition(() => {
   hydrateRoot(
@@ -24,3 +28,5 @@ startTransition(() => {
     </StrictMode>,
   )
 })
+
+registerServiceWorker()

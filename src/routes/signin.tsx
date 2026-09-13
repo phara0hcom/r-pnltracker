@@ -3,9 +3,11 @@
  * server-side — a successful Google login from another account is still refused.
  */
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import { useEffect } from 'react'
 import { z } from 'zod'
 import styles from './signin.module.scss'
 import { GoogleMark } from '~/components/icons/GoogleMark'
+import { clearSavedCopies } from '~/components/offline/offlineStore'
 import { signIn } from '~/lib/auth-client'
 import { getSessionUser } from '~/lib/session'
 
@@ -24,6 +26,12 @@ export const Route = createFileRoute('/signin')({
 
 function SignIn() {
   const { redirect: redirectTo, error } = Route.useSearch()
+
+  // Rendering at all means there is no session — signed out here or elsewhere,
+  // expired, or refused — so nothing saved under the last one stays behind.
+  useEffect(() => {
+    void clearSavedCopies()
+  }, [])
 
   return (
     <div className={styles.page}>

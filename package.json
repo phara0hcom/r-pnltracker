@@ -12,7 +12,7 @@
     "start": "node .output/server/index.mjs",
     "test": "vitest run --project lib --project dom",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/sw",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
@@ -20,6 +20,7 @@
     "lint:fix": "eslint . --fix",
     "seed": "vite-node src/scripts/seed.ts",
     "report": "vite-node src/scripts/report.ts",
+    "icons": "node scripts/generate-icons.mjs",
     "preview": "npm run build && npm run start",
     "test:db": "vitest run --project db"
   },

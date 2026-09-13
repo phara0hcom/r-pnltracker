@@ -1,8 +1,11 @@
+import { createHash } from 'node:crypto'
 import { sentryTanstackStart } from '@sentry/tanstackstart-react/vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import react from '@vitejs/plugin-react'
 import { nitro } from 'nitro/vite'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, build as viteBuild, type Plugin } from 'vite'
+
+const srcDir = new URL('./src', import.meta.url).pathname
 
 /**
  * Modules that must never reach the browser.
@@ -87,6 +90,64 @@ function noServerCodeInClient(): Plugin {
   }
 }
 
+/**
+ * Emits the service worker, `sw.js`, into the client build.
+ *
+ * Bundled by a nested build of its own and emitted as a plain file, rather than
+ * added to the client build as a second entry. As an entry it would share chunks
+ * with the app, which a classic worker cannot load, and it would sit in the
+ * client manifest TanStack Start reads to find its own entry.
+ *
+ * The precache is the client bundle's own file list, so it cannot drift from
+ * what was built, and the build id is a hash of that list: the same code yields
+ * the same worker, while any change to the code renames every cache and so
+ * discards the copies saved for the old one. See `src/sw/sw.ts`.
+ */
+function serviceWorker(): Plugin {
+  return {
+    name: 'pnl:service-worker',
+    apply: 'build',
+    // After every other plugin has added its files, so the precache is complete.
+    enforce: 'post',
+    applyToEnvironment: (environment) => environment.name === 'client',
+    async generateBundle(_options, bundle) {
+      const precache = Object.keys(bundle)
+        .filter((fileName) => fileName.startsWith('assets/') && !fileName.endsWith('.map'))
+        .sort()
+        .map((fileName) => `/${fileName}`)
+      const buildId = createHash('sha256').update(precache.join('\n')).digest('hex').slice(0, 16)
+
+      const result = await viteBuild({
+        // Never this file: the nested build would load this plugin and recurse.
+        configFile: false,
+        logLevel: 'warn',
+        publicDir: false,
+        resolve: { alias: { '~': srcDir } },
+        define: {
+          __PNL_PRECACHE__: JSON.stringify(precache),
+          __PNL_BUILD__: JSON.stringify(buildId),
+        },
+        build: {
+          write: false,
+          emptyOutDir: false,
+          sourcemap: false,
+          rolldownOptions: {
+            input: `${srcDir}/sw/sw.ts`,
+            output: { format: 'iife', entryFileNames: 'sw.js' },
+          },
+        },
+      })
+
+      const outputs = (Array.isArray(result) ? result : [result]).flatMap((entry) =>
+        'output' in entry ? entry.output : [],
+      )
+      const worker = outputs.find((file) => file.type === 'chunk' && file.isEntry)
+      if (worker?.type !== 'chunk') this.error('the service worker build produced no entry chunk')
+      this.emitFile({ type: 'asset', fileName: 'sw.js', source: worker.code })
+    },
+  }
+}
+
 /*
  * Source maps are built and uploaded only when there is somewhere to upload them.
  *
@@ -161,12 +222,19 @@ export default defineConfig({
             'X-Robots-Tag': 'noindex, nofollow, noarchive, nosnippet, noimageindex',
           },
         },
+        /*
+         * Checked for an update on every navigation. Left to an HTTP cache, a
+         * browser could keep the previous deploy's worker — and its caching
+         * rules — for up to a day.
+         */
+        '/sw.js': { headers: { 'cache-control': 'no-cache' } },
       },
     }),
     react(),
     noServerCodeInClient(),
+    serviceWorker(),
   ],
   resolve: {
-    alias: { '~': new URL('./src', import.meta.url).pathname },
+    alias: { '~': srcDir },
   },
 })

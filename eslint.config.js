@@ -201,6 +201,14 @@ export default tseslint.config(
     },
   },
 
+  // ── Service worker ───────────────────────────────────────────────────────
+  // A worker scope: `self` is the ServiceWorkerGlobalScope and there is no
+  // `window` or `document`. Type-checked through `src/sw/tsconfig.json`.
+  {
+    files: ['src/sw/**/*.ts'],
+    languageOptions: { globals: globals.serviceworker },
+  },
+
   // This config file itself is plain JS outside the tsconfig project, so
   // type-aware rules cannot run on it.
   {
