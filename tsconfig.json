@@ -20,5 +20,6 @@
       "~/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*", "*.config.ts"]
+  "include": ["src/**/*", "*.config.ts"],
+  "exclude": ["src/sw"]
 }

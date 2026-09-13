@@ -13,6 +13,7 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import { Link } from '@tanstack/react-router'
 import { NAV_ICONS, type NavRoute } from './icons/NavIcons'
 import styles from './SidebarNav.module.scss'
+import { clearSavedCopies } from '~/components/offline/offlineStore'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
 import { signOut } from '~/lib/auth-client'
 import { cx } from '~/lib/cx'
@@ -132,9 +133,18 @@ export function SidebarNav({
             type="button"
             className={cx(styles.signOut, collapsed && styles.signOutRail)}
             onClick={() => {
-              void signOut().then(() => {
-                window.location.href = '/signin'
-              })
+              /*
+               * The saved figures go first, and are not held up by sign-out:
+               * with no network `signOut` rejects, and the device must still be
+               * left clean. The redirect follows whatever the server said.
+               */
+              void clearSavedCopies()
+                .catch(() => undefined)
+                .then(() => signOut())
+                .catch(() => undefined)
+                .finally(() => {
+                  window.location.href = '/signin'
+                })
             }}
           >
             <svg

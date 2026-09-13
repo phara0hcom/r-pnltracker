@@ -1,0 +1,10 @@
+{
+  "//": "The service worker runs in a worker scope, not a window. Its types clash with the DOM library the rest of the app compiles against, so it is checked as a project of its own — `npm run typecheck` runs both.",
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "WebWorker"],
+    "types": []
+  },
+  "include": ["./**/*.ts"],
+  "exclude": []
+}
