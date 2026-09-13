@@ -11,7 +11,6 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useCallback, useMemo } from 'react'
 import styles from './positions.module.scss'
 import { AccountDot } from '~/components/AccountDot'
-import { ZeroBar } from '~/components/charts/ZeroBar'
 import { ACCOUNT_LABEL, ASSET_LABEL, pct, qty, tone, yen, yenSigned } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { Empty, HeroStat, PageHeader, SegmentedTabs, SortHeader, StatStrip, StripCell, Table } from '~/components/screen'
@@ -243,12 +242,8 @@ function AllocationBar({
 /** SP replacement for a table row — a card with the same figures, no sideways scroll. */
 function PositionCard({
   row,
-  maxPos,
-  maxNeg,
 }: {
   row: PositionRow
-  maxPos: number
-  maxNeg: number
 }) {
   const priceLabel =
     row.currentPrice == null
@@ -279,11 +274,6 @@ function PositionCard({
           <span className={styles.cardDim}>{pct(row.unrealizedPct)}</span>
         </span>
       </div>
-      {unrealValue != null ? (
-        <div className={styles.cardTrack}>
-          <ZeroBar value={unrealValue} maxPos={maxPos} maxNeg={maxNeg} />
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -370,12 +360,6 @@ function Positions() {
       byAccount.set(row.accountType, (byAccount.get(row.accountType) ?? 0) + Number(row.marketValueJpy))
     }
 
-    // The SP cards' bar scale spans every row, sorted or not, so re-sorting
-    // the list never rescales the bars underneath it.
-    const unrealizedValues = rows.map((row) =>
-      row.unrealizedJpy == null ? 0 : Number(row.unrealizedJpy),
-    )
-
     return {
       priced,
       totalCost,
@@ -383,10 +367,6 @@ function Positions() {
       totalUnrealized,
       unpriced: rows.length - priced.length,
       unrealizedPctOfCost: totalCost > 0 ? totalUnrealized / totalCost : null,
-      barScale: {
-        maxPos: Math.max(0, ...unrealizedValues),
-        maxNeg: Math.abs(Math.min(0, ...unrealizedValues)),
-      },
       allocation: [...byAccount.entries()]
         .sort(([, left], [, right]) => right - left)
         .map(([accountType, value]) => ({
@@ -412,7 +392,7 @@ function Positions() {
     }
   }, [rows])
 
-  const { priced, totalCost, totalValue, totalUnrealized, unpriced, unrealizedPctOfCost, barScale, allocation, highlights } =
+  const { priced, totalCost, totalValue, totalUnrealized, unpriced, unrealizedPctOfCost, allocation, highlights } =
     summary
 
   return (
@@ -497,8 +477,6 @@ function Positions() {
               <PositionCard
                 key={`${row.symbol}-${row.accountType}`}
                 row={row}
-                maxPos={barScale.maxPos}
-                maxNeg={barScale.maxNeg}
               />
             ))}
           </div>
