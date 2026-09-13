@@ -72,17 +72,23 @@ export const authed = createMiddleware({ type: 'function' })
     const session = await sessionForRequest(request)
 
     if (!session?.user || !isAllowedEmail(session.user.email)) {
-      // TODO(nit): `session?.user.email` optional-chains on `session` but then
-      // dereferences `user` unguarded — and this branch is entered precisely
-      // when `session.user` may be nullish, so a non-null session with no user
-      // throws a TypeError here instead of logging. Better Auth always returns
-      // the two together today, which is the only reason it holds.
-      // Fix: `session?.user?.email ?? 'n/a'`.
-      // Also logs the address on every rejection; drop it, or hash it, if these
-      // logs ever leave the machine.
-      console.error(
-        `[auth] rejected: session=${session?.user ? 'present' : 'missing'} email=${session?.user.email ?? 'n/a'}`,
-      )
+      /*
+       * No address in the log.
+       *
+       * This line used to name the rejected account, under a note saying to drop
+       * or hash it "if these logs ever leave the machine". They now do: Sentry's
+       * console integration would turn this into a breadcrumb attached to the
+       * next event, so the address would leave on the back of an unrelated error.
+       * The integration is disabled server-side as well — belt and braces, since
+       * the value of logging it was never more than confirming which of two
+       * states applies, and `reason` still does that.
+       *
+       * The dereference bug the old note flagged is gone with it: `session?.user`
+       * is now only read for its presence, so a non-null session with no user no
+       * longer throws a TypeError in place of rejecting.
+       */
+      const reason = session?.user ? 'not-allowlisted' : 'no-session'
+      console.error(`[auth] rejected: ${reason}`)
       throw new Error('Unauthorised')
     }
 

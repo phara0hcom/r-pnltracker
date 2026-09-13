@@ -5,6 +5,7 @@
  * preference belongs to this browser, not to a URL someone might share.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { breadcrumb } from '~/lib/observability/report'
 
 const STORAGE_KEY = 'pnl.sidebar.collapsed'
 
@@ -13,7 +14,10 @@ function load(): boolean {
   try {
     return window.localStorage.getItem(STORAGE_KEY) === 'true'
   } catch {
-    // Private browsing — the sidebar still collapses for this session.
+    // Private browsing — the sidebar still collapses for this session. Left as a
+    // breadcrumb rather than an event: this is the fallback working, and it is
+    // only worth knowing about while explaining a later failure.
+    breadcrumb('localStorage read failed', { key: STORAGE_KEY })
     return false
   }
 }
@@ -36,6 +40,7 @@ export function useSidebarCollapsed(): [boolean, () => void] {
       window.localStorage.setItem(STORAGE_KEY, String(next))
     } catch {
       // Storage unavailable; the choice still holds until reload.
+      breadcrumb('localStorage write failed', { key: STORAGE_KEY })
     }
   }, [collapsed])
 

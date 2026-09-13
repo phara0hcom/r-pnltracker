@@ -12,6 +12,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 import * as schema from './schema'
+import { reportWarning } from '~/lib/observability/report'
 
 const connectionString = process.env.DATABASE_URL
 
@@ -40,6 +41,17 @@ function isLocalHost(url: string): boolean {
     const { hostname } = new URL(url)
     return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
   } catch {
+    /*
+     * Reported because this catch decides whether TLS is verified.
+     *
+     * It fails closed — an unparseable URL is treated as remote, so the result is
+     * a stricter connection rather than a plaintext one — which is exactly why it
+     * could be wrong for a long time without anyone noticing.
+     *
+     * A no-op if Sentry has not initialised yet: this runs while the pool is
+     * being built, and `report.ts` checks for a client before doing anything.
+     */
+    reportWarning('DATABASE_URL is not a parseable URL — assuming remote', {}, ['bad-database-url'])
     return false
   }
 }

@@ -26,6 +26,7 @@ import { ExitPlanDialog } from '~/components/exits/ExitPlanDialog'
 import { ExitPlanRow } from '~/components/exits/ExitPlanRow'
 import { ExitRuleDialog } from '~/components/exits/ExitRuleDialog'
 import { ExitSettingsForm } from '~/components/exits/ExitSettingsForm'
+import { FeedDeliveryLog } from '~/components/exits/FeedDeliveryLog'
 import { OpenPlanButton } from '~/components/exits/OpenPlanButton'
 import { money, moneySigned, tone } from '~/components/format'
 import { Empty, PageHeader, Section, Table } from '~/components/screen'
@@ -311,6 +312,13 @@ function Exits() {
           </ul>
         </Section>
       )}
+
+      {/*
+        Below the plans, because it answers a question about the feed rather
+        than about a position — but on this screen rather than in a log file,
+        since "why does every plan read stale?" is asked here and nowhere else.
+      */}
+      <FeedDeliveryLog deliveries={data.deliveries} tally={data.deliveryTally} />
 
       <Section
         title="Framework settings"

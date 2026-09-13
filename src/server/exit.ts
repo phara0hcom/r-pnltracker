@@ -15,11 +15,14 @@ import {
   archiveExitRule as archiveRule,
   barsFor,
   createExitRule as createRule,
+  feedDeliveryTally,
   getExitRule,
   getExitSettings,
   listExitRules,
+  recentFeedDeliveries,
   saveExitSettings as persistSettings,
   updateExitRule as patchRule,
+  type FeedDeliveryOutcome,
 } from '~/db/exit.service'
 import type { AccountType, AssetClass } from '~/lib/domain/types'
 import { calendarFor, todayFor } from '~/lib/exit/calendar'
@@ -28,6 +31,11 @@ import { assess } from '~/lib/exit/rules'
 import { TRAILING_METHODS, type ExitActionKind, type TrailingMethod } from '~/lib/exit/types'
 import { webhookSecretUsable } from '~/lib/exit/webhook'
 import { poolKey } from '~/lib/pnl/engine'
+
+/** Deep enough to hold several days of alerts, shallow enough not to be a log viewer. */
+const DELIVERY_LIMIT = 100
+/** The window the headline counts describe. */
+const DELIVERY_WINDOW_MS = 24 * 60 * 60 * 1000
 
 /** Only listed equities get exit rules — no provider feeds a fund's 基準価額. */
 const ELIGIBLE_CLASSES: readonly AssetClass[] = ['JP_EQUITY', 'US_EQUITY']
@@ -120,6 +128,38 @@ export interface ExitSettingsView {
   staleTradingDays: number
 }
 
+/**
+ * One logged webhook delivery, ready to render.
+ *
+ * Exists because the feed is otherwise invisible: TradingView answers a machine
+ * and reports failures as a status code, so "the alert never fired", "it fired
+ * and was refused" and "it fired, was stored, and took too long to answer" all
+ * look identical from the Exit Rules screen. They are different problems with
+ * different fixes, and this is what tells them apart.
+ */
+export interface FeedDeliveryView {
+  id: string
+  receivedAt: string
+  durationMs: number
+  outcome: FeedDeliveryOutcome
+  status: number
+  ticker: string | null
+  /** The instrument's own name, when the ticker resolved to one. */
+  name: string | null
+  tradingDay: string | null
+  backfilled: number | null
+  priced: boolean | null
+  detail: string | null
+}
+
+/** The last 24 hours at a glance, so the table is a drill-down rather than the lead. */
+export interface FeedDeliveryTally {
+  total: number
+  stored: number
+  failed: number
+  slowestMs: number | null
+}
+
 export interface ExitScreenData {
   rules: ExitRuleRow[]
   /**
@@ -132,16 +172,22 @@ export interface ExitScreenData {
   settings: ExitSettingsView
   /** False when the secret is unset *or too short*, so the screen can say why no data. */
   webhookConfigured: boolean
+  deliveries: FeedDeliveryView[]
+  deliveryTally: FeedDeliveryTally
 }
 
 export const getExitScreen = createServerFn({ method: 'GET' })
   .middleware([authed])
   .handler(async ({ context }): Promise<ExitScreenData> => {
-    const [{ trades, engine }, rules, settings] = await Promise.all([
+    const [{ trades, engine }, rules, settings, deliveries, deliveryTally] = await Promise.all([
       // The single engine entry point — same pipeline every other screen uses.
       engineFor(context.userId),
       listExitRules(context.userId),
       getExitSettings(context.userId),
+      // Unscoped by user, like the bars they describe. Enough rows to cover a
+      // full day's alerts several times over without becoming a log viewer.
+      recentFeedDeliveries(DELIVERY_LIMIT),
+      feedDeliveryTally(new Date(Date.now() - DELIVERY_WINDOW_MS)),
     ])
 
     const { positions } = engine
@@ -296,6 +342,22 @@ export const getExitScreen = createServerFn({ method: 'GET' })
       // the minimum 503s every payload, and reporting that as configured left
       // the screen silent about the one thing wrong with it.
       webhookConfigured: webhookSecretUsable(process.env.TRADINGVIEW_WEBHOOK_SECRET),
+      deliveries: deliveries.map((row) => ({
+        id: row.id,
+        // ISO across the wire; the client renders it in the reader's own zone,
+        // which is the only zone that answers "did this fire when I expected?"
+        receivedAt: row.receivedAt.toISOString(),
+        durationMs: row.durationMs,
+        outcome: row.outcome,
+        status: row.status,
+        ticker: row.ticker,
+        name: row.name,
+        tradingDay: row.tradingDay,
+        backfilled: row.backfilled,
+        priced: row.priced,
+        detail: row.detail,
+      })),
+      deliveryTally,
     }
   })
 

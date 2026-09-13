@@ -9,6 +9,7 @@ import {
 import { ErrorPage } from '~/components/fallback/ErrorPage'
 import { NotFound } from '~/components/fallback/NotFound'
 import { VercelInsights } from '~/components/VercelInsights'
+import { VitalsAlarm } from '~/components/VitalsAlarm'
 import appCss from '~/styles/globals.scss?url'
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -43,6 +44,7 @@ function RootDocument() {
         </a>
         <Outlet />
         <VercelInsights />
+        <VitalsAlarm />
         <Scripts />
       </body>
     </html>

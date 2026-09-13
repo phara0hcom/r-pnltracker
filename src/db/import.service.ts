@@ -10,14 +10,21 @@
  * database untouched rather than half-imported, which matters because a partial
  * trade history produces confidently wrong cost basis.
  */
+import * as Sentry from '@sentry/tanstackstart-react'
 import { and, eq, sql } from 'drizzle-orm'
 import { emptyParseResult, type ParseResult } from '../lib/domain/types'
 import { decodeShiftJis } from '../lib/import/decode'
-import { describePlan, planImport, type ImportPlan } from '../lib/import/plan'
+import {
+  describePlan,
+  planImport,
+  type ImportPlan,
+  type StoredTrade,
+} from '../lib/import/plan'
 import { parseTorizan } from '../lib/import/torizan'
 import { detectFormat, parseTradeHistory } from '../lib/import/tradeHistory'
 import { attributeDividends } from '../lib/tax/dividends'
 import {
+  dec,
   fromTradeRow,
   idFor,
   toCashRow,
@@ -77,17 +84,46 @@ export function parseFile(filename: string, bytes: Uint8Array): ParseResult {
   }
 }
 
-/** Hashes already stored, tombstones included, so deletions are respected. */
-async function existingHashes(userId: string): Promise<{
-  trades: Set<string>
+/**
+ * What is already stored, tombstones included, so deletions are respected.
+ *
+ * Trades come back as whole identities rather than bare hashes because the
+ * planner has to recognise a fill Rakuten has re-dated, whose hash therefore
+ * no longer matches. See the restatement note in `lib/import/plan.ts`.
+ */
+async function existingRows(userId: string): Promise<{
+  trades: StoredTrade[]
   dividends: Set<string>
 }> {
   const [tradeRows, dividendRows] = await Promise.all([
-    db.select({ h: trades.sourceRowHash }).from(trades).where(eq(trades.userId, userId)),
+    db
+      .select({
+        id: trades.id,
+        sourceRowHash: trades.sourceRowHash,
+        symbol: instruments.symbol,
+        accountType: trades.accountType,
+        side: trades.side,
+        quantity: trades.quantity,
+        unitPrice: trades.unitPrice,
+        tradeDate: trades.tradeDate,
+        settleDate: trades.settleDate,
+        isEdited: trades.isEdited,
+        origin: trades.origin,
+      })
+      .from(trades)
+      .innerJoin(instruments, eq(trades.instrumentId, instruments.id))
+      .where(eq(trades.userId, userId)),
     db.select({ h: dividends.sourceRowHash }).from(dividends).where(eq(dividends.userId, userId)),
   ])
   return {
-    trades: new Set(tradeRows.map((row) => row.h)),
+    // `numeric(24,8)` comes back as `250.00000000` while the parser's Decimal
+    // renders `250`. Both sides are normalised here or the planner's key never
+    // matches and every restatement looks like a new trade.
+    trades: tradeRows.map((row) => ({
+      ...row,
+      quantity: dec(row.quantity).toFixed(),
+      unitPrice: dec(row.unitPrice).toFixed(),
+    })),
     dividends: new Set(dividendRows.map((row) => row.h)),
   }
 }
@@ -98,23 +134,45 @@ export async function previewImport(
   filename: string,
   bytes: Uint8Array,
 ): Promise<ImportPreview> {
-  const parsed = parseFile(filename, bytes)
-  const existing = await existingHashes(userId)
-  const plan = planImport(parsed, existing.trades, existing.dividends)
+  return Sentry.startSpan(
+    { name: 'previewImport', op: 'import.preview', attributes: { bytes: bytes.length } },
+    async (span) => {
+      /*
+       * `parseFile` decodes Shift-JIS and parses; `detectFormat` below decodes a
+       * second time. Both are CPU over the whole file and neither is measured
+       * anywhere else, so they get their own spans — a 40-file upload is 40
+       * sequential passes through here and it is worth knowing what that costs
+       * before deciding whether the duplicated decode matters.
+       */
+      const parsed = Sentry.startSpan({ name: 'parseFile', op: 'import.parse' }, () =>
+        parseFile(filename, bytes),
+      )
+      const existing = await Sentry.startSpan({ name: 'existingRows', op: 'db.query' }, () =>
+        existingRows(userId),
+      )
+      const plan = planImport(parsed, existing.trades, existing.dividends)
 
-  return {
-    filename,
-    format: detectFormat(decodeShiftJis(bytes)) ?? 'UNKNOWN',
-    plan,
-    summary: describePlan(plan),
-    snapshotCount: parsed.snapshots.length,
-    cashCount: parsed.cashMovements.length,
-  }
+      span.setAttribute('newTrades', plan.newTrades.length)
+      span.setAttribute('restatedTrades', plan.restatedTrades.length)
+      span.setAttribute('duplicateTrades', plan.duplicateTrades)
+
+      return {
+        filename,
+        format: detectFormat(decodeShiftJis(bytes)) ?? 'UNKNOWN',
+        plan,
+        summary: describePlan(plan),
+        snapshotCount: parsed.snapshots.length,
+        cashCount: parsed.cashMovements.length,
+      }
+    },
+  )
 }
 
 export interface ImportResult {
   batchId: string
   tradesInserted: number
+  /** Stored rows the broker re-dated, updated in place rather than added. */
+  tradesRestated: number
   dividendsInserted: number
   snapshotsInserted: number
   cashInserted: number
@@ -134,14 +192,33 @@ export async function commitImport(
   filename: string,
   bytes: Uint8Array,
 ): Promise<ImportResult> {
-  const parsed = parseFile(filename, bytes)
-  const existing = await existingHashes(userId)
+  const parsed = Sentry.startSpan({ name: 'parseFile', op: 'import.parse' }, () =>
+    parseFile(filename, bytes),
+  )
+  const existing = await Sentry.startSpan({ name: 'existingRows', op: 'db.query' }, () =>
+    existingRows(userId),
+  )
   const plan = planImport(parsed, existing.trades, existing.dividends)
 
   const format = detectFormat(decodeShiftJis(bytes)) ?? 'UNKNOWN'
   const batchId = idFor('batch', userId, filename, new Date().toISOString())
 
-  return db.transaction(async (tx) => {
+  /*
+   * One span for the whole transaction rather than one per statement.
+   *
+   * The statements inside are not independently interesting — they succeed or the
+   * transaction rolls back together — but the transaction holds a pooled
+   * connection to a database ~75ms away for its entire duration, and it re-reads
+   * every trade inside itself when dividends are present. That total is the
+   * number that decides whether a 40-file upload is tolerable.
+   */
+  return Sentry.startSpan(
+    {
+      name: 'commitImport.transaction',
+      op: 'db.transaction',
+      attributes: { format, newTrades: plan.newTrades.length },
+    },
+    () => db.transaction(async (tx) => {
     await tx.insert(importBatches).values({
       id: batchId,
       userId,
@@ -242,6 +319,52 @@ export async function commitImport(
         })
     }
 
+    /*
+     * Fills the broker re-dated: updated in place, never inserted.
+     *
+     * `onConflictDoUpdate` above cannot reach these — its target is the hash,
+     * and the hash is exactly what a restatement changes. The new hash is
+     * written along with the rest so re-importing the *same* file afterwards
+     * is an ordinary duplicate, and the row id is deliberately left alone so
+     * its memo, journal and any open URL survive.
+     *
+     * `isEdited` is re-checked in the WHERE rather than trusted from the plan:
+     * the plan was made outside this transaction, and a hand-correction made
+     * in between must still win.
+     */
+    for (const restated of plan.restatedTrades) {
+      const row = toTradeRow({
+        userId,
+        trade: restated.trade,
+        importBatchId: batchId,
+        origin: 'IMPORT',
+      })
+      await tx
+        .update(trades)
+        .set({
+          tradeDate: row.tradeDate,
+          settleDate: row.settleDate,
+          fee: row.fee,
+          feeTax: row.feeTax,
+          otherCost: row.otherCost,
+          // The settlement rate, replacing the provisional one the
+          // pre-settlement export carried — and with it the JPY cost basis.
+          fxRate: row.fxRate,
+          grossAmount: row.grossAmount,
+          netAmount: row.netAmount,
+          netAmountJpy: row.netAmountJpy,
+          pointsUsed: row.pointsUsed,
+          isSettled: row.isSettled,
+          sourceRowHash: row.sourceRowHash,
+          sourceFile: row.sourceFile,
+          importBatchId: batchId,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(trades.userId, userId), eq(trades.id, restated.id), eq(trades.isEdited, false)),
+        )
+    }
+
     // Attribution needs every trade, not just this file's, to resolve which
     // account held the units on the pay date.
     if (plan.newDividends.length) {
@@ -283,12 +406,14 @@ export async function commitImport(
     return {
       batchId,
       tradesInserted: plan.newTrades.length,
+      tradesRestated: plan.restatedTrades.length,
       dividendsInserted: plan.newDividends.length,
       snapshotsInserted: parsed.snapshots.length,
       cashInserted: parsed.cashMovements.length,
       duplicatesSkipped: plan.duplicateTrades + plan.duplicateDividends,
       errors: plan.errors.length,
     }
-  })
+    }),
+  )
 }
 

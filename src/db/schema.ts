@@ -42,6 +42,18 @@ export const dividendKindEnum = pgEnum('dividend_kind', ['DIVIDEND', 'DISTRIBUTI
 export const originEnum = pgEnum('origin', ['IMPORT', 'MANUAL'])
 export const cashKindEnum = pgEnum('cash_kind', ['DEPOSIT', 'WITHDRAWAL', 'TRANSFER'])
 export const priceSourceEnum = pgEnum('price_source', ['FINNHUB', 'SCRAPE', 'MANUAL', 'STALE', 'FEED'])
+/**
+ * How a webhook delivery ended.
+ *
+ * `STORED` covers a bar that landed, whether or not its close was publishable —
+ * a fund has no quotable price and a replayed bar is refused, and neither is a
+ * failure of the delivery.
+ */
+export const feedDeliveryOutcomeEnum = pgEnum('feed_delivery_outcome', [
+  'STORED',
+  'UNKNOWN_TICKER',
+  'INVALID_PAYLOAD',
+])
 /** How the exit-rule trailing stop is computed once Target 1 is taken. */
 export const trailingMethodEnum = pgEnum('trailing_method', ['ATR', 'SMA10', 'SMA20'])
 
@@ -546,6 +558,61 @@ export const exitFeedBars = pgTable(
 )
 
 /**
+ * One row per webhook delivery that got past the secret.
+ *
+ * The feed is invisible by design — TradingView reports a delivery failure as a
+ * status code and nothing else, and the endpoint answers a machine, so there is
+ * no screen where a slow or refused call would otherwise show up. This is that
+ * screen's data: when the call arrived, how long the server spent on it, and
+ * whether the bar was actually stored. The question it exists to answer is the
+ * one that cannot be answered from `exit_feed_bars` alone — whether a delivery
+ * was *processed* and merely answered too late for TradingView to wait.
+ *
+ * Unscoped by user, like the bars and prices it describes.
+ *
+ * **Only authenticated deliveries are recorded.** A wrong secret is answered
+ * with a 404 and no write at all: this table is reachable from an endpoint
+ * anyone can POST to, and logging rejected probes would let one fill it.
+ */
+export const exitFeedDeliveries = pgTable(
+  'exit_feed_deliveries',
+  {
+    id: text('id').primaryKey(),
+    /** When the handler took the request, from the server's own clock. */
+    receivedAt: timestamp('received_at').notNull(),
+    /**
+     * Server-side handling time: the work, measured to just before this row is
+     * written. It excludes writing the row itself, which is the cost of
+     * observing rather than of the delivery, and it cannot include the response
+     * travelling back — no server can measure that.
+     */
+    durationMs: integer('duration_ms').notNull(),
+    outcome: feedDeliveryOutcomeEnum('outcome').notNull(),
+    /** The HTTP status actually returned, so a 4xx is visible as such. */
+    status: smallint('status').notNull(),
+
+    /** As sent. Kept even when it matches no instrument — that is the finding. */
+    ticker: varchar('ticker', { length: 128 }),
+    exchange: varchar('exchange', { length: 32 }),
+    instrumentId: text('instrument_id').references(() => instruments.id, {
+      onDelete: 'set null',
+    }),
+    tradingDay: date('trading_day'),
+    /** Plans whose entry ATR this bar completed; null when nothing was stored. */
+    backfilled: integer('backfilled'),
+    /** Whether the close became the instrument's current price. */
+    priced: boolean('priced'),
+    /**
+     * Why a payload was refused, or why a stored bar's close was not published.
+     * The second case used to reach the console only, where nobody was looking.
+     */
+    detail: text('detail'),
+  },
+  // Every read of this table is "the most recent deliveries", newest first.
+  (table) => [index('exit_feed_deliveries_received_idx').on(table.receivedAt)],
+)
+
+/**
  * The framework's tunables, per user.
  *
  * Stored rather than hardcoded because every one of them is a judgement the
@@ -620,4 +687,5 @@ export type DbPriceOverride = typeof priceOverrides.$inferSelect
 export type DbExitRule = typeof exitRules.$inferSelect
 export type NewDbExitRule = typeof exitRules.$inferInsert
 export type DbExitFeedBar = typeof exitFeedBars.$inferSelect
+export type DbExitFeedDelivery = typeof exitFeedDeliveries.$inferSelect
 export type DbExitSettings = typeof exitSettings.$inferSelect

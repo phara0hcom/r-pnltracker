@@ -6,6 +6,7 @@
  * colleague opening your filtered link should not inherit it.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { breadcrumb } from '~/lib/observability/report'
 import {
   hiddenCount,
   toggleColumn,
@@ -28,6 +29,7 @@ function load(tableId: string): HiddenColumns {
     // Anything else is a corrupted or outgrown value; fall back rather than throw.
     return Array.isArray(parsed) ? parsed.filter((key) => typeof key === 'string') : NONE
   } catch {
+    breadcrumb('localStorage read failed', { key: storageKey(tableId) })
     return NONE
   }
 }
@@ -64,6 +66,7 @@ export function useColumnVisibility<K extends string>(
         window.localStorage.setItem(storageKey(tableId), JSON.stringify(next))
       } catch {
         // Private browsing or a full quota — the choice still holds for this session.
+        breadcrumb('localStorage write failed', { key: storageKey(tableId) })
       }
     },
     [tableId],

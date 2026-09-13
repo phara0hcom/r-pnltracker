@@ -5,6 +5,7 @@ import styles from './import.module.scss'
 import { PageHeader, Section, Table } from '~/components/screen'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
+import { reportError } from '~/lib/observability/report'
 import {
   commitFiles,
   previewFiles,
@@ -66,6 +67,7 @@ function Import() {
     // Without this a server error renders nothing at all and the screen simply
     // looks inert — which is exactly how this failed before.
     onError: (error: Error) => {
+      reportError(error, { mutation: 'previewFiles' })
       setFailure(
         `${error.message || 'The server rejected the upload.'} — if this persists, reload the page: a stale tab can hold a client build the dev server no longer recognises.`,
       )
@@ -83,6 +85,7 @@ function Import() {
       void queryClient.invalidateQueries()
     },
     onError: (error: Error) => {
+      reportError(error, { mutation: 'commitFiles' })
       setFailure(error.message || 'The import failed. Nothing was written.')
     },
   })
@@ -124,7 +127,11 @@ function Import() {
 
   const usableCount = staged.filter((staged) => !staged.problem).length
   const totalNew = preview?.reduce((running, file) => running + file.newTrades + file.newDividends, 0) ?? 0
+  const totalRestated = preview?.reduce((running, file) => running + file.restated, 0) ?? 0
   const totalDupes = preview?.reduce((running, file) => running + file.duplicates, 0) ?? 0
+  // A file can be worth importing while adding nothing: an export taken after
+  // settlement re-dates fills it already holds and corrects their FX.
+  const totalChanges = totalNew + totalRestated
   const busy = doPreview.isPending || doCommit.isPending
 
   return (
@@ -244,6 +251,7 @@ function Import() {
                 <th scope="col">Format</th>
                 <th scope="col" data-numeric>New trades</th>
                 <th scope="col" data-numeric>New dividends</th>
+                <th scope="col" data-numeric>Restated</th>
                 <th scope="col" data-numeric>Duplicates</th>
                 <th scope="col" data-numeric>Snapshots</th>
                 <th scope="col" data-numeric>Errors</th>
@@ -256,6 +264,7 @@ function Import() {
                   <td>{filePreview.format}</td>
                   <td data-numeric>{filePreview.newTrades}</td>
                   <td data-numeric>{filePreview.newDividends}</td>
+                  <td data-numeric>{filePreview.restated}</td>
                   <td data-numeric className={styles.dim}>{filePreview.duplicates}</td>
                   <td data-numeric>{filePreview.snapshots}</td>
                   <td data-numeric className={filePreview.errors.length ? styles.loss : undefined}>
@@ -265,6 +274,14 @@ function Import() {
               ))}
             </tbody>
           </Table>
+
+          {totalRestated > 0 ? (
+            <p className={styles.dropHint}>
+              Restated: fills Rakuten has re-dated since the export they first arrived in — a US
+              trade is dated by its US day until it settles, then by the JST day. They update the
+              trade already held, with its settlement FX rate, rather than being added again.
+            </p>
+          ) : null}
 
           {preview.some((filePreview) => filePreview.errors.length > 0) ? (
             <div className={styles.errors}>
@@ -288,6 +305,7 @@ function Import() {
           <div className={styles.actions}>
             <span className={styles.summary}>
               {totalNew} new record{totalNew === 1 ? '' : 's'}
+              {totalRestated > 0 ? `, ${String(totalRestated)} restated` : ''}
               {totalDupes > 0 ? `, ${String(totalDupes)} already imported` : ''}
             </span>
             <button
@@ -302,16 +320,16 @@ function Import() {
             <button
               type="button"
               className={styles.primary}
-              disabled={busy || totalNew === 0}
+              disabled={busy || totalChanges === 0}
               onClick={() => {
                 doCommit.mutate(payloads)
               }}
             >
               {doCommit.isPending
                 ? 'Importing…'
-                : totalNew === 0
+                : totalChanges === 0
                   ? 'Nothing new to import'
-                  : `Import ${String(totalNew)}`}
+                  : `Import ${String(totalChanges)}`}
             </button>
           </div>
         </Section>
@@ -324,6 +342,7 @@ function Import() {
               <tr>
                 <th scope="col">File</th>
                 <th scope="col" data-numeric>Trades</th>
+                <th scope="col" data-numeric>Restated</th>
                 <th scope="col" data-numeric>Dividends</th>
                 <th scope="col" data-numeric>Snapshots</th>
                 <th scope="col" data-numeric>Skipped</th>
@@ -334,6 +353,7 @@ function Import() {
                 <tr key={result.filename}>
                   <td>{result.filename}</td>
                   <td data-numeric>{result.tradesInserted}</td>
+                  <td data-numeric>{result.tradesRestated}</td>
                   <td data-numeric>{result.dividendsInserted}</td>
                   <td data-numeric>{result.snapshotsInserted}</td>
                   <td data-numeric className={styles.dim}>{result.duplicatesSkipped}</td>

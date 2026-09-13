@@ -16,6 +16,7 @@ import { cacheQuote } from '~/db/prices.service'
 import { fxRates as schemaFx, instruments, priceCache, priceOverrides } from '~/db/schema'
 import { listTrades } from '~/db/trades.service'
 import type { AssetClass } from '~/lib/domain/types'
+import { reportWarning } from '~/lib/observability/report'
 import { runEngine } from '~/lib/pnl/engine'
 import {
   checkFinnhub,
@@ -71,6 +72,15 @@ export const refreshPrices = createServerFn({ method: 'POST' })
     let attempted = 0
     let noSource = 0
     const needsManual: string[] = []
+    /*
+     * Which symbols no provider would answer for.
+     *
+     * Collected rather than reported per symbol: a refresh that fails for twelve
+     * tickers is one fault — the chain is down, or the key is exhausted — not
+     * twelve, and twelve events would say the same thing twelve times against a
+     * 5,000-a-month budget.
+     */
+    const providerFailures: string[] = []
 
     for (const position of positions) {
       const id = instrumentId(position.symbol)
@@ -95,6 +105,17 @@ export const refreshPrices = createServerFn({ method: 'POST' })
       const quote = await fetchQuote({ symbol: position.symbol, assetClass: position.assetClass })
       if (!quote) {
         failed++
+        /*
+         * The whole chain declined: Finnhub, then Yahoo, then kabutan. Nothing in
+         * `lib/prices/providers.ts` may throw, so every one of those failures
+         * returned null silently — which is how the feed could look healthy while
+         * no price ever updated. This is the first place that fact is recorded.
+         *
+         * Note this is *not* the `noSource` branch above. Funds are named rather
+         * than coded in every Rakuten export, so `hasQuotableTicker` skips them
+         * deliberately and they must never count as a provider failure.
+         */
+        providerFailures.push(position.symbol)
         if (!existing) needsManual.push(position.symbol)
         continue
       }
@@ -105,6 +126,18 @@ export const refreshPrices = createServerFn({ method: 'POST' })
     }
 
     const fx = await fetchUsdJpy()
+
+    if (providerFailures.length > 0) {
+      reportWarning(
+        `price providers failed for ${String(providerFailures.length)} of ${String(attempted)} symbols`,
+        { symbols: providerFailures.join(','), failed: providerFailures.length, attempted },
+        ['price-provider-failure'],
+      )
+    }
+    if (!fx) {
+      // The FX rate is not per-symbol and has its own chain, so it fails on its own.
+      reportWarning('USD/JPY rate unavailable', {}, ['fx-unavailable'])
+    }
     if (fx) {
       await db
         .insert(schemaFx)

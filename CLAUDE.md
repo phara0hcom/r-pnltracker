@@ -92,6 +92,8 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/lib/exit/calendar.ts` | JP/US trading-day calendars, derived from the statutory rules |
 | `src/routes/api/tv/$secret.ts` | TradingView webhook — the only unauthenticated route |
 | `src/server/middleware.ts` | `authed` (composes `sameOrigin`) — supplies typed `context.userId` |
+| `src/start.ts` | global request/function middleware — **holds CSRF**, plus tracing and the slow-call alarm |
+| `src/lib/observability/scrub.ts` | the single gate for everything reported to Sentry — pure, unit-tested |
 
 Every server function touching user data must `.middleware([authed])`. The typed
 `context.userId` means a handler that forgets the check does not compile.
@@ -155,6 +157,18 @@ Dedupe is `sourceRowHash`, unique per `(userId, sourceRowHash)`. The hash includ
 occurrence ordinal** because one order is often filled as several byte-identical executions —
 without it, real trades silently collapse into one. Re-importing an overlapping export is safe.
 
+**Rakuten restates US fills after settlement**, and the trade date is in that hash. A US trade
+exported before it settles is dated by its *US* trading day and priced at a provisional FX rate;
+later exports date the same fill by the JST day, one later, and carry the settlement rate. The
+hash therefore stops matching and the fill is stored twice — which is how CAG, BABA and SEDG
+each ended up with two identical sells in September 2026, and how the engine came to warn
+`close with no open position` on the copy. `planImport` makes a second pass for this: a row
+whose hash is unknown but which matches a stored row on symbol, account, side, quantity, price
+and **受渡日**, differing by exactly one day in 約定日, is the same execution and *updates* that
+row rather than being inserted. 受渡日 is the anchor because settlement is T+n business days
+from the trade date, so two genuinely distinct fills cannot share one. The later date wins; an
+older export arriving afterwards is skipped rather than allowed to revert the row.
+
 Deletes are soft (`deletedAt`), because a hard delete would let the next import resurrect the
 row via a hash that no longer exists. Manual trades are salted `MANUAL` so an import can never
 match one; editing an imported trade keeps its original hash so a re-import does not revert
@@ -177,7 +191,9 @@ See `SETUP.md` for the full checklist. `.env` keys: `DATABASE_URL` (Neon **poole
 host), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 `ALLOWED_EMAIL` (hard allowlist — empty fails closed), `FINNHUB_API_KEY`,
 `TRADINGVIEW_WEBHOOK_SECRET` (24+ chars; forms the `/api/tv/<secret>` path — unset disables
-the exit-rules feed rather than failing).
+the exit-rules feed rather than failing), `SENTRY_DSN` / `VITE_SENTRY_DSN` (unset disables
+reporting; the `VITE_` half is inlined at build time, so changing it on Vercel needs a
+redeploy), and build-only `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` for source maps.
 
 Price providers degrade rather than throw: Finnhub (US only) → JP scrape (Yahoo, then
 kabutan) → manual override → stale cache. Nothing in `src/lib/prices/providers.ts` may
@@ -186,5 +202,39 @@ throw; a pricing outage must never break a render. Yahoo rate-limits by IP and r
 `hasQuotableTicker` gates the whole chain — funds are named, not coded, in every Rakuten
 export, so they are skipped rather than attempted and never count as a provider failure. Settings → *Check connections* probes each source live and
 distinguishes a missing key from a rate limit.
+
+## Observability
+
+Errors and slow paths go to **Sentry**, never to Postgres. Vercel is on the hobby
+plan, where runtime logs last one hour — see `docs/observability.md` for the full
+rationale.
+
+- **Unset `SENTRY_DSN` disables it**, exactly as `TRADINGVIEW_WEBHOOK_SECRET`
+  disables the feed. Nothing in `src/lib/observability/report.ts` may throw, the
+  same contract `lib/prices/providers.ts` has: reporting a failure must not become
+  one, least of all on the TradingView route where a 5xx is retried.
+- **Everything reported passes through `src/lib/observability/scrub.ts`**, wired
+  into all four hooks — `beforeSend`, `beforeSendTransaction`, `beforeBreadcrumb`
+  and `beforeSendMetric`.
+  No bodies, cookies, headers, user, `extra`, or URL query strings (filter state
+  describes the holdings). The TradingView secret is in the URL *path*, so it is
+  redacted by path segment — Sentry names transactions after the URL and it would
+  otherwise appear in issue titles. Never put a monetary amount in a tag, span
+  attribute or message; amounts are excluded by construction, not by a filter.
+- **`src/start.ts` now owns CSRF protection.** `createStartHandler` applies its
+  own CSRF middleware *only* while no start instance exists, so creating that file
+  moved the responsibility to us for all 28 server functions — and dropping it is
+  silent in production. Keep the `filter`, or `/api/tv/$secret` starts answering
+  403 to every delivery. `src/start.test.ts` guards both.
+- **There are no automatic database spans.** Nitro inlines `pg`, so OpenTelemetry
+  has nothing to patch. Database and engine time is measured by hand in
+  `src/server/engine.ts`; if you want a new hot path visible, add the span.
+- Tracing is sampled at 5% to fit the span quota. Durations are **not** spans:
+  every server function and every web vital is a `metrics.distribution`, and
+  metrics are off unless `enableMetrics: true` is set in both instrument files.
+  Metric items are *not* aggregated — volume scales 1:1 with calls, and it fits
+  only because that quota is counted in bytes. The threshold alarms in
+  `src/start.ts` and `VitalsAlarm` stay as error events on top, because a chart
+  does not page anyone.
 
 `PLAN.md` is the original design document with the full rationale and validation strategy.
