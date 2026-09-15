@@ -12,7 +12,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 import * as schema from './schema'
-import { reportWarning } from '~/lib/observability/report'
+import { reportError, reportWarning } from '~/lib/observability/report'
 
 const connectionString = process.env.DATABASE_URL
 
@@ -56,10 +56,17 @@ function isLocalHost(url: string): boolean {
   }
 }
 
-const pool =
-  globalThis.__pnlPool ??
-  new Pool({
-    connectionString,
+/**
+ * A pool that cannot crash the process.
+ *
+ * Built through a function so the `'error'` listener is attached where the pool
+ * is *born*, exactly once. Registering it beside the `??` below would re-add it
+ * on every HMR reload — the pool there is cached and survives them — and report
+ * one fault once per reload.
+ */
+function createPool(connection: string): Pool {
+  const created = new Pool({
+    connectionString: connection,
     // Neon terminates idle connections; keep the pool small and let it recycle.
     max: 10,
     idleTimeoutMillis: 30_000,
@@ -67,8 +74,35 @@ const pool =
     // Neon presents a valid public certificate, so verify it. `pg` warns that
     // bare `sslmode=require` will stop implying verification in a future major,
     // so the trust decision is made here explicitly rather than via the URL.
-    ssl: isLocalHost(connectionString) ? false : { rejectUnauthorized: true },
+    ssl: isLocalHost(connection) ? false : { rejectUnauthorized: true },
   })
+
+  /*
+   * `pg` emits `'error'` on the *pool* when a fault reaches a client sitting
+   * idle in it, and `Pool` is an `EventEmitter` — so with no listener Node
+   * throws the error instead of delivering it. That throw happens in a socket
+   * callback rather than inside a request, so it reaches `uncaughtException`
+   * and takes the whole instance down. The Sentry event for it carried
+   * `status_code: 200`: the request it killed had already been answered.
+   *
+   * It is not an edge case here. Neon closes idle connections, and on Vercel
+   * the instance is frozen between invocations — `idleTimeoutMillis` above
+   * cannot be relied on to reap the client first, because its timer does not
+   * run while the instance is frozen. The close then arrives when the instance
+   * next thaws.
+   *
+   * `pg-pool` removes the client from the pool *before* it emits, so the pool
+   * heals itself and the crash was the only damage. Reporting it and returning
+   * is the whole fix.
+   */
+  created.on('error', (error) => {
+    reportError(error, { source: 'db-pool' })
+  })
+
+  return created
+}
+
+const pool = globalThis.__pnlPool ?? createPool(connectionString)
 
 // Cached in every environment. Production is the case the cache is actually for
 // — a serverless instance that reuses a warm connection instead of opening one
