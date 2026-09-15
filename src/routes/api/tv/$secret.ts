@@ -65,8 +65,26 @@ function secretMatches(provided: string, expected: string): boolean {
  */
 let unconfiguredReported = false
 
-/** Shared by both verbs — resolves the configured secret and checks the path. */
-function authorise(secret: string): Response | null {
+/**
+ * Whether this instance has already reported a secret it refused.
+ *
+ * Latched for the same reason and in the same way: this path is reachable by
+ * anyone who can guess the URL shape, so it is the one most able to flood. One
+ * event per cold start says "something is posting the wrong secret" without
+ * handing a prober a way to spend the error budget.
+ */
+let rejectedSecretReported = false
+
+/**
+ * Shared by both verbs — resolves the configured secret and checks the path.
+ *
+ * `method` is carried only so a refusal can say which verb it refused. It is
+ * the difference between a diagnosis and a shrug: a rejected POST is something
+ * *delivering* to a URL this app no longer accepts, which is what a rotated
+ * secret looks like from here, while a rejected GET is a person checking a URL
+ * by hand or a scanner walking the path.
+ */
+function authorise(secret: string, method: 'GET' | 'POST'): Response | null {
   const expected = process.env.TRADINGVIEW_WEBHOOK_SECRET
 
   // The same predicate the Exit Rules screen reports with, so a too-short secret
@@ -95,16 +113,31 @@ function authorise(secret: string): Response | null {
 
   /*
    * 404 rather than 401: an unauthenticated prober learns nothing about whether
-   * this path is a real endpoint.
+   * this path is a real endpoint. The answer is unchanged — what is reported
+   * about it is not.
    *
-   * Deliberately reported nowhere. This is the one delivery path with no
-   * telemetry at all, for the same reason the delivery log starts below the
-   * secret check rather than above it: a channel an anonymous caller can write
-   * to is a channel an anonymous caller can fill. The cost is that a *rotated*
-   * secret — TradingView still posting the old URL — is indistinguishable here
-   * from a port scan, and shows up only as deliveries having stopped.
+   * Reported once per cold start, and never with the secret that was offered.
+   * That string is attacker-controlled and is a credential when it is *not* an
+   * attack: the case this exists to catch is TradingView still delivering to a
+   * rotated URL, where the rejected value is the previous real secret. So the
+   * report says that a refusal happened and which verb it refused, and nothing
+   * about what was sent. `scrub.ts` redacts the path, but only because nothing
+   * here puts the secret anywhere it would have to.
+   *
+   * Until this existed, a rotated secret was indistinguishable from a port scan
+   * and showed up only as deliveries having quietly stopped.
    */
-  if (!secretMatches(secret, expected)) return json({ error: 'not found' }, 404)
+  if (!secretMatches(secret, expected)) {
+    if (!rejectedSecretReported) {
+      rejectedSecretReported = true
+      reportWarning(
+        'exit feed: secret refused',
+        { route: 'tv-webhook', status: 404, method },
+        ['tv-webhook', 'secret-refused'],
+      )
+    }
+    return json({ error: 'not found' }, 404)
+  }
 
   return null
 }
@@ -117,7 +150,7 @@ export const Route = createFileRoute('/api/tv/$secret')({
        * is wired to it. Reports nothing beyond "the secret is right".
        */
       GET: ({ params }: { params: { secret: string } }) =>
-        authorise(params.secret) ?? json({ ok: true, endpoint: 'exit-rules feed' }, 200),
+        authorise(params.secret, 'GET') ?? json({ ok: true, endpoint: 'exit-rules feed' }, 200),
 
       POST: async ({
         request,
@@ -126,7 +159,7 @@ export const Route = createFileRoute('/api/tv/$secret')({
         request: Request
         params: { secret: string }
       }): Promise<Response> => {
-        const denied = authorise(params.secret)
+        const denied = authorise(params.secret, 'POST')
         if (denied) return denied
 
         /*
