@@ -21,12 +21,18 @@ import { createFileRoute } from '@tanstack/react-router'
 import { recordFeedDelivery, storeFeedBar, type FeedDeliveryOutcome } from '~/db/exit.service'
 import { cacheFeedClose } from '~/db/prices.service'
 import {
+  feedDeliveryReport,
   MIN_SECRET_LENGTH,
   parseFeedBody,
   tradingDayCandidates,
   webhookSecretUsable,
 } from '~/lib/exit/webhook'
-import { reportError } from '~/lib/observability/report'
+import {
+  breadcrumb,
+  reportError,
+  reportMeasurement,
+  reportWarning,
+} from '~/lib/observability/report'
 
 const json = (body: unknown, status: number): Response =>
   new Response(JSON.stringify(body), {
@@ -47,6 +53,18 @@ function secretMatches(provided: string, expected: string): boolean {
   return timingSafeEqual(a, b)
 }
 
+/**
+ * Whether this instance has already reported the feed as unconfigured.
+ *
+ * Anyone can reach the 503 below — it is decided before the secret is checked,
+ * so it answers probers too. Reporting each one would let an anonymous caller
+ * spend the month's error budget on a single missing environment variable,
+ * which is the concern that already put `Unauthorised` in `ignoreErrors`. One
+ * event per cold start is enough to learn the feed is off, and cannot be
+ * turned into a flood.
+ */
+let unconfiguredReported = false
+
 /** Shared by both verbs — resolves the configured secret and checks the path. */
 function authorise(secret: string): Response | null {
   const expected = process.env.TRADINGVIEW_WEBHOOK_SECRET
@@ -58,11 +76,34 @@ function authorise(secret: string): Response | null {
       '[tv] TRADINGVIEW_WEBHOOK_SECRET is unset or shorter than ' +
         `${String(MIN_SECRET_LENGTH)} characters — refusing to accept webhooks.`,
     )
+    /*
+     * The console line above reaches nobody. Sentry's Console integration is
+     * removed in `instrument.server.ts` on purpose, and Vercel's hobby plan
+     * keeps runtime logs for an hour — so until now the feed being switched off
+     * looked exactly like the feed being quiet.
+     */
+    if (!unconfiguredReported) {
+      unconfiguredReported = true
+      reportWarning(
+        'exit feed: webhook secret unset or too short',
+        { route: 'tv-webhook', status: 503 },
+        ['tv-webhook', 'not-configured'],
+      )
+    }
     return json({ error: 'webhook not configured' }, 503)
   }
 
-  // 404 rather than 401: an unauthenticated prober learns nothing about whether
-  // this path is a real endpoint.
+  /*
+   * 404 rather than 401: an unauthenticated prober learns nothing about whether
+   * this path is a real endpoint.
+   *
+   * Deliberately reported nowhere. This is the one delivery path with no
+   * telemetry at all, for the same reason the delivery log starts below the
+   * secret check rather than above it: a channel an anonymous caller can write
+   * to is a channel an anonymous caller can fill. The cost is that a *rotated*
+   * secret — TradingView still posting the old URL — is indistinguishable here
+   * from a port scan, and shows up only as deliveries having stopped.
+   */
   if (!secretMatches(secret, expected)) return json({ error: 'not found' }, 404)
 
   return null
@@ -113,12 +154,67 @@ export const Route = createFileRoute('/api/tv/$secret')({
           body: Record<string, unknown>,
           fields: Partial<Parameters<typeof recordFeedDelivery>[0]> = {},
         ): Promise<Response> => {
+          // Measured to here, so neither the log's own write nor the reporting
+          // below is counted as time the delivery spent — see
+          // `recordFeedDelivery`. Read once so the row and the metric agree.
+          const durationMs = Math.round(performance.now() - startedAt)
+
+          /*
+           * Sentry, before the row is written rather than after.
+           *
+           * The delivery log is the richer record, but it is also the thing most
+           * likely to be missing when it is most needed: it needs the database,
+           * and a database that is refusing writes is exactly when someone is
+           * asking why the feed went quiet. Reporting first means the outcome is
+           * announced even in the case the `catch` below exists for.
+           *
+           * Nothing here is wrapped because nothing here can throw:
+           * `report.ts` guarantees that of all four functions, and
+           * `feedDeliveryReport` is pure.
+           *
+           * The measurement is the answer to "is anything arriving at all" —
+           * every delivery, counted and timed, billed against the metric quota
+           * rather than the error budget. It is the same instrument
+           * `server_fn.duration` gives every server function, which this route
+           * has never had: the alarm in `src/start.ts` is function middleware
+           * and a route handler never runs it.
+           */
+          reportMeasurement('tv_webhook.duration', durationMs, 'millisecond', {
+            outcome,
+            status,
+          })
+
+          const report = feedDeliveryReport(outcome, durationMs)
+          /*
+           * Named one at a time rather than spread from `fields`.
+           *
+           * Tags are indexed and searchable, so what goes in them is a decision
+           * — and spreading would make it an accident: a column added to
+           * `FeedDeliveryRecord` later would start being reported without anyone
+           * choosing that. `detail` is the field that shows why it matters. It
+           * already carries free text — a parser message, or a database error
+           * verbatim — which belongs in the log row where it can be read, not in
+           * a tag where it would fragment the grouping.
+           */
+          const tags = {
+            route: 'tv-webhook',
+            outcome,
+            status,
+            durationMs,
+            ticker: fields.ticker ?? null,
+            exchange: fields.exchange ?? null,
+          }
+
+          if (report.channel === 'warning') {
+            reportWarning(report.message, tags, report.fingerprint)
+          } else {
+            breadcrumb(report.message, tags)
+          }
+
           try {
             await recordFeedDelivery({
               receivedAt,
-              // Measured to here, so the log's own write is not counted as time
-              // the delivery spent — see `recordFeedDelivery`.
-              durationMs: Math.round(performance.now() - startedAt),
+              durationMs,
               outcome,
               status,
               ticker: null,
