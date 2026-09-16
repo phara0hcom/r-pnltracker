@@ -21,11 +21,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { reportError } = vi.hoisted(() => ({ reportError: vi.fn() }))
 
-vi.mock('~/lib/observability/report', () => ({
+// Spread from the real module rather than listing its exports: a hand-written
+// copy of an export list is a copy that drifts, and a fifth export added to
+// `report.ts` would arrive here as `undefined` and fail inside module init,
+// pointing at the pool rather than at this mock.
+vi.mock('~/lib/observability/report', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   reportError,
-  reportWarning: vi.fn(),
-  breadcrumb: vi.fn(),
-  reportMeasurement: vi.fn(),
 }))
 
 /** Local, and never dialled: `isLocalHost` matches it, so no TLS is set up either. */
