@@ -27,6 +27,8 @@ const parts = {
   costBasis: String(1200) + '.00',
   dbUrl: ['postgresql://u', ':', 'p', '@host/db'].join(''),
   session: Array.from({ length: 2 }, () => 'f9e8d7c6b5a49382').join(''),
+  apiKey: Array.from({ length: 2 }, () => 'c7d8e9f0a1b2c3d4').join(''),
+  callerIp: ['203', '0', '113', '7'].join('.'),
 }
 
 const sent: unknown[] = []
@@ -77,6 +79,37 @@ Sentry.withScope((scope) => {
       ...event.sdkProcessingMetadata,
       normalizedRequest: { url: `https://pnl.example.com/api/tv/${parts.secret}` },
     }
+    /*
+     * Span attributes, set the way the exporter does.
+     *
+     * `httpServerSpansIntegration` puts `urlObj.href` in `url.full` and
+     * `pathname + search` in `http.target` on the server span of every sampled
+     * request, and the exporter copies that whole bag onto
+     * `contexts.trace.data`; a child span for a price provider carries the
+     * provider's URL, key included. This probe passed for as long as it did
+     * because it only ever set what `scrub.ts` already handled — the same way
+     * it once passed while `query_string` and `env` went out untouched.
+     */
+    event.contexts = {
+      ...event.contexts,
+      trace: {
+        trace_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        span_id: 'bbbbbbbbbbbbbbbb',
+        data: {
+          'url.full': `https://pnl.example.com/api/tv/${parts.secret}?symbol=${parts.symbol}`,
+          'http.target': `/positions?symbol=${parts.symbol}&account=NISA`,
+          'client.address': parts.callerIp,
+        },
+      },
+    }
+    event.spans = [
+      {
+        span_id: 'cccccccccccccccc',
+        trace_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        start_timestamp: 0,
+        data: { 'url.full': `https://finnhub.io/api/v1/quote?token=${parts.apiKey}` },
+      },
+    ]
     return event
   })
   scope.setExtra('balance', parts.balance)
@@ -106,6 +139,8 @@ const forbidden: Record<string, string> = {
   'request.query_string': `symbol=${parts.symbol}&account=NISA`,
   'request.env (DATABASE_URL)': parts.dbUrl,
   'request.cookies (session)': parts.session,
+  'span url.full (Finnhub key)': parts.apiKey,
+  'span client.address (caller IP)': parts.callerIp,
 }
 
 console.log(`envelopes captured: ${String(sent.length)}\n`)

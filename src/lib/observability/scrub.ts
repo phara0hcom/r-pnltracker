@@ -75,10 +75,64 @@ export function redactTvSecret(value: string): string {
   return value.replace(/\/api\/tv\/[^/?#\s]+/g, '/api/tv/[redacted]')
 }
 
-function scrubUrl(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
+/** Query gone, webhook secret redacted — the two rules, applied to one string. */
+function scrubUrlString(value: string): string {
   const cut = value.indexOf('?')
   return redactTvSecret(cut === -1 ? value : value.slice(0, cut))
+}
+
+function scrubUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  return scrubUrlString(value)
+}
+
+/**
+ * Span attributes that hold a URL.
+ *
+ * `url.full` is `urlObj.href` and `http.target` is `pathname + search` — both
+ * set by `httpServerSpansIntegration` on the server span of every sampled
+ * request, query string intact. They get the same treatment `request.url` does.
+ */
+const URL_ATTRIBUTES = new Set(['url.full', 'http.url', 'http.target', 'url.path', 'http.route'])
+
+/**
+ * Span attributes that describe *who asked* rather than what was asked.
+ *
+ * `url.query` is the filter state on its own, and the other two are the
+ * caller's address — the same class of thing `request.env` was removed for.
+ */
+const CALLER_ATTRIBUTES = new Set(['url.query', 'client.address', 'http.client_ip'])
+
+/**
+ * The gate for span attributes, which reach the wire in two places nothing was
+ * checking: `contexts.trace.data` on a transaction, and `data` on every child
+ * span in `event.spans`.
+ *
+ * This is the same failure the file already has a note about — `query_string`
+ * and `env` sat beside a `url` that was being stripped, populated by the SDK's
+ * own instrumentation rather than by us, and went unnoticed because nothing
+ * here put them there. A span's attributes are a third such bag: at a 5% trace
+ * sample, one request in twenty was shipping `/positions?symbol=…&account=…`
+ * and one POST in twenty the TradingView secret, in `url.full`.
+ *
+ * Unknown string attributes are passed through `redactTvSecret` rather than
+ * left alone. The secret is a path segment, so it can turn up in any attribute
+ * naming a route — and the point of matching the segment rather than the
+ * configured value is that this works without knowing the secret.
+ */
+export function scrubSpanData<V>(data: Record<string, V>): Record<string, V> {
+  return Object.fromEntries(
+    Object.entries(data)
+      .filter(([key]) => !CALLER_ATTRIBUTES.has(key))
+      .map(([key, value]): [string, V] => {
+        if (typeof value !== 'string') return [key, value]
+        const cleaned = URL_ATTRIBUTES.has(key) ? scrubUrlString(value) : redactTvSecret(value)
+        // Narrowed to `string` above and still a string, so `V` is intact —
+        // generic over the value type so this serves both an attribute bag
+        // typed `SpanAttributes` and the looser one on `contexts.trace`.
+        return [key, cleaned as V]
+      }),
+  )
 }
 
 /**
@@ -138,6 +192,25 @@ export function scrubEvent<E extends Event>(event: E): E {
   if (scrubbed.contexts) {
     const { state: _state, ...contexts } = scrubbed.contexts
     scrubbed.contexts = contexts
+
+    /*
+     * Only when the span actually carried attributes. An error event's trace
+     * context is `{ trace_id, span_id }` and nothing else — adding an empty
+     * `data` to it would be a change to every event to fix a transaction bug.
+     */
+    const trace = scrubbed.contexts.trace
+    if (trace?.data) {
+      scrubbed.contexts.trace = { ...trace, data: scrubSpanData<unknown>(trace.data) }
+    }
+  }
+
+  /*
+   * Child spans carry their own attribute bag and reach the wire in the same
+   * envelope. A `http.client` span for a price provider is the clearest case:
+   * its URL holds the Finnhub key.
+   */
+  if (scrubbed.spans) {
+    scrubbed.spans = scrubbed.spans.map((span) => ({ ...span, data: scrubSpanData(span.data) }))
   }
 
   /*

@@ -18,7 +18,7 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { createFileRoute } from '@tanstack/react-router'
-import { recordFeedDelivery, storeFeedBar, type FeedDeliveryOutcome } from '~/db/exit.service'
+import { storeFeedBar, type FeedDeliveryOutcome } from '~/db/exit.service'
 import { cacheFeedClose } from '~/db/prices.service'
 import {
   MIN_SECRET_LENGTH,
@@ -26,7 +26,17 @@ import {
   tradingDayCandidates,
   webhookSecretUsable,
 } from '~/lib/exit/webhook'
-import { reportError } from '~/lib/observability/report'
+import {
+  feedDeliveryReport,
+  TV_WEBHOOK_ROUTE,
+} from '~/lib/observability/feedDelivery'
+import {
+  breadcrumb,
+  reportError,
+  reportingEnabled,
+  reportMeasurement,
+  reportWarning,
+} from '~/lib/observability/report'
 
 const json = (body: unknown, status: number): Response =>
   new Response(JSON.stringify(body), {
@@ -47,8 +57,78 @@ function secretMatches(provided: string, expected: string): boolean {
   return timingSafeEqual(a, b)
 }
 
-/** Shared by both verbs — resolves the configured secret and checks the path. */
-function authorise(secret: string): Response | null {
+/**
+ * Wraps a report so it fires at most once for the life of this instance.
+ *
+ * Both callers below sit *above* the secret check, so anyone who can guess the
+ * URL shape can reach them. Reporting every time would let an anonymous caller
+ * spend the month's error budget on one missing environment variable — the
+ * concern that already put `Unauthorised` in `ignoreErrors`. One event per cold
+ * start says what is wrong and cannot be turned into a flood.
+ *
+ * A helper rather than two hand-rolled `let` flags, which is what this was:
+ * two byte-parallel blocks whose names differed by one word, teaching the next
+ * person to copy whichever one their eye landed on. The `reportError` calls
+ * further down are deliberately *not* wrapped — they are past the secret check,
+ * so only a real delivery reaches them.
+ */
+function once<A extends unknown[]>(report: (...args: A) => void): (...args: A) => void {
+  let spent = false
+  return (...args: A) => {
+    if (spent) return
+    /*
+     * Not spent on a report that goes nowhere.
+     *
+     * `report.ts` returns silently until `Sentry.init` has made a client, and
+     * `instrument.server.ts` says in its own header that Nitro reaches it
+     * through two lazy dynamic imports — so `init` runs on the first *request*.
+     * If the first thing a cold instance handled was a refused secret, the
+     * latch was spent on a no-op and every later refusal on that warm instance
+     * was suppressed: precisely the rotated-secret case this exists to catch,
+     * silenced by the mechanism meant to surface it.
+     *
+     * Returning early is safe: with no client there is nothing to flood.
+     */
+    if (!reportingEnabled()) return
+    spent = true
+    report(...args)
+  }
+}
+
+/** The feed is switched off: the secret is unset, or too short to be worth having. */
+const reportUnconfigured = once(() => {
+  reportWarning('exit feed: webhook secret unset or too short', {
+    route: TV_WEBHOOK_ROUTE,
+    status: 503,
+  }, [TV_WEBHOOK_ROUTE, 'not-configured'])
+})
+
+/**
+ * Something offered a secret this app does not accept.
+ *
+ * `method` is the diagnosis, and is the first refusal's — a refused POST is
+ * something still *delivering* to a URL this app no longer accepts, which is
+ * what a rotated secret looks like from here, while a refused GET is a person
+ * checking the URL by hand or a scanner walking the path.
+ */
+const reportSecretRefused = once((method: 'GET' | 'POST') => {
+  reportWarning('exit feed: secret refused', {
+    route: TV_WEBHOOK_ROUTE,
+    status: 404,
+    method,
+  }, [TV_WEBHOOK_ROUTE, 'secret-refused'])
+})
+
+/**
+ * Shared by both verbs — resolves the configured secret and checks the path.
+ *
+ * `method` is carried only so a refusal can say which verb it refused. It is
+ * the difference between a diagnosis and a shrug: a rejected POST is something
+ * *delivering* to a URL this app no longer accepts, which is what a rotated
+ * secret looks like from here, while a rejected GET is a person checking a URL
+ * by hand or a scanner walking the path.
+ */
+function authorise(secret: string, method: 'GET' | 'POST'): Response | null {
   const expected = process.env.TRADINGVIEW_WEBHOOK_SECRET
 
   // The same predicate the Exit Rules screen reports with, so a too-short secret
@@ -58,12 +138,36 @@ function authorise(secret: string): Response | null {
       '[tv] TRADINGVIEW_WEBHOOK_SECRET is unset or shorter than ' +
         `${String(MIN_SECRET_LENGTH)} characters — refusing to accept webhooks.`,
     )
+    /*
+     * The console line above reaches nobody. Sentry's Console integration is
+     * removed in `instrument.server.ts` on purpose, and Vercel's hobby plan
+     * keeps runtime logs for an hour — so until now the feed being switched off
+     * looked exactly like the feed being quiet.
+     */
+    reportUnconfigured()
     return json({ error: 'webhook not configured' }, 503)
   }
 
-  // 404 rather than 401: an unauthenticated prober learns nothing about whether
-  // this path is a real endpoint.
-  if (!secretMatches(secret, expected)) return json({ error: 'not found' }, 404)
+  /*
+   * 404 rather than 401: an unauthenticated prober learns nothing about whether
+   * this path is a real endpoint. The answer is unchanged — what is reported
+   * about it is not.
+   *
+   * Reported once per cold start, and never with the secret that was offered.
+   * That string is attacker-controlled and is a credential when it is *not* an
+   * attack: the case this exists to catch is TradingView still delivering to a
+   * rotated URL, where the rejected value is the previous real secret. So the
+   * report says that a refusal happened and which verb it refused, and nothing
+   * about what was sent. `scrub.ts` redacts the path, but only because nothing
+   * here puts the secret anywhere it would have to.
+   *
+   * Until this existed, a rotated secret was indistinguishable from a port scan
+   * and showed up only as deliveries having quietly stopped.
+   */
+  if (!secretMatches(secret, expected)) {
+    reportSecretRefused(method)
+    return json({ error: 'not found' }, 404)
+  }
 
   return null
 }
@@ -76,7 +180,7 @@ export const Route = createFileRoute('/api/tv/$secret')({
        * is wired to it. Reports nothing beyond "the secret is right".
        */
       GET: ({ params }: { params: { secret: string } }) =>
-        authorise(params.secret) ?? json({ ok: true, endpoint: 'exit-rules feed' }, 200),
+        authorise(params.secret, 'GET') ?? json({ ok: true, endpoint: 'exit-rules feed' }, 200),
 
       POST: async ({
         request,
@@ -85,61 +189,61 @@ export const Route = createFileRoute('/api/tv/$secret')({
         request: Request
         params: { secret: string }
       }): Promise<Response> => {
-        const denied = authorise(params.secret)
+        const denied = authorise(params.secret, 'POST')
         if (denied) return denied
 
         /*
-         * The clock starts once the secret is accepted, and every path from
-         * here files a row in `exit_feed_deliveries`.
+         * The clock starts once the secret is accepted.
          *
-         * Nothing else can see this endpoint work. TradingView reports a
-         * delivery as a status code on a screen nobody watches, and a bar that
-         * arrives looks identical in `exit_feed_bars` whether it took 80ms or
-         * timed the alert out at 8s. The log is what separates "never arrived"
-         * from "arrived, was stored, and answered too late to be waited for" —
-         * and only the second of those is fixed by making the route faster.
-         *
-         * Deliberately *after* `authorise`: a wrong secret is answered with a
-         * 404 and no write. Anyone can POST here, and a table an unauthenticated
-         * caller can append to is a table an unauthenticated caller can fill.
+         * Deliberately after `authorise`: a wrong secret costs nothing beyond
+         * the comparison that refused it.
          */
-        const receivedAt = new Date()
         const startedAt = performance.now()
 
-        /** Files the delivery, then answers. Logging never fails the request. */
-        const finish = async (
+        /** Reports the outcome, then answers. Reporting never fails the request. */
+        const finish = (
           status: number,
           outcome: FeedDeliveryOutcome,
           body: Record<string, unknown>,
-          fields: Partial<Parameters<typeof recordFeedDelivery>[0]> = {},
-        ): Promise<Response> => {
-          try {
-            await recordFeedDelivery({
-              receivedAt,
-              // Measured to here, so the log's own write is not counted as time
-              // the delivery spent — see `recordFeedDelivery`.
-              durationMs: Math.round(performance.now() - startedAt),
-              outcome,
-              status,
-              ticker: null,
-              exchange: null,
-              instrumentId: null,
-              tradingDay: null,
-              backfilled: null,
-              priced: null,
-              detail: null,
-              ...fields,
-            })
-          } catch (error) {
-            // The bar is the job and it is already stored. A logging fault must
-            // not turn a delivery that succeeded into a 5xx TradingView retries.
-            console.error(
-              `[tv] delivery not logged: ${error instanceof Error ? error.message : String(error)}`,
-            )
-            // Nothing else records this one: the row that would have recorded it
-            // is the row that failed to write.
-            reportError(error, { route: 'tv-webhook', stage: 'delivery-log', status })
+          subject: { ticker?: string; exchange?: string | null } = {},
+        ): Response => {
+          const durationMs = Math.round(performance.now() - startedAt)
+
+          /*
+           * The measurement is the answer to "is anything arriving at all" —
+           * every delivery, counted and timed, billed against the metric quota
+           * rather than the error budget. It is the same instrument
+           * `server_fn.duration` gives every server function, which this route
+           * has never had: the alarm in `src/start.ts` is function middleware
+           * and a route handler never runs it.
+           *
+           * Nothing here is wrapped because nothing here can throw: `report.ts`
+           * guarantees that of all four functions, and `feedDeliveryReport` is
+           * pure.
+           */
+          reportMeasurement('tv_webhook.duration', durationMs, 'millisecond', {
+            outcome,
+            status,
+          })
+
+          const report = feedDeliveryReport(outcome, durationMs)
+          // Ticker and exchange only. Tags are indexed and searchable, so what
+          // goes in them is a decision rather than whatever the call site had.
+          const tags = {
+            route: TV_WEBHOOK_ROUTE,
+            outcome,
+            status,
+            durationMs,
+            ticker: subject.ticker ?? null,
+            exchange: subject.exchange ?? null,
           }
+
+          if (report.channel === 'warning') {
+            reportWarning(report.message, tags, report.fingerprint)
+          } else {
+            breadcrumb(report.message, tags)
+          }
+
           return json(body, status)
         }
 
@@ -148,7 +252,7 @@ export const Route = createFileRoute('/api/tv/$secret')({
           // Logged as well as returned: TradingView shows delivery failures only
           // as a status code, so the reason has to be findable server-side.
           console.error(`[tv] rejected payload: ${parsed.error}`)
-          return finish(400, 'INVALID_PAYLOAD', { error: parsed.error }, { detail: parsed.error })
+          return finish(400, 'INVALID_PAYLOAD', { error: parsed.error })
         }
 
         const { ticker, exchange, time, ...indicators } = parsed.payload
@@ -180,12 +284,10 @@ export const Route = createFileRoute('/api/tv/$secret')({
           // Not an error worth retrying: an alert exists for something this
           // account has never traded, so there is nothing to attach a bar to.
           console.error(`[tv] no instrument for ticker ${ticker} — bar discarded`)
-          return finish(
-            404,
-            'UNKNOWN_TICKER',
-            { error: `unknown instrument ${ticker}` },
-            { ticker, exchange: exchange ?? null },
-          )
+          return finish(404, 'UNKNOWN_TICKER', { error: `unknown instrument ${ticker}` }, {
+            ticker,
+            exchange: exchange ?? null,
+          })
         }
 
         const { symbol, tradingDay, backfilled } = stored
@@ -209,8 +311,28 @@ export const Route = createFileRoute('/api/tv/$secret')({
          * against any quote fetched later the same day — the price would be
          * correct and permanently unable to publish itself.
          */
+        /*
+         * Awaited, and the response waits for it.
+         *
+         * This was briefly fired-and-forgotten to shorten the answer, which
+         * does not work here: a Vercel function may be suspended the moment it
+         * responds, so an unawaited round trip is not "occasionally dropped"
+         * but routinely never run — and the `catch` below, the only thing that
+         * would say so, would not run either. Publishing the close would have
+         * quietly stopped working, which is worse than answering 75ms later.
+         * Doing it properly needs `waitUntil`, which is neither a dependency
+         * here nor reachable from a route handler.
+         *
+         * The delivery-log row is still gone with the screen that read it, so
+         * the answer costs two round trips rather than three.
+         *
+         * `asOf` is delivery time, not the payload's `time`, which is the bar's
+         * *open*. Filing a close under its opening timestamp would date every
+         * JP bar to 00:00 JST, and it would then lose the `setWhere` comparison
+         * against any quote fetched later the same day — the price would be
+         * correct and permanently unable to publish itself.
+         */
         let priced = false
-        let pricingFault: string | null = null
         try {
           priced = await cacheFeedClose({
             instrumentId: stored.instrumentId,
@@ -221,47 +343,29 @@ export const Route = createFileRoute('/api/tv/$secret')({
           })
         } catch (error) {
           /*
-           * Publishing the price is a bonus; recording the bar is the job.
-           * A throw here would 500 a request whose bar has already been
-           * stored, and TradingView retries a 5xx — so a pricing fault would
-           * present as the exit feed being down, which is the one failure
-           * this feature most needs to report honestly.
+           * Publishing the price is a bonus; recording the bar is the job. A
+           * throw here would 500 a request whose bar is already stored, and
+           * TradingView retries a 5xx — so a pricing fault would present as the
+           * exit feed being down, which is the one failure this feature most
+           * needs to report honestly.
            *
-           * The likely cause is the `price_source` enum missing 'FEED',
-           * i.e. drizzle/0004 not yet applied, so the message says so. It is
-           * carried into the delivery log as well: the console is not somewhere
-           * anyone looks, which is how this could fail quietly for a week.
+           * The likely cause is the `price_source` enum missing 'FEED', i.e.
+           * drizzle/0004 not yet applied, so the message says so. Reported as
+           * well as logged: the symptom is a stale badge, which looks like
+           * nothing happening, and the console is not somewhere anyone looks.
            */
-          pricingFault = error instanceof Error ? error.message : String(error)
+          const fault = error instanceof Error ? error.message : String(error)
           console.error(
-            `[tv] bar stored, price not published for ${symbol}: ${pricingFault}` +
+            `[tv] bar stored, price not published for ${symbol}: ${fault}` +
               ' — is drizzle/0004_price_source_feed.sql applied?',
           )
-          /*
-           * Also reported, not only logged and filed.
-           *
-           * The delivery log records this where someone can see it, but only if
-           * they open the Exit Rules screen — and the symptom it produces is a
-           * stale badge, which looks like nothing happening. This is the one
-           * fault on this route worth an alert.
-           */
-          reportError(error, { route: 'tv-webhook', symbol, tradingDay })
+          reportError(error, { route: TV_WEBHOOK_ROUTE, symbol, tradingDay })
         }
 
-        return finish(
-          200,
-          'STORED',
-          { ok: true, symbol, tradingDay, backfilled, priced },
-          {
-            ticker,
-            exchange: exchange ?? null,
-            instrumentId: stored.instrumentId,
-            tradingDay,
-            backfilled,
-            priced,
-            detail: pricingFault,
-          },
-        )
+        return finish(200, 'STORED', { ok: true, symbol, tradingDay, backfilled, priced }, {
+          ticker,
+          exchange: exchange ?? null,
+        })
       },
     },
   },

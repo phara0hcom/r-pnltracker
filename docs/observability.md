@@ -1,8 +1,11 @@
 # Reporting errors and finding slow paths
 
-Nothing new is written to Postgres for this. `exit_feed_deliveries` stays as it
-is — it answers a different question, and it is the only observability the app
-renders in its own UI.
+Nothing is written to Postgres for this. `exit_feed_deliveries` used to be the
+exception — the one piece of observability the app rendered in its own UI — and
+it is no longer written or read: Sentry now carries the same outcomes, and the
+row was a third of what the webhook made TradingView wait for. The table is left
+in the schema rather than dropped, because it still holds the history it
+collected.
 
 ## Why an external service at all
 
