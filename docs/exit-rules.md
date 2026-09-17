@@ -334,15 +334,6 @@ reported.** In the case this is written for — TradingView still delivering to 
 rotated URL — that string is the previous real secret, so only the fact of a
 refusal and the verb it refused are recorded.
 
-The log costs one round trip per delivery, which is a third of the route's
-throughput under a burst (measured against a Postgres 75ms away, 30 simultaneous
-deliveries: ~490ms without it, ~740ms with). That is the deliberate trade — a
-feed that cannot be observed cannot be fixed — and it is reversible: folding the
-insert into the price write as a second data-modifying CTE would make it free.
-
-Rows are never pruned. One per alert per day is a few thousand a year, which is
-nothing; the screen reads the newest 100 and tallies the last 24 hours.
-
 ## 5. Edge cases handled
 
 **Opening gaps are approximated, not observed.** The payload carries `close`
