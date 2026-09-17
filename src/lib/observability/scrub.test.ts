@@ -1,13 +1,6 @@
 import type { ErrorEvent } from '@sentry/tanstackstart-react'
 import { describe, expect, it } from 'vitest'
-import {
-  redactTvSecret,
-  scrubBreadcrumb,
-  scrubEvent,
-  scrubMetric,
-  scrubTransaction,
-  stripQuery,
-} from './scrub'
+import { redactTvSecret, scrubBreadcrumb, scrubEvent, scrubMetric, scrubSpanData, scrubTransaction, stripQuery } from './scrub'
 
 /**
  * An event shaped like the ones this app actually produces: a screen request
@@ -258,5 +251,96 @@ describe('scrubMetric', () => {
     })
 
     expect(metric.attributes).toEqual({ durationMs: 12, cached: false })
+  })
+})
+
+describe('span attributes', () => {
+  /*
+   * The attribute names are not invented. `httpServerSpansIntegration` sets
+   * `url.full` to `urlObj.href` and `http.target` to `pathname + search` on the
+   * server span of every sampled request, and the exporter copies the whole
+   * attribute bag onto `contexts.trace.data`. At a 5% trace sample that is one
+   * request in twenty.
+   */
+  it('strips the query string the rest of this file exists to remove', () => {
+    const scrubbed = scrubSpanData<unknown>({
+      'url.full': 'https://pnl.example.com/positions?symbol=8411&from=2026-01-01&account=NISA',
+      'http.target': '/positions?symbol=8411&account=NISA',
+      'url.query': 'symbol=8411&account=NISA',
+    })
+
+    expect(scrubbed['url.full']).toBe('https://pnl.example.com/positions')
+    expect(scrubbed['http.target']).toBe('/positions')
+    // The query on its own has no path left to keep: the key goes entirely.
+    expect(scrubbed).not.toHaveProperty('url.query')
+  })
+
+  it('redacts the webhook secret, which is a path segment and survives query stripping', () => {
+    const scrubbed = scrubSpanData<unknown>({
+      'url.full': 'https://pnl.example.com/api/tv/s3cr3t-token-24-chars-long',
+      'http.target': '/api/tv/s3cr3t-token-24-chars-long',
+      // An attribute this file has never seen, holding the same secret.
+      'some.future.attribute': 'handled /api/tv/s3cr3t-token-24-chars-long',
+    })
+
+    for (const value of Object.values(scrubbed)) {
+      expect(value).not.toContain('s3cr3t-token-24-chars-long')
+      expect(value).toContain('/api/tv/[redacted]')
+    }
+  })
+
+  it('drops the caller address, like the request env it sits beside', () => {
+    const scrubbed = scrubSpanData<unknown>({
+      'client.address': '203.0.113.7',
+      'http.client_ip': '203.0.113.7',
+      'http.response.status_code': 200,
+    })
+
+    expect(scrubbed).toEqual({ 'http.response.status_code': 200 })
+  })
+
+  it('scrubs the trace context of a transaction, where the exporter puts them', () => {
+    const event = scrubEvent({
+      type: 'transaction',
+      contexts: {
+        trace: {
+          trace_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          span_id: 'abc',
+          data: { 'url.full': 'https://pnl.example.com/api/tv/s3cr3t?x=1' },
+        },
+      },
+    })
+
+    expect(event.contexts?.trace?.data).toEqual({
+      'url.full': 'https://pnl.example.com/api/tv/[redacted]',
+    })
+  })
+
+  it('scrubs child spans too — a price provider span carries the API key', () => {
+    const event = scrubEvent({
+      type: 'transaction',
+      spans: [
+        {
+          span_id: 'abc',
+          trace_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          start_timestamp: 0,
+          data: { 'url.full': 'https://finnhub.io/api/v1/quote?symbol=AAPL&token=SECRETKEY' },
+        },
+      ],
+    })
+
+    expect(event.spans?.[0]?.data).toEqual({ 'url.full': 'https://finnhub.io/api/v1/quote' })
+  })
+
+  it('leaves an error event’s trace context exactly as it was', () => {
+    // No `data` on it, and adding an empty one would change every error event
+    // to fix a transaction bug.
+    const event = scrubEvent(realisticEvent())
+
+    expect(event.contexts?.trace).toEqual({
+      trace_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      span_id: 'abc',
+      op: 'function.server',
+    })
   })
 })
