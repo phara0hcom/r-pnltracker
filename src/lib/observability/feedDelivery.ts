@@ -7,8 +7,6 @@
  * says that file is for parsing the Pine payload — which this is not, and a
  * reader looking for a Sentry channel rule would never grep it.
  */
-import type { FeedDeliveryOutcome } from '~/db/exit.service'
-
 /**
  * The `route` tag and fingerprint head every report from this endpoint shares.
  *
@@ -19,6 +17,21 @@ import type { FeedDeliveryOutcome } from '~/db/exit.service'
  * Nothing would fail, and the symptom is an issue list that looks calm.
  */
 export const TV_WEBHOOK_ROUTE = 'tv-webhook'
+
+/**
+ * How a delivery ended.
+ *
+ * Stated here rather than derived from the database's `feed_delivery_outcome`
+ * enum. That derivation was worth it while the delivery log was written and
+ * read; now that nothing writes it, it would keep a dormant table, its enum and
+ * a migration alive to type three strings — and would make this module, in
+ * `src/lib/`, reach into `src/db/` against the rule in CLAUDE.md.
+ *
+ * Drift is still caught where it matters: the route types its own `outcome` as
+ * the database's `FeedDeliveryOutcome` and passes it in here, so the two unions
+ * have to stay assignable or the call stops compiling.
+ */
+export type FeedOutcome = 'STORED' | 'UNKNOWN_TICKER' | 'INVALID_PAYLOAD'
 
 /**
  * A delivery slower than this is announced, not merely measured.
@@ -47,14 +60,8 @@ export type FeedDeliveryReport =
   | { channel: 'warning'; message: string; fingerprint: string[] }
   | { channel: 'breadcrumb'; message: string }
 
-/**
- * Typed against the database's own outcome enum rather than a copy of it, so
- * the switch below is checked for exhaustiveness against the real thing. A new
- * member added to `feed_delivery_outcome` stops compiling here until someone
- * decides what it is worth reporting.
- */
 export function feedDeliveryReport(
-  outcome: FeedDeliveryOutcome,
+  outcome: FeedOutcome,
   durationMs: number,
 ): FeedDeliveryReport {
   switch (outcome) {

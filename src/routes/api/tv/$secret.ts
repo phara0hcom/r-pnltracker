@@ -33,6 +33,7 @@ import {
 import {
   breadcrumb,
   reportError,
+  reportingEnabled,
   reportMeasurement,
   reportWarning,
 } from '~/lib/observability/report'
@@ -75,6 +76,20 @@ function once<A extends unknown[]>(report: (...args: A) => void): (...args: A) =
   let spent = false
   return (...args: A) => {
     if (spent) return
+    /*
+     * Not spent on a report that goes nowhere.
+     *
+     * `report.ts` returns silently until `Sentry.init` has made a client, and
+     * `instrument.server.ts` says in its own header that Nitro reaches it
+     * through two lazy dynamic imports — so `init` runs on the first *request*.
+     * If the first thing a cold instance handled was a refused secret, the
+     * latch was spent on a no-op and every later refusal on that warm instance
+     * was suppressed: precisely the rotated-secret case this exists to catch,
+     * silenced by the mechanism meant to surface it.
+     *
+     * Returning early is safe: with no client there is nothing to flood.
+     */
+    if (!reportingEnabled()) return
     spent = true
     report(...args)
   }
@@ -297,28 +312,19 @@ export const Route = createFileRoute('/api/tv/$secret')({
          * correct and permanently unable to publish itself.
          */
         /*
-         * Fired, not awaited — and this is the whole of "answer as soon as the
-         * data is good".
+         * Awaited, and the response waits for it.
          *
-         * The bar above is the job, so the response waits for it: answering
-         * first and storing after would mean a delivery TradingView believes
-         * landed, with nothing to retry it, if the instance is frozen before
-         * the write commits. Publishing the close is the opposite kind of work.
-         * It was already a bonus — the `catch` it used to have exists because a
-         * pricing fault must never 5xx a bar that is safely stored — so the
-         * worst a dropped one costs is that Positions reads a slightly staler
-         * price until a quote provider is next polled.
+         * This was briefly fired-and-forgotten to shorten the answer, which
+         * does not work here: a Vercel function may be suspended the moment it
+         * responds, so an unawaited round trip is not "occasionally dropped"
+         * but routinely never run — and the `catch` below, the only thing that
+         * would say so, would not run either. Publishing the close would have
+         * quietly stopped working, which is worse than answering 75ms later.
+         * Doing it properly needs `waitUntil`, which is neither a dependency
+         * here nor reachable from a route handler.
          *
-         * That leaves one round trip on the answer instead of three: the
-         * delivery-log row is gone with the screen that read it, and this one
-         * no longer holds the response open. At ~75ms each against Neon (see
-         * the region note in `vite.config.ts`), and with every alert of the day
-         * firing into the same burst, that is the difference between alerts
-         * that answer in time and alerts TradingView abandons.
-         *
-         * `.catch` is not optional. An unawaited rejection is an
-         * `unhandledRejection`, which is the same shape of fault as the pool
-         * error that was killing this instance — see `src/db/index.ts`.
+         * The delivery-log row is still gone with the screen that read it, so
+         * the answer costs two round trips rather than three.
          *
          * `asOf` is delivery time, not the payload's `time`, which is the bar's
          * *open*. Filing a close under its opening timestamp would date every
@@ -326,19 +332,27 @@ export const Route = createFileRoute('/api/tv/$secret')({
          * against any quote fetched later the same day — the price would be
          * correct and permanently unable to publish itself.
          */
-        void cacheFeedClose({
-          instrumentId: stored.instrumentId,
-          assetClass: stored.assetClass,
-          close: indicators.close,
-          asOf: new Date(),
-          tradingDay,
-        }).catch((error: unknown) => {
+        let priced = false
+        try {
+          priced = await cacheFeedClose({
+            instrumentId: stored.instrumentId,
+            assetClass: stored.assetClass,
+            close: indicators.close,
+            asOf: new Date(),
+            tradingDay,
+          })
+        } catch (error) {
           /*
+           * Publishing the price is a bonus; recording the bar is the job. A
+           * throw here would 500 a request whose bar is already stored, and
+           * TradingView retries a 5xx — so a pricing fault would present as the
+           * exit feed being down, which is the one failure this feature most
+           * needs to report honestly.
+           *
            * The likely cause is the `price_source` enum missing 'FEED', i.e.
            * drizzle/0004 not yet applied, so the message says so. Reported as
-           * well as logged: the symptom it produces is a stale badge, which
-           * looks like nothing happening, and the console is not somewhere
-           * anyone looks — which is how this could fail quietly for a week.
+           * well as logged: the symptom is a stale badge, which looks like
+           * nothing happening, and the console is not somewhere anyone looks.
            */
           const fault = error instanceof Error ? error.message : String(error)
           console.error(
@@ -346,14 +360,9 @@ export const Route = createFileRoute('/api/tv/$secret')({
               ' — is drizzle/0004_price_source_feed.sql applied?',
           )
           reportError(error, { route: TV_WEBHOOK_ROUTE, symbol, tradingDay })
-        })
+        }
 
-        /*
-         * `priced` is deliberately absent from the body: the publish above has
-         * not resolved yet and nothing reads this body anyway — TradingView
-         * discards it, and the GET health check has its own.
-         */
-        return finish(200, 'STORED', { ok: true, symbol, tradingDay, backfilled }, {
+        return finish(200, 'STORED', { ok: true, symbol, tradingDay, backfilled, priced }, {
           ticker,
           exchange: exchange ?? null,
         })

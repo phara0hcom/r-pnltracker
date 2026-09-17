@@ -69,3 +69,51 @@ describe('feedDeliveryReport', () => {
     for (const message of messages) expect(message).not.toMatch(/\d/)
   })
 })
+
+describe('the report-once latch', () => {
+  /*
+   * Rebuilt here rather than imported: the real one is a module-level closure
+   * in the route, which is what made the bug invisible — nothing could reach it
+   * to ask whether it had been spent. The behaviour is what matters.
+   */
+  const build = (live: () => boolean) => {
+    let spent = false
+    const calls: string[] = []
+    return {
+      calls,
+      fire: (what: string) => {
+        if (spent) return
+        if (!live()) return
+        spent = true
+        calls.push(what)
+      },
+    }
+  }
+
+  it('does not spend its one chance before Sentry has a client', () => {
+    /*
+     * `init` runs on the first request — `instrument.server.ts` reaches it
+     * through two lazy dynamic imports. A cold instance whose first delivery is
+     * a refused secret would otherwise burn the latch on a report that went
+     * nowhere, and stay silent for the rest of its life: the rotated-secret
+     * case, silenced by the thing meant to surface it.
+     */
+    let live = false
+    const latch = build(() => live)
+
+    latch.fire('while cold')
+    expect(latch.calls).toEqual([])
+
+    live = true
+    latch.fire('once initialised')
+    expect(latch.calls).toEqual(['once initialised'])
+  })
+
+  it('still reports only once thereafter, so a prober cannot flood', () => {
+    const latch = build(() => true)
+    latch.fire('first')
+    latch.fire('second')
+    latch.fire('third')
+    expect(latch.calls).toEqual(['first'])
+  })
+})

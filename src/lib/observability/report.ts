@@ -58,6 +58,18 @@ function enabled(): boolean {
 }
 
 /**
+ * Whether a report made right now would actually go anywhere.
+ *
+ * Exported for one caller: a report-once latch cannot tell the difference
+ * between "reported" and "silently dropped because `init` has not run yet",
+ * and spending its single chance on the second is how the condition it guards
+ * goes unreported for the life of the instance.
+ */
+export function reportingEnabled(): boolean {
+  return enabled()
+}
+
+/**
  * A fault worth an alert: a real error object, with its stack.
  *
  * `tags` are indexed and searchable in Sentry, so they are where the ticker or

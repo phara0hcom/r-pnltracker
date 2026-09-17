@@ -291,8 +291,10 @@ the burst before, ~480ms after.
 
 ## 4.3 The feed says what it did
 
-Every delivery that gets past the secret files a row in `exit_feed_deliveries`,
-and the Exit Rules screen shows them under **Feed deliveries**.
+Every delivery that gets past the secret is reported to Sentry. There is no
+table and no screen: `exit_feed_deliveries` and the **Feed deliveries** panel
+both existed for this and are gone, because the row cost a round trip on the
+answer and the screen had to be opened on purpose to tell you anything.
 
 This exists because the endpoint answers a machine. TradingView reports a
 delivery as a status code on a page nobody watches, and a bar that arrives looks
@@ -302,22 +304,35 @@ different problems all presented the same way — as every plan quietly reading
 
 | What you see | What happened | Where the fix is |
 |---|---|---|
-| No row at all | The alert never fired, or never pointed here | TradingView |
-| `Payload refused` (400) | It fired; the body was not usable | The Pine script |
-| `Unknown ticker` (404) | It fired; nothing here trades that name | The alert, or the import |
-| `Stored, slow` (200) | The bar landed, and the answer may have come too late for the alert to wait | This route |
-| `Stored, price failed` | The bar landed; publishing its close threw | Usually a missing migration |
+| No `tv_webhook.duration` at all | The alert never fired, or never pointed here | TradingView |
+| `exit feed: payload rejected` (400) | It fired; the body was not usable | The Pine script |
+| `exit feed: no instrument for ticker` (404) | It fired; nothing here trades that name | The alert, or the import |
+| `exit feed: slow delivery` (200) | The bar landed, and the answer may have come too late for the alert to wait | This route |
+| `engine warning` on the price publish | The bar landed; publishing its close threw | Usually a missing migration |
+| `exit feed: secret refused` (404) | Something offered a secret this app does not accept | A rotated secret, or a scanner |
+| `exit feed: webhook secret unset or too short` (503) | The feed is switched off | `TRADINGVIEW_WEBHOOK_SECRET` |
 
-Only the fourth is fixed by making the route faster, which is why the duration
-gets a column of its own. It is server-side handling time and stops before the
-log row is written — the cost of observing is not charged to the delivery — and
-no server can measure the reply travelling back, so a delivery TradingView gave
-up on still shows a 200 here. That asymmetry is the point: a 200 in this table
-beside a failure in TradingView's alert log *is* the diagnosis.
+Every delivery — including the ordinary ones — is also recorded as a
+`tv_webhook.duration` measurement tagged with its outcome, which is what answers
+"is anything arriving at all". It is billed against the metric quota rather than
+the error budget, so counting the successes is affordable; a bar that landed in
+time is a breadcrumb, not an event.
 
-**A wrong secret is answered with a 404 and never recorded.** Anyone can POST at
-this URL, and a table an unauthenticated caller can append to is a table an
-unauthenticated caller can fill.
+Only the slow case is fixed by making the route faster. The duration is
+server-side handling time, and no server can measure the reply travelling back,
+so a delivery TradingView gave up on still reports a 200 here. That asymmetry is
+the point: a 200 in Sentry beside a failure in TradingView's alert log *is* the
+diagnosis.
+
+The two reports above that sit *before* the secret check — `secret refused` and
+`webhook secret unset or too short` — fire at most once per cold start. Anyone
+can reach them, and an error budget an anonymous caller can spend is an error
+budget an anonymous caller can exhaust.
+
+**A wrong secret is answered with a 404, and the secret offered is never
+reported.** In the case this is written for — TradingView still delivering to a
+rotated URL — that string is the previous real secret, so only the fact of a
+refusal and the verb it refused are recorded.
 
 The log costs one round trip per delivery, which is a third of the route's
 throughput under a burst (measured against a Postgres 75ms away, 30 simultaneous
@@ -395,7 +410,7 @@ a zero-share sale.
 | `src/lib/exit/entry.ts` | Current holding streak, for prefill |
 | `src/lib/exit/webhook.ts` | Payload parsing, timezone and Pine-JSON repair |
 | `src/routes/api/tv/$secret.ts` | The webhook endpoint (no session — see §1.1) |
-| `src/components/exits/FeedDeliveryLog.tsx` | The delivery log on screen — see §4.3 |
+| `src/lib/observability/feedDelivery.ts` | Which deliveries are worth an event — see §4.3 |
 | `src/db/exit.service.ts` | Plans, settings, bar storage |
 | `src/db/prices.service.ts` | Publishing a bar close into the shared price cache |
 | `src/lib/prices/feed.ts` | Which asset classes a feed close may be published for |
