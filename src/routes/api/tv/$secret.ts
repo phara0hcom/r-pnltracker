@@ -18,8 +18,10 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { createFileRoute } from '@tanstack/react-router'
+import { waitUntil } from '@vercel/functions'
 import { storeFeedBar, type FeedDeliveryOutcome } from '~/db/exit.service'
 import { cacheFeedClose } from '~/db/prices.service'
+import type { FeedPayload } from '~/lib/exit/webhook'
 import {
   MIN_SECRET_LENGTH,
   parseFeedBody,
@@ -28,6 +30,7 @@ import {
 } from '~/lib/exit/webhook'
 import {
   feedDeliveryReport,
+  SLOW_ACCEPT_MS,
   TV_WEBHOOK_ROUTE,
 } from '~/lib/observability/feedDelivery'
 import {
@@ -172,6 +175,159 @@ function authorise(secret: string, method: 'GET' | 'POST'): Response | null {
   return null
 }
 
+/** What survives payload parsing, kept alive across the `waitUntil` boundary. */
+type FeedIndicators = Omit<FeedPayload, 'ticker' | 'exchange' | 'time'>
+
+interface PendingDelivery {
+  ticker: string
+  exchange: string | null
+  time: number
+  indicators: FeedIndicators
+  /** `performance.now()` when the accept phase began — the delivery's own clock. */
+  acceptedAt: number
+}
+
+/**
+ * The bar write and price publish, run *after* the response has already gone
+ * to TradingView, via `waitUntil`.
+ *
+ * Nothing here can become an HTTP status any more — the answer is already
+ * sent — so every outcome, expected or not, has to reach Sentry itself or it
+ * reaches nobody. That is the trade the route now makes on purpose: TradingView
+ * gets its 2xx inside the 3s budget regardless of what the database is doing,
+ * and an unknown ticker, a stalled pool, or an unexpected throw shows up as a
+ * warning or an error here instead of a 404/5xx there.
+ *
+ * The two statements are still deliberately two rather than five — see
+ * `storeFeedBar`'s own header for why a burst of same-close alerts makes that
+ * matter — this just moves them off the request's own clock.
+ */
+async function processDelivery(delivery: PendingDelivery): Promise<void> {
+  const { ticker, exchange, time, indicators, acceptedAt } = delivery
+  try {
+    const storeStartedAt = performance.now()
+    const stored = await storeFeedBar({
+      ticker,
+      // Both candidates, because which one applies depends on the asset
+      // class — which this call resolves and picks with.
+      tradingDay: tradingDayCandidates(time, exchange),
+      barTime: new Date(time),
+      exchange,
+      ...indicators,
+    })
+    const storeDurationMs = Math.round(performance.now() - storeStartedAt)
+
+    if (!stored) {
+      // Not an error worth retrying: an alert exists for something this
+      // account has never traded, so there is nothing to attach a bar to.
+      // TradingView already has its 200 — this can only be reported, not
+      // returned — so it has to go to Sentry or nowhere.
+      console.error(`[tv] no instrument for ticker ${ticker} — bar discarded`)
+      const totalDurationMs = Math.round(performance.now() - acceptedAt)
+      // Typed as the database's own enum, so if `exit_feed_deliveries.outcome`
+      // ever changes, `feedDeliveryReport`'s union has to follow it or this
+      // stops compiling — the one place that drift would otherwise go unnoticed
+      // now that nothing writes the table itself.
+      const outcome: FeedDeliveryOutcome = 'UNKNOWN_TICKER'
+      reportMeasurement('tv_webhook.process_duration', totalDurationMs, 'millisecond', {
+        outcome,
+        storeDurationMs,
+      })
+      const report = feedDeliveryReport(outcome, totalDurationMs)
+      // UNKNOWN_TICKER is always the 'warning' branch — checked rather than
+      // asserted because `feedDeliveryReport`'s return type doesn't encode
+      // that per outcome, only `feedDeliveryReport` itself does.
+      if (report.channel === 'warning') {
+        reportWarning(report.message, {
+          route: TV_WEBHOOK_ROUTE,
+          ticker,
+          exchange,
+          storeDurationMs,
+        }, report.fingerprint)
+      }
+      return
+    }
+
+    const { symbol, tradingDay, instrumentId, assetClass, backfilled } = stored
+
+    /*
+     * The close is also the best price anyone has for this instrument at the
+     * moment it lands — see `cacheFeedClose`'s own header for the staleness
+     * guards. Publishing it is a bonus; recording the bar is the job, so a
+     * failure here is reported and swallowed rather than allowed to mark the
+     * whole delivery as failed.
+     *
+     * `asOf` is delivery time, not the payload's `time`, which is the bar's
+     * *open*. Filing a close under its opening timestamp would date every JP
+     * bar to 00:00 JST, and it would then lose the staleness comparison
+     * against any quote fetched later the same day.
+     */
+    let priced = false
+    const priceStartedAt = performance.now()
+    try {
+      priced = await cacheFeedClose({
+        instrumentId,
+        assetClass,
+        close: indicators.close,
+        asOf: new Date(),
+        tradingDay,
+      })
+    } catch (error) {
+      // The likely cause is the `price_source` enum missing 'FEED', i.e.
+      // drizzle/0004 not yet applied, so the message says so.
+      const fault = error instanceof Error ? error.message : String(error)
+      console.error(
+        `[tv] bar stored, price not published for ${symbol}: ${fault}` +
+          ' — is drizzle/0004_price_source_feed.sql applied?',
+      )
+      reportError(error, { route: TV_WEBHOOK_ROUTE, symbol, tradingDay })
+    }
+    const priceDurationMs = Math.round(performance.now() - priceStartedAt)
+    const totalDurationMs = Math.round(performance.now() - acceptedAt)
+
+    // The measurement is the answer to "is anything arriving and landing at
+    // all" — every processed delivery, counted and timed, billed against the
+    // metric quota rather than the error budget.
+    const outcome: FeedDeliveryOutcome = 'STORED'
+    reportMeasurement('tv_webhook.process_duration', totalDurationMs, 'millisecond', {
+      outcome,
+      storeDurationMs,
+      priceDurationMs,
+      priced,
+    })
+
+    const report = feedDeliveryReport(outcome, totalDurationMs)
+    const tags = {
+      route: TV_WEBHOOK_ROUTE,
+      ticker,
+      exchange,
+      symbol,
+      tradingDay,
+      backfilled,
+      storeDurationMs,
+      priceDurationMs,
+      priced,
+    }
+    if (report.channel === 'warning') {
+      reportWarning(report.message, tags, report.fingerprint)
+    } else {
+      breadcrumb(report.message, tags)
+    }
+  } catch (error) {
+    /*
+     * Nothing upstream is waiting on this any more. Before the response moved
+     * earlier, a throw here surfaced as a 5xx and TradingView retried it; now
+     * it has to report itself or it vanishes into an unhandled rejection that
+     * Fluid Compute logs and nothing else sees.
+     */
+    console.error(
+      `[tv] deferred processing failed for ${ticker}: ` +
+        (error instanceof Error ? error.message : String(error)),
+    )
+    reportError(error, { route: TV_WEBHOOK_ROUTE, ticker, phase: 'deferred' })
+  }
+}
+
 export const Route = createFileRoute('/api/tv/$secret')({
   server: {
     handlers: {
@@ -193,179 +349,81 @@ export const Route = createFileRoute('/api/tv/$secret')({
         if (denied) return denied
 
         /*
-         * The clock starts once the secret is accepted.
+         * The clock starts once the secret is accepted. Deliberately after
+         * `authorise`: a wrong secret costs nothing beyond the comparison that
+         * refused it.
          *
-         * Deliberately after `authorise`: a wrong secret costs nothing beyond
-         * the comparison that refused it.
+         * Everything from here to the response does no *database* I/O, on
+         * purpose — just reading the request body and running it through a
+         * JSON parse and a schema check. TradingView gives this
+         * route 3s to answer; storing the bar and publishing its price used to
+         * sit inside that budget as two database round trips to a region a
+         * continent away, and a burst of same-close alerts could queue behind
+         * a stalled pool for longer than that. Neither can lose the delivery
+         * any more, because neither runs before the response does — see
+         * `processDelivery` below, which runs after via `waitUntil`.
          */
-        const startedAt = performance.now()
-
-        /** Reports the outcome, then answers. Reporting never fails the request. */
-        const finish = (
-          status: number,
-          outcome: FeedDeliveryOutcome,
-          body: Record<string, unknown>,
-          subject: { ticker?: string; exchange?: string | null } = {},
-        ): Response => {
-          const durationMs = Math.round(performance.now() - startedAt)
-
-          /*
-           * The measurement is the answer to "is anything arriving at all" —
-           * every delivery, counted and timed, billed against the metric quota
-           * rather than the error budget. It is the same instrument
-           * `server_fn.duration` gives every server function, which this route
-           * has never had: the alarm in `src/start.ts` is function middleware
-           * and a route handler never runs it.
-           *
-           * Nothing here is wrapped because nothing here can throw: `report.ts`
-           * guarantees that of all four functions, and `feedDeliveryReport` is
-           * pure.
-           */
-          reportMeasurement('tv_webhook.duration', durationMs, 'millisecond', {
-            outcome,
-            status,
-          })
-
-          const report = feedDeliveryReport(outcome, durationMs)
-          // Ticker and exchange only. Tags are indexed and searchable, so what
-          // goes in them is a decision rather than whatever the call site had.
-          const tags = {
-            route: TV_WEBHOOK_ROUTE,
-            outcome,
-            status,
-            durationMs,
-            ticker: subject.ticker ?? null,
-            exchange: subject.exchange ?? null,
-          }
-
-          if (report.channel === 'warning') {
-            reportWarning(report.message, tags, report.fingerprint)
-          } else {
-            breadcrumb(report.message, tags)
-          }
-
-          return json(body, status)
-        }
+        const acceptedAt = performance.now()
 
         const parsed = parseFeedBody(await request.text())
+        const acceptDurationMs = Math.round(performance.now() - acceptedAt)
+
         if (!parsed.ok) {
           // Logged as well as returned: TradingView shows delivery failures only
           // as a status code, so the reason has to be findable server-side.
           console.error(`[tv] rejected payload: ${parsed.error}`)
-          return finish(400, 'INVALID_PAYLOAD', { error: parsed.error })
+          const outcome: FeedDeliveryOutcome = 'INVALID_PAYLOAD'
+          reportMeasurement('tv_webhook.accept_duration', acceptDurationMs, 'millisecond', {
+            outcome,
+          })
+          const report = feedDeliveryReport(outcome, acceptDurationMs)
+          // INVALID_PAYLOAD is always the 'warning' branch — see the same
+          // check in `processDelivery` for why this isn't just asserted.
+          if (report.channel === 'warning') {
+            reportWarning(report.message, {
+              route: TV_WEBHOOK_ROUTE,
+              status: 400,
+            }, report.fingerprint)
+          }
+          return json({ error: parsed.error }, 400)
         }
 
         const { ticker, exchange, time, ...indicators } = parsed.payload
+        const resolvedExchange = exchange ?? null
 
-        /*
-         * Two statements for the work, and deliberately not five.
-         *
-         * Every alert of the day fires at the same close, so this route is only
-         * ever hit in bursts — one delivery per open position, all at once.
-         * Each round trip is paid per delivery against a database on another
-         * continent (~75ms; see the region note in `vite.config.ts`) and holds
-         * a pooled connection for the whole of it, so the number of statements,
-         * not the work inside them, is what decides how many alerts can land
-         * together. Resolving the instrument, upserting the bar and backfilling
-         * the entry ATR are therefore one statement, and publishing the close
-         * is the other.
-         */
-        const stored = await storeFeedBar({
-          ticker,
-          // Both candidates, because which one applies depends on the asset
-          // class — which the statement below resolves and picks with.
-          tradingDay: tradingDayCandidates(time, exchange ?? null),
-          barTime: new Date(time),
-          exchange: exchange ?? null,
-          ...indicators,
+        reportMeasurement('tv_webhook.accept_duration', acceptDurationMs, 'millisecond', {
+          outcome: 'ACCEPTED',
         })
-
-        if (!stored) {
-          // Not an error worth retrying: an alert exists for something this
-          // account has never traded, so there is nothing to attach a bar to.
-          console.error(`[tv] no instrument for ticker ${ticker} — bar discarded`)
-          return finish(404, 'UNKNOWN_TICKER', { error: `unknown instrument ${ticker}` }, {
+        // The number that now actually maps to TradingView's 3s limit — see
+        // `SLOW_ACCEPT_MS`'s own header. The accept phase does no *database*
+        // I/O, so crossing it points at a cold start, CPU contention, or a
+        // slow client upload — never a slow query.
+        if (acceptDurationMs > SLOW_ACCEPT_MS) {
+          reportWarning('exit feed: slow accept', {
+            route: TV_WEBHOOK_ROUTE,
             ticker,
-            exchange: exchange ?? null,
+            exchange: resolvedExchange,
+            acceptDurationMs,
+          }, [TV_WEBHOOK_ROUTE, 'slow-accept'])
+        } else {
+          breadcrumb('exit feed: accepted', {
+            ticker,
+            exchange: resolvedExchange,
+            acceptDurationMs,
           })
         }
 
-        const { symbol, tradingDay, backfilled } = stored
+        waitUntil(
+          processDelivery({
+            ticker,
+            exchange: resolvedExchange,
+            time,
+            indicators,
+            acceptedAt,
+          }),
+        )
 
-        /*
-         * The close is also the best price anyone has for this instrument at
-         * the moment it lands. The alert fires *at* the daily close, whereas
-         * the quote providers are polled only when someone asks — so without
-         * this, Positions could show a staler figure than the Exit Rules card
-         * beside it, sourced from the same instrument minutes earlier.
-         *
-         * Only when the bar is the newest one held: a replayed bar carries an
-         * old trading day, and an old close must not become the current price.
-         * That test lives inside the write now rather than in a statement of
-         * its own — it is a condition on the row, so asking it separately cost
-         * a round trip and still left a gap for a later bar to commit in.
-         *
-         * `asOf` is delivery time, not the payload's `time`, which is the bar's
-         * *open*. Filing a close under its opening timestamp would date every
-         * JP bar to 00:00 JST, and it would then lose the `setWhere` comparison
-         * against any quote fetched later the same day — the price would be
-         * correct and permanently unable to publish itself.
-         */
-        /*
-         * Awaited, and the response waits for it.
-         *
-         * This was briefly fired-and-forgotten to shorten the answer, which
-         * does not work here: a Vercel function may be suspended the moment it
-         * responds, so an unawaited round trip is not "occasionally dropped"
-         * but routinely never run — and the `catch` below, the only thing that
-         * would say so, would not run either. Publishing the close would have
-         * quietly stopped working, which is worse than answering 75ms later.
-         * Doing it properly needs `waitUntil`, which is neither a dependency
-         * here nor reachable from a route handler.
-         *
-         * The delivery-log row is still gone with the screen that read it, so
-         * the answer costs two round trips rather than three.
-         *
-         * `asOf` is delivery time, not the payload's `time`, which is the bar's
-         * *open*. Filing a close under its opening timestamp would date every
-         * JP bar to 00:00 JST, and it would then lose the `setWhere` comparison
-         * against any quote fetched later the same day — the price would be
-         * correct and permanently unable to publish itself.
-         */
-        let priced = false
-        try {
-          priced = await cacheFeedClose({
-            instrumentId: stored.instrumentId,
-            assetClass: stored.assetClass,
-            close: indicators.close,
-            asOf: new Date(),
-            tradingDay,
-          })
-        } catch (error) {
-          /*
-           * Publishing the price is a bonus; recording the bar is the job. A
-           * throw here would 500 a request whose bar is already stored, and
-           * TradingView retries a 5xx — so a pricing fault would present as the
-           * exit feed being down, which is the one failure this feature most
-           * needs to report honestly.
-           *
-           * The likely cause is the `price_source` enum missing 'FEED', i.e.
-           * drizzle/0004 not yet applied, so the message says so. Reported as
-           * well as logged: the symptom is a stale badge, which looks like
-           * nothing happening, and the console is not somewhere anyone looks.
-           */
-          const fault = error instanceof Error ? error.message : String(error)
-          console.error(
-            `[tv] bar stored, price not published for ${symbol}: ${fault}` +
-              ' — is drizzle/0004_price_source_feed.sql applied?',
-          )
-          reportError(error, { route: TV_WEBHOOK_ROUTE, symbol, tradingDay })
-        }
-
-        return finish(200, 'STORED', { ok: true, symbol, tradingDay, backfilled, priced }, {
-          ticker,
-          exchange: exchange ?? null,
-        })
+        return json({ ok: true, ticker }, 200)
       },
     },
   },

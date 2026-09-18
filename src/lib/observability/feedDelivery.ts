@@ -41,12 +41,26 @@ export type FeedOutcome = 'STORED' | 'UNKNOWN_TICKER' | 'INVALID_PAYLOAD'
  * lives in a `type: 'function'` middleware, which wraps server functions only.
  * A route handler never runs it, whatever the header of that file hoped.
  *
- * It matters more here than there. Every alert of the day fires at the same
- * close, and TradingView gives up on an alert that answers too late — so a
- * delivery that has slowed is the difference between a bar arriving and a bar
- * being lost, with nothing on screen to say which happened.
+ * This no longer decides whether TradingView's alert survives — the route
+ * answers before this work even starts, so a slow delivery can no longer be
+ * lost to a timeout. It survives as the signal for the thing that replaced
+ * that risk: the database or the pool degrading, invisible to TradingView but
+ * not to whoever queries this outcome next.
  */
 export const SLOW_FEED_DELIVERY_MS = 2000
+
+/**
+ * An accept phase slower than this is announced, not merely measured.
+ *
+ * This is the number that now maps onto TradingView's own 3s delivery limit —
+ * everything the route awaits before answering. Set well under that limit
+ * because the accept phase does no *database* I/O — it only reads the small
+ * request body and runs a JSON parse and a schema check — so crossing even
+ * this lower bar means something is already wrong: a cold start, CPU
+ * contention on the instance, a burst of concurrent deliveries queuing ahead
+ * of this one, or the body itself arriving slowly over the network.
+ */
+export const SLOW_ACCEPT_MS = 1000
 
 /**
  * The channel a delivery deserves.
