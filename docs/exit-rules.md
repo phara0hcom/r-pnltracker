@@ -263,13 +263,16 @@ The alert setup is "repeat once per open position", and every one of them fires
 at the same daily close. So this endpoint is never hit at a steady rate — it is
 idle all day and then takes one delivery per open position in the same second.
 
-What decides how many of those can land together is the **number of statements
-per delivery**, not the work inside them. Each round trip is paid per delivery
-against a database on another continent — the function is pinned to `hnd1` and
-the Neon project is in `ap-southeast-1`, about 75ms apart (see the region note in
-`vite.config.ts`) — and a pooled connection is held for the whole of it.
+The response to TradingView no longer waits on either statement — see §4.3 for
+why — but what decides how fast that burst drains once it lands is still the
+**number of statements per delivery**, not the work inside them. Each round trip
+is paid per delivery against a database on another continent — the function is
+pinned to `hnd1` and the Neon project is in `ap-southeast-1`, about 75ms apart
+(see the region note in `vite.config.ts`) — and a pooled connection is held for
+the whole of it.
 
-A delivery therefore sends two:
+A delivery therefore runs two, inside `processDelivery`, scheduled with
+`waitUntil` once the response has already gone out:
 
 1. **Resolve, store, backfill.** One statement with three CTEs: find the
    instrument by ticker, upsert the bar, and fill in any entry ATR that bar
@@ -285,7 +288,9 @@ spend a round trip learning it, `tradingDayCandidates` computes the day under
 both zones and the statement picks with the row it has already resolved.
 
 Measured against a Postgres 75ms away, 30 simultaneous deliveries: ~1150ms for
-the burst before, ~480ms after.
+the burst before, ~480ms after. That figure no longer bounds what TradingView
+waits for — it now describes how long the backlog takes to drain in the
+background; `tv_webhook.process_duration` (§4.3) is the current number to read.
 
 ---
 
@@ -296,33 +301,42 @@ table and no screen: `exit_feed_deliveries` and the **Feed deliveries** panel
 both existed for this and are gone, because the row cost a round trip on the
 answer and the screen had to be opened on purpose to tell you anything.
 
-This exists because the endpoint answers a machine. TradingView reports a
-delivery as a status code on a page nobody watches, and a bar that arrives looks
-identical in `exit_feed_bars` whether it took 80ms or timed the alert out. Three
-different problems all presented the same way — as every plan quietly reading
-*stale*:
+This exists because the endpoint answers a machine, and it answers in two
+stages now: TradingView only ever sees the *accept* stage — the secret check
+and payload validation — and everything after that, storing the bar and
+publishing its close, runs once the response has already gone out (§4.2). A bar
+that arrives looks identical in `exit_feed_bars` whether it took 80ms or was
+slow enough to warrant a warning. Several different problems all present the
+same way — as every plan quietly reading *stale*:
 
 | What you see | What happened | Where the fix is |
 |---|---|---|
-| No `tv_webhook.duration` at all | The alert never fired, or never pointed here | TradingView |
+| No `tv_webhook.accept_duration` at all | The alert never fired, or never pointed here | TradingView |
 | `exit feed: payload rejected` (400) | It fired; the body was not usable | The Pine script |
-| `exit feed: no instrument for ticker` (404) | It fired; nothing here trades that name | The alert, or the import |
-| `exit feed: slow delivery` (200) | The bar landed, and the answer may have come too late for the alert to wait | This route |
+| `exit feed: slow accept` | The route itself was slow to answer — a cold start, CPU contention, or a slow upload | This route, or the instance |
+| `exit feed: no instrument for ticker` (still 200) | It fired and was accepted; nothing here trades that name — found only after answering, so TradingView never sees it | The alert, or the import |
+| `exit feed: slow delivery` (still 200) | The bar landed, but the database took longer than usual — no longer a risk to the alert itself | The database, or the pool |
 | `engine warning` on the price publish | The bar landed; publishing its close threw | Usually a missing migration |
 | `exit feed: secret refused` (404) | Something offered a secret this app does not accept | A rotated secret, or a scanner |
 | `exit feed: webhook secret unset or too short` (503) | The feed is switched off | `TRADINGVIEW_WEBHOOK_SECRET` |
 
-Every delivery — including the ordinary ones — is also recorded as a
-`tv_webhook.duration` measurement tagged with its outcome, which is what answers
-"is anything arriving at all". It is billed against the metric quota rather than
-the error budget, so counting the successes is affordable; a bar that landed in
-time is a breadcrumb, not an event.
+Every delivery is recorded twice, because the two stages answer different
+questions. `tv_webhook.accept_duration`, tagged `ACCEPTED` or `INVALID_PAYLOAD`,
+answers "is anything arriving, and are we answering it in time" — this is the
+one that actually maps to TradingView's 3s limit, since nothing after the
+accept stage can make that answer later. `tv_webhook.process_duration`, tagged
+`STORED` or `UNKNOWN_TICKER` and measured inside `processDelivery`, answers "is
+anything actually landing in the database". Both are billed against the metric
+quota rather than the error budget, so counting the successes is affordable; a
+bar that lands in time is a breadcrumb on the process side, not an event.
 
-Only the slow case is fixed by making the route faster. The duration is
-server-side handling time, and no server can measure the reply travelling back,
-so a delivery TradingView gave up on still reports a 200 here. That asymmetry is
-the point: a 200 in Sentry beside a failure in TradingView's alert log *is* the
-diagnosis.
+The old asymmetry here — a delivery TradingView gave up on still reporting a
+200 — is mostly gone: storing the bar and publishing its close no longer sit
+inside TradingView's own timeout, so a slow database can no longer cost a
+delivery, only a stale bar and a warning. What is left is narrower and worth
+watching on its own: `exit feed: slow accept` means the route itself, before
+any database call, was slow enough to risk the 3s budget — which now points at
+the instance, not the query.
 
 The two reports above that sit *before* the secret check — `secret refused` and
 `webhook secret unset or too short` — fire at most once per cold start. Anyone
