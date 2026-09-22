@@ -21,6 +21,7 @@ import type { TradingDayCandidates } from '~/lib/exit/webhook'
 /** One stored plan, with the instrument it belongs to resolved. */
 export interface ExitRuleRecord {
   id: string
+  userId: string
   instrumentId: string
   symbol: string
   name: string
@@ -68,6 +69,7 @@ function toRecord(row: {
 }): ExitRuleRecord {
   return {
     id: row.rule.id,
+    userId: row.rule.userId,
     instrumentId: row.rule.instrumentId,
     symbol: row.instrument.symbol,
     name: row.instrument.name,
@@ -101,6 +103,23 @@ export async function listExitRules(
     .innerJoin(instruments, eq(exitRules.instrumentId, instruments.id))
     .where(and(...conditions))
     .orderBy(asc(exitRules.entryDate))
+
+  return rows.map(toRecord)
+}
+
+/**
+ * Every live plan against one instrument, whichever user owns it.
+ *
+ * Unscoped by user, like `barsFor` — the webhook's notify path knows only the
+ * instrument a bar just arrived for, not who is asking. Callers group the
+ * result by `userId` themselves.
+ */
+export async function listExitRulesForInstrument(instrumentId: string): Promise<ExitRuleRecord[]> {
+  const rows = await db
+    .select({ rule: exitRules, instrument: instruments })
+    .from(exitRules)
+    .innerJoin(instruments, eq(exitRules.instrumentId, instruments.id))
+    .where(and(eq(exitRules.instrumentId, instrumentId), isNull(exitRules.archivedAt)))
 
   return rows.map(toRecord)
 }

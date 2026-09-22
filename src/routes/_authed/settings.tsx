@@ -4,6 +4,7 @@ import { useState } from 'react'
 import styles from './settings.module.scss'
 import { ASSET_LABEL } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
+import { PushNotificationSettings } from '~/components/notifications/PushNotificationSettings'
 import { Empty, PageHeader, Section, Table } from '~/components/screen'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
@@ -237,6 +238,13 @@ function Settings() {
             </dd>
           </dl>
         </div>
+      </Section>
+
+      <Section
+        title="Notifications"
+        description="A browser notification whenever an exit-rule recommendation changes — sent even when the app is closed."
+      >
+        <PushNotificationSettings />
       </Section>
     </>
   )

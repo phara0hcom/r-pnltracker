@@ -15,6 +15,13 @@
       "when": 1789125206742,
       "tag": "0001_feed_delivery_log",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790064369331,
+      "tag": "0002_loose_mister_sinister",
+      "breakpoints": true
     }
   ]
 }

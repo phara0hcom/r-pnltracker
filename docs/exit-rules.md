@@ -348,6 +348,51 @@ reported.** In the case this is written for — TradingView still delivering to 
 rotated URL — that string is the previous real secret, so only the fact of a
 refusal and the verb it refused are recorded.
 
+## 4.4 Push notifications on a recommendation change
+
+A subscribed browser gets an OS notification whenever a plan's suggested
+action changes — `Hold` → `Move to breakeven`, `Trail active` → `Take
+partial`, any transition, of any severity — even when the app is closed. This
+is Web Push, not the plain in-page `Notification` API: the framework's most
+likely failure mode is a lapsed alert (§1.3), and the moment a bar actually
+lands and changes something is almost always market close, when nobody has
+the screen open.
+
+**There is no separate recalculation.** The webhook's own `processDelivery`
+(§4.2) already resolves the instrument a bar belongs to; once the bar is
+stored, `notifyExitActionChanges` re-runs `assess()` for every live plan
+against that instrument, exactly as the screen would, and diffs the result
+against `exit_action_state` — a small table holding only the last action kind
+a plan was evaluated at. That table is deliberately *not* a column on
+`exit_rules`: everything on that table is a locked entry fact, and this value
+is the opposite, expected to change on nearly every delivery. Keeping it
+separate means nothing in `assess()`'s own input path can ever read it by
+accident — the framework's "replayed, never re-read" rule for path-dependent
+state stays true by construction, not by discipline.
+
+**A plan's first-ever evaluation never notifies.** An absent row means "never
+seen", and the first observation only seeds it — otherwise shipping this
+would fire once for every open plan, and every new plan would notify on its
+first bar. The same silence covers a plan with nobody subscribed yet: the
+state still advances, so subscribing later does not deliver a backlog of
+every change that happened while no one was listening.
+
+**A transient send failure is retried; a dead subscription is pruned.**
+Sending is unconditional-retry, not fire-and-forget: `exit_action_state` only
+advances once at least one device actually received the push, so a network
+blip to the push service is retried on the *next* delivery rather than
+silently dropping a stop-out. A `404`/`410` from the push service, by
+contrast, means that endpoint is gone for good, and is deleted immediately.
+
+**Setup**: generate a key pair once with `npx web-push generate-vapid-keys`,
+set `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` /
+`VITE_VAPID_PUBLIC_KEY` (see `.env.example`), then enable notifications from
+**Settings → Notifications** on each device. Unset, the feature is simply
+off — the toggle says so rather than failing silently, the same contract as
+`TRADINGVIEW_WEBHOOK_SECRET`.
+
+---
+
 ## 5. Edge cases handled
 
 **Opening gaps are approximated, not observed.** The payload carries `close`
@@ -425,6 +470,11 @@ a zero-share sale.
 | `src/components/exits/ExitPlanRow.tsx` | The table row, for plans rated `neutral` |
 | `src/components/exits/ExitPlanDialog.tsx` | One plan in full, read-only — opened from either |
 | `src/components/exits/ExitRuleDialog.tsx` | The create/edit form (not the read dialog) |
+| `src/lib/notifications/exitActionNotice.ts` | Change detection and push payload shaping — pure |
+| `src/lib/notifications/webpush.ts` | The only module that imports `web-push` |
+| `src/db/notifications.service.ts` | Push subscriptions and `exit_action_state` storage |
+| `src/server/exitNotifications.ts` | Re-evaluates and pushes on a webhook delivery |
+| `src/components/notifications/PushNotificationSettings.tsx` | The Settings toggle |
 
 `src/lib/exit/` is pure and DB-free like the rest of `lib/`, so the whole rule
 set is tested against handmade bar sequences with no database and no network —
