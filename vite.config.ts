@@ -18,9 +18,11 @@ const SERVER_ONLY = [
   /\/src\/db\//,
   /\/src\/lib\/auth\.ts$/,
   /\/src\/lib\/import\/decode\.ts$/,
+  // The only module that imports `web-push` — see its own header.
+  /\/src\/lib\/notifications\/webpush\.ts$/,
   // Not `better-auth`: its `dist/client` half is the browser SDK and belongs
   // in the client bundle. `src/lib/auth.ts` above is the server instance.
-  /\/node_modules\/(pg|pg-pool|pg-protocol|pg-types|drizzle-orm|iconv-lite)\//,
+  /\/node_modules\/(pg|pg-pool|pg-protocol|pg-types|drizzle-orm|iconv-lite|web-push)\//,
   /*
    * Sentry's Node half, and the module-hook machinery OpenTelemetry patches with.
    *

@@ -108,6 +108,17 @@ SENTRY_DSN="https://...@o000000.ingest.sentry.io/000000"
 VITE_SENTRY_DSN="<the same DSN>"
 ```
 
+Optional — browser push notifications when an exit-rule recommendation
+changes. Leave these out and the feature is off; the Settings screen says so.
+See `docs/exit-rules.md`.
+
+```bash
+VAPID_PUBLIC_KEY="<from: npx web-push generate-vapid-keys>"
+VAPID_PRIVATE_KEY="<from the same command>"
+VAPID_SUBJECT="mailto:you@example.com"
+VITE_VAPID_PUBLIC_KEY="<the same public key>"
+```
+
 Generate the secret:
 ```bash
 openssl rand -base64 32

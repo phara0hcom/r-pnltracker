@@ -1,0 +1,36 @@
+@use '../../styles/mixins' as m;
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.desc {
+  flex: 1 1 20rem;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.button {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+}
+
+.note {
+  font-size: var(--text-sm);
+  color: var(--color-text-subtle);
+}
+
+.error {
+  flex-basis: 100%;
+  font-size: var(--text-sm);
+  color: var(--color-loss);
+}

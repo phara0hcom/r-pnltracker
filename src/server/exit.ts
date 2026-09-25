@@ -10,6 +10,7 @@ import { createServerFn } from '@tanstack/react-start'
 import Decimal from 'decimal.js'
 import { z } from 'zod'
 import { engineFor } from './engine'
+import { evaluateExitRule, positionsByPool } from './exitPosition'
 import { authed } from './middleware'
 import {
   archiveExitRule as archiveRule,
@@ -24,7 +25,6 @@ import {
 import type { AccountType, AssetClass } from '~/lib/domain/types'
 import { calendarFor, todayFor } from '~/lib/exit/calendar'
 import { openEntryStreaks, streakFor } from '~/lib/exit/entry'
-import { assess } from '~/lib/exit/rules'
 import { TRAILING_METHODS, type ExitActionKind, type TrailingMethod } from '~/lib/exit/types'
 import { webhookSecretUsable } from '~/lib/exit/webhook'
 import { poolKey } from '~/lib/pnl/engine'
@@ -151,48 +151,15 @@ export const getExitScreen = createServerFn({ method: 'GET' })
     // by a session for part of every day.
     const now = new Date()
 
-    const heldBy = new Map(
-      positions.map((position) => [
-        poolKey(position.symbol, position.accountType),
-        position.quantity,
-      ]),
-    )
+    // Shares remaining is the engine's truth, not a stored copy - importing
+    // the Target 1 sell is what moves a position from "take partial" to
+    // "trail", with no separate flag to keep in step.
+    const heldBy = positionsByPool(positions)
 
     const bars = await barsFor(rules.map((rule) => rule.instrumentId))
 
     const evaluated = rules.map((rule): ExitRuleRow => {
-      // Shares remaining is the engine's truth, not a stored copy - importing
-      // the Target 1 sell is what moves a position from "take partial" to
-      // "trail", with no separate flag to keep in step.
-      const remaining = heldBy.get(poolKey(rule.symbol, rule.accountType)) ?? new Decimal(0)
-      // Realized sells in the current streak — what actually says the Target 1
-      // partial has been taken. A later top-up must not undo that.
-      const streak = streakFor(streaks, rule.symbol, rule.accountType)
-      const sold = streak?.sharesSold ?? new Decimal(0)
-
-      const result = assess(
-        {
-          symbol: rule.symbol,
-          name: rule.name,
-          assetClass: rule.assetClass,
-          accountType: rule.accountType,
-          entryDate: rule.entryDate,
-          entryPrice: rule.entryPrice,
-          totalShares: rule.totalShares,
-          sharesRemaining: remaining,
-          sharesSold: sold,
-          supportLevel: rule.supportLevel,
-          currentStreakEntryDate: streak?.entryDate ?? null,
-          entryAtr: rule.entryAtr,
-          entryStopAtrMultiple: rule.entryStopAtrMultiple,
-          entryTargetMultiple: rule.entryTargetMultiple,
-          lotSize: rule.lotSize,
-          trailingMethod: rule.trailingMethod,
-        },
-        bars.get(rule.instrumentId) ?? [],
-        settings,
-        todayFor(calendarFor(rule.assetClass), now),
-      )
+      const { position, result } = evaluateExitRule(rule, heldBy, streaks, bars.get(rule.instrumentId) ?? [], settings, now)
 
       return {
         id: rule.id,
@@ -205,7 +172,7 @@ export const getExitScreen = createServerFn({ method: 'GET' })
         entryDate: rule.entryDate,
         entryPrice: rule.entryPrice.toFixed(2),
         totalShares: shares(rule.totalShares),
-        sharesRemaining: shares(remaining),
+        sharesRemaining: shares(position.sharesRemaining),
         supportLevel: rule.supportLevel.toFixed(2),
         entryAtr: price(rule.entryAtr),
         lotSize: rule.lotSize,
@@ -244,7 +211,7 @@ export const getExitScreen = createServerFn({ method: 'GET' })
             ? null
             // Two places, like every other per-share figure: rounding to whole
             // units here discarded the cents on every US position.
-            : result.unrealizedPerShare.mul(remaining).toFixed(2),
+            : result.unrealizedPerShare.mul(position.sharesRemaining).toFixed(2),
 
         actionKind: result.action.kind,
         actionMessage: result.action.message,
