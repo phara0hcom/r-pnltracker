@@ -10,8 +10,9 @@
 import Decimal from 'decimal.js'
 import { describe, expect, it } from 'vitest'
 import { ZERO, type NormalizedTrade } from '../domain/types'
+import { computeStats, dailyPnl } from '../stats/stats'
 import { runEngine } from './engine'
-import { usdResult } from './usdResult'
+import { asShown, usdResult } from './usdResult'
 
 function fill(side: 'BUY' | 'SELL', tradeDate: string, qty: number, price: string): NormalizedTrade {
   const quantity = new Decimal(qty)
@@ -75,5 +76,33 @@ describe('price-only dollar result', () => {
     expect(usdResult(close!, new Decimal(150))!.gainJpyNow).toBe('1500')
     expect(usdResult(close!, null)!.gainJpyNow).toBeNull()
     expect(usdResult({ ...close!, assetClass: 'JP_EQUITY' }, null)).toBeNull()
+  })
+})
+
+describe('asShown', () => {
+  // Bought at ¥159/$ and sold at ¥155/$ above the dollar cost: a gain in
+  // dollars, a loss in tax-basis yen.
+  const buy = { ...fill('BUY', '2026-09-23', 10, '100'), fxRate: new Decimal(159), netAmountJpy: new Decimal(159_000) }
+  const sell = { ...fill('SELL', '2026-09-24', 10, '102'), fxRate: new Decimal(155), netAmountJpy: new Decimal(158_100) }
+  const [close] = runEngine([buy, sell]).realized
+
+  it('turns the tax loss into the dollar gain at today’s rate', () => {
+    expect(close!.realizedJpy.toFixed()).toBe('-900')
+    const shown = asShown(close!, new Decimal(150))
+    expect(shown.realizedJpy.toFixed()).toBe('3000')
+    expect(shown.costJpy.toFixed()).toBe('150000')
+  })
+
+  it('gives the dashboard stats and the calendar day the same total', () => {
+    const shown = [asShown(close!, new Decimal(150))]
+    expect(computeStats(shown).netPnl.toFixed()).toBe('3000')
+    expect(dailyPnl(shown).get('2026-09-24')?.toFixed()).toBe('3000')
+    // …and the row's own bracketed yen.
+    expect(usdResult(close!, new Decimal(150))!.gainJpyNow).toBe('3000')
+  })
+
+  it('leaves a yen close, and a US close with no rate yet, as the engine booked them', () => {
+    expect(asShown({ ...close!, assetClass: 'JP_EQUITY' }, new Decimal(150)).realizedJpy.toFixed()).toBe('-900')
+    expect(asShown(close!, null)).toBe(close)
   })
 })

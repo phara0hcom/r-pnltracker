@@ -39,7 +39,7 @@ import {
 import { orderedPoolDays, poolKey } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
-import { usdResult, type UsdResult } from '~/lib/pnl/usdResult'
+import { asShown, usdResult, type UsdResult } from '~/lib/pnl/usdResult'
 import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
 import { findReinvestment } from '~/lib/tax/reinvestment'
 import { buildYearOverYear, type TaxYearBasis } from '~/lib/tax/report'
@@ -809,13 +809,11 @@ export const getCalendar = createServerFn({ method: 'GET' })
         holdingDays: number
       }
     >()
-    const daily = new Map<string, typeof ZERO>()
+    // Day totals count US closes as the rows show them — see `asShown`, which
+    // the dashboard totals through too, so the two screens cannot disagree.
+    const daily = dailyPnl(engine.realized.map((close) => asShown(close, liveFx)))
     for (const close of engine.realized) {
       const usd = usdResult(close, liveFx)
-      // Until a rate has ever been fetched a US close can only be counted at
-      // its tax-basis yen.
-      const shown = usd?.gainJpyNow ?? close.realizedJpy
-      daily.set(close.tradeDate, (daily.get(close.tradeDate) ?? ZERO).add(shown))
       realizedByKey.set(
         `${close.tradeDate}|${close.symbol}|${close.accountType}|${close.quantity.toFixed()}`,
         {

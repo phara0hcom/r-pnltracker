@@ -144,8 +144,10 @@ derivation and sources.
   restored trade loses its place. An order that leaves a day's closes shorter
   of units than before is refused before writing.
 - **A US close is shown in dollars on price**: (sell − average buy) × shares,
-  before commission (`lib/pnl/usdResult.ts`). The JPY figure beside it in tax
-  and stats is each trade at its own day's rate, and can have the opposite sign.
+  before commission (`lib/pnl/usdResult.ts`). The dashboard and calendar total
+  it at today's USD/JPY through `asShown`, so the two always agree. The JPY
+  figure in tax, NISA and the Stats screen is each trade at its own day's rate,
+  and can have the opposite sign.
 - **旧NISA is a separate system** and is excluded from the ¥18M lifetime cap.
 - **Exit-rule entry facts are locked**: `initialStop`, R and Target 1 are fixed from the
   entry-date ATR *and the stop/target multiples stored on the plan*, never re-read from

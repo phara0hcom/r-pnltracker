@@ -228,7 +228,9 @@ function Dashboard() {
           label="Realized P&L · all time"
           value={yen(d.realizedJpy)}
           tone={tone(realized)}
-          context={`${yen(d.grossProfitJpy)} gains · ${yen(d.grossLossJpy)} losses`}
+          context={`${yen(d.grossProfitJpy)} gains · ${yen(d.grossLossJpy)} losses${
+            d.usdJpy == null ? '' : ` · US trades in dollars at ¥${d.usdJpy}/$`
+          }`}
           aside={
             d.equityCurve.length >= 2 ? (
               <EquitySparkline points={d.equityCurve} tone={tone(realized)} />

@@ -7,12 +7,14 @@
  */
 import { createServerFn } from '@tanstack/react-start'
 import { authed } from './middleware'
+import { usdJpyRate } from '~/db/prices.service'
 import { listTrades } from '~/db/trades.service'
 import { accountFilterInput } from '~/lib/accountScope'
 import { matchesAccountFilter, ZERO } from '~/lib/domain/types'
 import { buildNisaReport } from '~/lib/nisa/quota'
 import { runEngine, type RealizedEvent } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
+import { asShown } from '~/lib/pnl/usdResult'
 import { computeStats } from '~/lib/stats/stats'
 
 /** Aggregates for one time window — reused for week, month and all-time. */
@@ -59,7 +61,13 @@ export interface MonthlyPoint {
 export interface DashboardData {
   tradeCount: number
   openPositions: number
+  /**
+   * Net realized, with US closes as their dollar result at `usdJpy` — the
+   * same figure the calendar totals. Moves with the rate from day to day.
+   */
   realizedJpy: string
+  /** The USD/JPY US closes were converted at. Null when there are none, or no rate yet. */
+  usdJpy: string | null
   /** Total acquisition cost of positions still held — capital currently invested. */
   investedAtCostJpy: string
   /** All-time gross loss, as a positive magnitude. */
@@ -180,7 +188,7 @@ export const getDashboard = createServerFn({ method: 'GET' })
   .middleware([authed])
   .validator(accountFilterInput)
   .handler(async ({ data, context }): Promise<DashboardData> => {
-    const records = await listTrades(context.userId)
+    const [records, liveFx] = await Promise.all([listTrades(context.userId), usdJpyRate()])
     // Filtered before the engine runs: pools are keyed (symbol × accountType),
     // so removing whole accounts leaves the rest identical.
     const trades = records
@@ -188,7 +196,13 @@ export const getDashboard = createServerFn({ method: 'GET' })
       .filter((trade) => matchesAccountFilter(trade.accountType, data.account))
 
     const engine = runEngine(trades)
-    const stats = computeStats(engine.realized)
+    // Performance figures count a US close as its dollar result at today's
+    // rate — the figure the Trades screen and calendar show — not the tax yen,
+    // which a weaker yen can turn into a loss on a trade that made dollars.
+    // NISA quota and the stock/currency split keep the engine's own events.
+    const shown = engine.realized.map((close) => asShown(close, liveFx))
+    const hasUsdCloses = engine.realized.some((close) => close.assetClass === 'US_EQUITY')
+    const stats = computeStats(shown)
     const now = new Date()
     const nisa = buildNisaReport(trades, engine.realized, now.getFullYear())
     const fx = attributeFx(engine.realized)
@@ -213,9 +227,10 @@ export const getDashboard = createServerFn({ method: 'GET' })
       winRate: stats.winRate,
       profitFactor: stats.profitFactor,
       maxDrawdownJpy: stats.maxDrawdown.toFixed(0),
-      week: summarize(engine.realized, 'This week', week.from, week.to),
-      month: summarize(engine.realized, 'This month', monthStart, monthEnd),
-      monthly: monthlySeries(engine.realized),
+      week: summarize(shown, 'This week', week.from, week.to),
+      month: summarize(shown, 'This month', monthStart, monthEnd),
+      monthly: monthlySeries(shown),
+      usdJpy: hasUsdCloses && liveFx ? liveFx.toFixed(2) : null,
       nisaLifetimeUsed: nisa.lifetime.used.toFixed(0),
       nisaLifetimeRemaining: nisa.lifetime.remaining.toFixed(0),
       nisaPendingRestoration: nisa.lifetime.pendingRestoration.toFixed(0),
