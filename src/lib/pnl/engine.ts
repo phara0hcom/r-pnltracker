@@ -132,6 +132,38 @@ const toEpochDays = (iso: string): number => Math.floor(Date.parse(`${iso}T00:00
 const fromEpochDays = (days: number): string =>
   new Date(Math.round(days) * 86_400_000).toISOString().slice(0, 10)
 
+/** The unit a hand-set order applies to: one pool on one 約定日. */
+const poolDayKey = (trade: { tradeDate: string; symbol: string; accountType: AccountType }) =>
+  `${trade.tradeDate}\0${poolKey(trade.symbol, trade.accountType)}`
+
+/**
+ * The pool-days whose order has been set by hand: every trade in them carries
+ * a `daySequence`.
+ *
+ * Per pool rather than per date, so the answer cannot depend on which other
+ * accounts are in view — the account filter drops whole pools, never part of
+ * one. A trade added to an ordered pool-day has no known place in it, so that
+ * pool-day falls back to opens-first until it is ordered again.
+ */
+export function orderedPoolDays(
+  trades: readonly {
+    tradeDate: string
+    symbol: string
+    accountType: AccountType
+    daySequence?: number | null
+  }[],
+): Set<string> {
+  const ordered = new Set<string>()
+  const unordered = new Set<string>()
+  for (const trade of trades) {
+    const key = poolDayKey(trade)
+    if (trade.daySequence == null) unordered.add(key)
+    else ordered.add(key)
+  }
+  for (const key of unordered) ordered.delete(key)
+  return ordered
+}
+
 /**
  * Chronological ordering with a deliberate tie-break.
  *
@@ -140,39 +172,50 @@ const fromEpochDays = (days: number): string =>
  * processed against a position that does not exist yet and the whole pool goes
  * negative. Ordering by trade date, then opens-first, then original file order.
  *
- * A day whose order has been set by hand is taken in that order instead — but
- * only when *every* trade on it carries a `daySequence`. Mixing the two rules
- * within one day would make the comparison intransitive, and a trade added to
- * an ordered day has no known place in it; that day falls back to opens-first
- * until it is ordered again.
+ * A pool-day ordered by hand (see `orderedPoolDays`) is then rearranged within
+ * the positions it already occupies. Everything else keeps exactly the order it
+ * would have had, and mixing the two rules in one comparator — which would not
+ * be transitive — is avoided.
  */
 export function sortTradesForEngine(trades: NormalizedTrade[]): NormalizedTrade[] {
-  const ordered = new Set<string>()
-  const unordered = new Set<string>()
-  for (const trade of trades) {
-    if (trade.daySequence == null) unordered.add(trade.tradeDate)
-    else ordered.add(trade.tradeDate)
-  }
-  for (const date of unordered) ordered.delete(date)
-
-  return trades
+  const sorted = trades
     // The original index is carried alongside so the sort stays stable: equal
     // keys fall back to file order rather than an arbitrary engine ordering.
     .map((trade, fileOrder) => ({ trade, fileOrder }))
     .sort((left, right) => {
       if (left.trade.tradeDate !== right.trade.tradeDate)
         return left.trade.tradeDate < right.trade.tradeDate ? -1 : 1
-      if (ordered.has(left.trade.tradeDate)) {
-        const bySequence = (left.trade.daySequence ?? 0) - (right.trade.daySequence ?? 0)
-        if (bySequence !== 0) return bySequence
-        return left.fileOrder - right.fileOrder
-      }
       const leftOpens = OPENING_SIDES.includes(left.trade.side) ? 0 : 1
       const rightOpens = OPENING_SIDES.includes(right.trade.side) ? 0 : 1
       if (leftOpens !== rightOpens) return leftOpens - rightOpens
       return left.fileOrder - right.fileOrder
     })
-    .map(({ trade }) => trade)
+
+  const ordered = orderedPoolDays(trades)
+  if (ordered.size === 0) return sorted.map(({ trade }) => trade)
+
+  const slots = new Map<string, number[]>()
+  sorted.forEach(({ trade }, index) => {
+    const key = poolDayKey(trade)
+    if (!ordered.has(key)) return
+    const list = slots.get(key)
+    if (list) list.push(index)
+    else slots.set(key, [index])
+  })
+  const result = [...sorted]
+  for (const indices of slots.values()) {
+    const bySequence = indices
+      .map((index) => sorted[index]!)
+      .sort(
+        (left, right) =>
+          (left.trade.daySequence ?? 0) - (right.trade.daySequence ?? 0) ||
+          left.fileOrder - right.fileOrder,
+      )
+    indices.forEach((index, n) => {
+      result[index] = bySequence[n]!
+    })
+  }
+  return result.map(({ trade }) => trade)
 }
 
 export function runEngine(trades: NormalizedTrade[]): EngineResult {

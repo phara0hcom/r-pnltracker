@@ -8,6 +8,7 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import type { NormalizedTrade } from '../lib/domain/types'
 import { orderProblem } from '../lib/import/dayOrder'
+import { poolKey } from '../lib/pnl/engine'
 import {
   applyTradeEdit,
   buildManualTrade,
@@ -228,7 +229,9 @@ export async function deleteTrade(userId: string, tradeId: string): Promise<void
 export async function restoreTrade(userId: string, tradeId: string): Promise<void> {
   await db
     .update(trades)
-    .set({ deletedAt: null, updatedAt: new Date() })
+    // Its old place may have been reused while it was deleted; unplaced, its
+    // pool-day falls back to opens-first until it is ordered again.
+    .set({ deletedAt: null, daySequence: null, updatedAt: new Date() })
     .where(and(eq(trades.userId, userId), eq(trades.id, tradeId)))
 }
 
@@ -258,10 +261,11 @@ export type DayOrderResult = { ok: true } | { ok: false; message: string }
 /**
  * Fix the order of one 約定日's trades, as the user says they happened.
  *
- * `ids` may be a subset — the calendar can be filtered to one account — and
- * the day's other trades are appended after them in their current order.
- * Pools are per account, so a trade the caller could not see is never in a
- * pool it reordered, and where it lands relative to them changes nothing.
+ * `ids` may be a subset of the day — the calendar can be filtered to one
+ * account — but must hold every trade of each pool it touches: the order is
+ * honoured per pool-day (see `orderedPoolDays`), and a pool half-ordered would
+ * silently fall back. Only these rows are written, so a pool the user could
+ * not see keeps whatever order it had.
  *
  * Refused, writing nothing, when the order would sell units the pool does not
  * hold at that point: the engine would clamp the sale and every figure after
@@ -272,30 +276,32 @@ export async function setDayOrder(
   date: string,
   ids: readonly string[],
 ): Promise<DayOrderResult> {
-  const rows = await db
-    .select({ id: trades.id, daySequence: trades.daySequence, createdAt: trades.createdAt })
-    .from(trades)
-    .where(and(eq(trades.userId, userId), eq(trades.tradeDate, date), isNull(trades.deletedAt)))
+  const records = await listTrades(userId)
+  const onDay = records.filter((record) => record.trade.tradeDate === date)
+  const byId = new Map(onDay.map((record) => [record.id, record]))
 
-  const onDay = new Set(rows.map((row) => row.id))
-  if (new Set(ids).size !== ids.length || ids.some((id) => !onDay.has(id))) {
+  if (new Set(ids).size !== ids.length || ids.some((id) => !byId.has(id))) {
     return { ok: false, message: `Those trades are not all on ${date} — reload and try again.` }
   }
 
   const given = new Set(ids)
-  const rest = rows
-    .filter((row) => !given.has(row.id))
-    .sort(
-      (left, right) =>
-        (left.daySequence ?? Number.MAX_SAFE_INTEGER) - (right.daySequence ?? Number.MAX_SAFE_INTEGER) ||
-        left.createdAt.getTime() - right.createdAt.getTime(),
-    )
-    .map((row) => row.id)
-  const sequence = new Map([...ids, ...rest].map((id, index) => [id, index]))
+  const pools = new Set(ids.map((id) => poolKey(byId.get(id)!.trade.symbol, byId.get(id)!.trade.accountType)))
+  const missing = onDay.find(
+    (record) =>
+      !given.has(record.id) && pools.has(poolKey(record.trade.symbol, record.trade.accountType)),
+  )
+  if (missing) {
+    return {
+      ok: false,
+      message: `${missing.trade.symbol} has another trade on ${date} that was not in the list — reload and try again.`,
+    }
+  }
 
-  // Replayed before it is written: the proposed order must not add a warning
-  // on this date that the current order does not already have.
-  const problem = orderProblem(await listTrades(userId), date, sequence)
+  const sequence = new Map(ids.map((id, index) => [id, index]))
+
+  // Replayed before it is written: the proposed order must not leave any
+  // close on this date shorter of units than it already was.
+  const problem = orderProblem(records, date, sequence)
   if (problem) return { ok: false, message: problem }
 
   await db.transaction(async (tx) => {

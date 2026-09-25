@@ -10,7 +10,8 @@
  * Pure: the caller supplies the stored trades and the ids the new rows will
  * have, so this stays DB-free like the rest of `lib`.
  */
-import { OPENING_SIDES, type NormalizedTrade } from '../domain/types'
+import type Decimal from 'decimal.js'
+import { CLOSING_SIDES, OPENING_SIDES, ZERO, type NormalizedTrade } from '../domain/types'
 import { poolKey, runEngine, sortTradesForEngine } from '../pnl/engine'
 
 export interface OrderCandidate {
@@ -73,32 +74,56 @@ export function daysToOrder(
 }
 
 /**
- * The first engine warning a proposed order adds on `date`, or null.
+ * Units the closes on `date` could not find, per pool.
  *
- * `sequence` maps row ids to their proposed place. Warnings the history
- * already has are not held against the order — only new ones, which mean it
- * sells units the pool does not yet hold.
+ * Measured as quantity rather than read from warning text: a clamp warning
+ * embeds the quantity held, so two orders that both come up short would never
+ * compare equal, and "no open position" is the same text however many closes
+ * hit it.
+ */
+function shortfallOn(trades: NormalizedTrade[], date: string): Map<string, { symbol: string; units: Decimal }> {
+  const out = new Map<string, { symbol: string; units: Decimal }>()
+  const add = (trade: { symbol: string; accountType: NormalizedTrade['accountType'] }, units: Decimal) => {
+    const key = poolKey(trade.symbol, trade.accountType)
+    const running = out.get(key) ?? { symbol: trade.symbol, units: ZERO }
+    out.set(key, { symbol: trade.symbol, units: running.units.add(units) })
+  }
+  for (const trade of trades) {
+    if (trade.tradeDate === date && CLOSING_SIDES.includes(trade.side)) add(trade, trade.quantity)
+  }
+  for (const close of runEngine(trades).realized) {
+    if (close.tradeDate === date) add(close, close.quantity.neg())
+  }
+  return out
+}
+
+/**
+ * Why a proposed order of `date` is refused, or null when it is fine.
+ *
+ * `sequence` maps row ids to their proposed place. A shortfall the history
+ * already has is not held against the order — only one it makes larger,
+ * which means it sells units the pool does not yet hold.
  */
 export function orderProblem(
   records: readonly { id: string; trade: NormalizedTrade }[],
   date: string,
   sequence: ReadonlyMap<string, number>,
 ): string | null {
-  const onDate = (list: NormalizedTrade[]) =>
-    runEngine(list)
-      .warnings.filter((warning) => warning.tradeDate === date)
-      .map((warning) => ({
-        symbol: warning.symbol,
-        key: `${warning.symbol}|${warning.accountType}|${warning.message}`,
-      }))
-
-  const before = new Set(onDate(records.map((record) => record.trade)).map((warning) => warning.key))
-  const added = onDate(
+  const before = shortfallOn(
+    records.map((record) => record.trade),
+    date,
+  )
+  const after = shortfallOn(
     records.map((record) => {
       const position = sequence.get(record.id)
       return position == null ? record.trade : { ...record.trade, daySequence: position }
     }),
-  ).find((warning) => !before.has(warning.key))
-
-  return added ? `That order sells ${added.symbol} before enough of it was bought.` : null
+    date,
+  )
+  for (const [key, { symbol, units }] of after) {
+    if (units.gt(before.get(key)?.units ?? ZERO)) {
+      return `That order sells ${symbol} before enough of it was bought.`
+    }
+  }
+  return null
 }

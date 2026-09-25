@@ -24,6 +24,7 @@ import {
   matchesAccountFilter,
   OPENING_SIDES,
   ZERO,
+  type AccountType,
   type AssetClass,
   type TradeSide,
 } from '~/lib/domain/types'
@@ -35,6 +36,7 @@ import {
   buildNisaReport,
   legacyNisaBookValue,
 } from '~/lib/nisa/quota'
+import { orderedPoolDays, poolKey } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
 import { usdResult, type UsdResult } from '~/lib/pnl/usdResult'
@@ -763,7 +765,7 @@ export interface CalendarDay {
    */
   realizedJpy: string | null
   tradeCount: number
-  /** True when `trades` is in an order set by hand rather than grouped. */
+  /** True when every trade shown is in an order set by hand, and listed in it. */
   ordered: boolean
   trades: CalendarTrade[]
   note: {
@@ -880,10 +882,13 @@ export const getCalendar = createServerFn({ method: 'GET' })
     // restore. Group by instrument instead, opens before closes, which puts a
     // same-day round trip on adjacent rows and matches the order the engine
     // processed that pool in.
-    const isOrdered = (dayTrades: CalendarTrade[]) =>
-      dayTrades.every((trade) => trade.daySequence != null)
-    for (const dayTrades of byDate.values()) {
-      if (isOrdered(dayTrades)) {
+    const ordered = orderedPoolDays(
+      records.map((record) => record.trade).filter((trade) => trade.tradeDate >= first && trade.tradeDate <= last),
+    )
+    const placed = (trade: CalendarTrade, date: string) =>
+      ordered.has(`${date}\0${poolKey(trade.symbol, trade.accountType as AccountType)}`)
+    for (const [date, dayTrades] of byDate) {
+      if (dayTrades.every((trade) => placed(trade, date))) {
         dayTrades.sort((left, right) => (left.daySequence ?? 0) - (right.daySequence ?? 0))
         continue
       }
@@ -891,6 +896,8 @@ export const getCalendar = createServerFn({ method: 'GET' })
         if (left.symbol !== right.symbol) return left.symbol.localeCompare(right.symbol)
         if (left.accountType !== right.accountType)
           return left.accountType.localeCompare(right.accountType)
+        // Within a pool the user has ordered, their order; the engine agrees.
+        if (placed(left, date)) return (left.daySequence ?? 0) - (right.daySequence ?? 0)
         const leftOpens = OPENING_SIDES.includes(left.side) ? 0 : 1
         const rightOpens = OPENING_SIDES.includes(right.side) ? 0 : 1
         return leftOpens - rightOpens
@@ -911,7 +918,7 @@ export const getCalendar = createServerFn({ method: 'GET' })
         date,
         realizedJpy: pnl ? pnl.toFixed(0) : null,
         tradeCount: dayTrades.length,
-        ordered: dayTrades.length > 0 && isOrdered(dayTrades),
+        ordered: dayTrades.length > 0 && dayTrades.every((trade) => placed(trade, date)),
         trades: dayTrades,
         note: note
           ? {

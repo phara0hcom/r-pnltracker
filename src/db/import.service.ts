@@ -133,6 +133,13 @@ export async function previewImport(
   userId: string,
   filename: string,
   bytes: Uint8Array,
+  /**
+   * Rows earlier files in the same upload would add, planned as if stored —
+   * which by the time the commit reaches this file, they are. Without them a
+   * fill exported both before and after settlement in one upload is previewed
+   * as two new trades, where the commit inserts one and restates it.
+   */
+  pending: readonly StoredTrade[] = [],
 ): Promise<ImportPreview> {
   return Sentry.startSpan(
     { name: 'previewImport', op: 'import.preview', attributes: { bytes: bytes.length } },
@@ -150,7 +157,12 @@ export async function previewImport(
       const existing = await Sentry.startSpan({ name: 'existingRows', op: 'db.query' }, () =>
         existingRows(userId),
       )
-      const plan = planImport(parsed, existing.trades, existing.dividends)
+      const pendingIds = new Set(pending.map((row) => row.id))
+      const plan = planImport(
+        parsed,
+        [...existing.trades.filter((row) => !pendingIds.has(row.id)), ...pending],
+        existing.dividends,
+      )
 
       span.setAttribute('newTrades', plan.newTrades.length)
       span.setAttribute('restatedTrades', plan.restatedTrades.length)

@@ -99,6 +99,12 @@ describe('a day ordered by hand', () => {
     expect(gains(sequenced)).toEqual(['78.66', '12.32'])
   })
 
+  it('does not depend on other pools on the date, so the account filter cannot move it', () => {
+    const sequenced = day.map((t, index) => ({ ...t, daySequence: index }))
+    const nisa = { ...trade('BUY', '2026-09-24', 5, '100', 'SOXL'), accountType: 'NISA_GROWTH' as const }
+    expect(gains([...sequenced, nisa])).toEqual(['78.66', '12.32'])
+  })
+
   it('falls back to opens-first while any trade on the day is unordered', () => {
     const partial = day.map((t, index) => (index === 3 ? t : { ...t, daySequence: index }))
     expect(gains(partial)).toEqual(['75.02', '15.96'])
@@ -120,6 +126,27 @@ describe('orderProblem', () => {
 
   it('refuses a sale placed before the buy it needs', () => {
     expect(orderProblem(records, '2026-09-24', order(['s20', 'b29', 'b2', 's11']))).toBe(
+      'That order sells SOXL before enough of it was bought.',
+    )
+  })
+})
+
+describe('orderProblem against a history already short', () => {
+  // 30 held, a sale of 50 and a buy of 10 the same day: short either way.
+  const records = [
+    { id: 'b30', trade: trade('BUY', '2026-09-20', 30, '100') },
+    { id: 's50', trade: trade('SELL', '2026-09-24', 50, '110') },
+    { id: 'b10', trade: trade('BUY', '2026-09-24', 10, '105') },
+  ]
+  const order = (ids: string[]) => new Map(ids.map((id, index) => [id, index]))
+
+  it('accepts an order that is short by no more than before', () => {
+    // Opens-first already has the buy ahead of the sale: 40 held, 10 short.
+    expect(orderProblem(records, '2026-09-24', order(['b10', 's50']))).toBeNull()
+  })
+
+  it('refuses one that is shorter, though the warning text differs either way', () => {
+    expect(orderProblem(records, '2026-09-24', order(['s50', 'b10']))).toBe(
       'That order sells SOXL before enough of it was bought.',
     )
   })

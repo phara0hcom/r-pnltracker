@@ -10,8 +10,9 @@ import { authed } from './middleware'
 import { commitImport, previewImport } from '~/db/import.service'
 import { idFor } from '~/db/mappers'
 import { listTrades, setDayOrder } from '~/db/trades.service'
+import type { NormalizedTrade } from '~/lib/domain/types'
 import { daysToOrder, type OrderCandidate } from '~/lib/import/dayOrder'
-import { orderFilesForImport } from '~/lib/import/plan'
+import { orderFilesForImport, type StoredTrade } from '~/lib/import/plan'
 
 export interface UploadPayload {
   filename: string
@@ -123,15 +124,39 @@ export const previewFiles = createServerFn({ method: 'POST' })
     const incoming = new Map<string, OrderCandidate>()
     // Previewed in the order they will actually be committed, so the summary
     // describes the run the user is about to approve.
+    // What earlier files will have written by the time the commit reaches the
+    // next one, keyed by row id.
+    const pending = new Map<string, StoredTrade>()
+    const asStored = (id: string, trade: NormalizedTrade): StoredTrade => ({
+      id,
+      sourceRowHash: trade.sourceRowHash,
+      symbol: trade.symbol,
+      accountType: trade.accountType,
+      side: trade.side,
+      quantity: trade.quantity.toFixed(),
+      unitPrice: trade.unitPrice.toFixed(),
+      tradeDate: trade.tradeDate,
+      settleDate: trade.settleDate,
+      isEdited: false,
+      origin: 'IMPORT',
+    })
     for (const file of orderFilesForImport(decodeChecked(data.files))) {
-      const preview = await previewImport(context.userId, file.filename, file.bytes)
+      const preview = await previewImport(
+        context.userId,
+        file.filename,
+        file.bytes,
+        [...pending.values()],
+      )
       for (const trade of preview.plan.newTrades) {
         // The id the commit will insert it under — see `toTradeRow`.
         const id = idFor('trade', context.userId, trade.sourceRowHash)
         incoming.set(id, { id, trade, incoming: true })
+        pending.set(id, asStored(id, trade))
       }
       for (const restated of preview.plan.restatedTrades) {
+        // A restatement keeps the row id, including one an earlier file adds.
         incoming.set(restated.id, { id: restated.id, trade: restated.trade, incoming: true })
+        pending.set(restated.id, asStored(restated.id, restated.trade))
       }
       out.push({
         filename: preview.filename,

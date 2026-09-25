@@ -136,9 +136,11 @@ derivation and sources.
 - **`再投資` rows are zero-cash buys** that add units *and* cost basis.
 - **Within one 約定日 the engine takes opens first**, because no export carries an
   execution time. A user can set the real order of a day from the calendar or
-  the import preview (`trades.day_sequence`); it is honoured only when *every*
-  trade on that date has one, and a re-dated or date-edited trade loses its
-  place. Orders that would sell units not yet held are refused before writing.
+  the import preview (`trades.day_sequence`). It is honoured per pool-day, only
+  when *every* trade of that pool on that date has one — per pool, so the
+  account filter cannot change the result — and a re-dated, date-edited or
+  restored trade loses its place. An order that leaves a day's closes shorter
+  of units than before is refused before writing.
 - **A US close is shown in dollars on price**: (sell − average buy) × shares,
   before commission (`lib/pnl/usdResult.ts`). The JPY figure beside it in tax
   and stats is each trade at its own day's rate, and can have the opposite sign.
