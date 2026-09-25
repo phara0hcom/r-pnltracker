@@ -39,6 +39,7 @@ import {
 import { orderedPoolDays, poolKey } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
+import { valuePosition, type PositionValue } from '~/lib/pnl/positionValue'
 import { asShown, usdResult, type UsdResult } from '~/lib/pnl/usdResult'
 import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
 import { findReinvestment } from '~/lib/tax/reinvestment'
@@ -64,7 +65,8 @@ async function dividendsFor(userId: string) {
 
 // ── Positions ───────────────────────────────────────────────────────────────
 
-export interface PositionRow {
+/** Valuation fields come from `valuePosition` — see `lib/pnl/positionValue.ts`. */
+export interface PositionRow extends PositionValue {
   symbol: string
   name: string
   assetClass: 'JP_EQUITY' | 'US_EQUITY' | 'FUND'
@@ -79,9 +81,6 @@ export interface PositionRow {
   currentPrice: string | null
   priceAsOf: string | null
   priceSource: string | null
-  marketValueJpy: string | null
-  unrealizedJpy: string | null
-  unrealizedPct: number | null
 }
 
 export const getPositions = createServerFn({ method: 'GET' })
@@ -108,27 +107,6 @@ export const getPositions = createServerFn({ method: 'GET' })
         // A manual override always wins over a fetched quote.
         const currentPrice = override ?? cached?.price ?? null
 
-        let marketValueJpy: string | null = null
-        let unrealizedJpy: string | null = null
-        let unrealizedPct: number | null = null
-
-        if (currentPrice) {
-          // USD quotes convert at the live rate, so unrealized P&L includes the
-          // currency move — for a JPY-based holder that is a real part of the
-          // position's value, not a rounding detail. The entry rate is used only
-          // until a rate has ever been fetched; it makes the currency component
-          // read as zero, which is wrong but at least not invented.
-          const rate =
-            position.assetClass === 'US_EQUITY' ? (liveFx ?? position.avgFxRate) : ZERO.add(1)
-          const marketValue = ZERO.add(currentPrice).mul(position.quantity).mul(rate)
-          marketValueJpy = marketValue.toFixed(0)
-          const gain = marketValue.sub(position.costBasisJpy)
-          unrealizedJpy = gain.toFixed(0)
-          unrealizedPct = position.costBasisJpy.gt(0)
-            ? gain.div(position.costBasisJpy).toNumber()
-            : null
-        }
-
         return {
           symbol: position.symbol,
           name: position.name,
@@ -143,12 +121,11 @@ export const getPositions = createServerFn({ method: 'GET' })
           currentPrice,
           priceAsOf: cached?.asOf.toISOString() ?? null,
           priceSource: override ? 'MANUAL' : (cached?.source ?? null),
-          marketValueJpy,
-          unrealizedJpy,
-          unrealizedPct,
+          ...valuePosition(position, currentPrice, liveFx),
         }
       })
-      .sort((left, right) => Number(right.costBasisJpy) - Number(left.costBasisJpy))
+      // By the cost the screen shows, which is what its default column sorts on.
+      .sort((left, right) => Number(right.costShownJpy) - Number(left.costShownJpy))
   })
 
 // ── NISA ────────────────────────────────────────────────────────────────────

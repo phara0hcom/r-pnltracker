@@ -29,6 +29,9 @@ const row = (over: Partial<PositionCsvRow> = {}): PositionCsvRow => ({
   marketValueJpy: '936000',
   unrealizedJpy: '183000',
   unrealizedPct: 0.243027,
+  costUsd: null,
+  unrealizedUsd: null,
+  unrealizedTaxJpy: null,
   priceAsOf: '2026-08-29T04:12:00.000Z',
   priceSource: 'KABUTAN',
   ...over,
@@ -59,7 +62,7 @@ describe('positionsCsv', () => {
     const [, first = ''] = lines(csv)
     expect(first).toContain('"eMAXIS Slim 米国株式(S&P500), 為替ヘッジなし"')
     // Header and body must still agree on column count.
-    expect(first.split(',')).toHaveLength(17)
+    expect(first.split(',')).toHaveLength(20)
   })
 
   it('doubles an embedded quote, per RFC 4180', () => {
@@ -83,6 +86,25 @@ describe('positionsCsv', () => {
     )
     const [, first = ''] = lines(csv)
     expect(first.endsWith(',,,,,,')).toBe(true)
+  })
+
+  it('carries a US position in dollars beside the tax-basis yen', () => {
+    const [header = '', first = ''] = lines(
+      positionsCsv(
+        [
+          row({
+            symbol: 'SOXL',
+            currency: 'USD',
+            costUsd: '1565.30',
+            unrealizedUsd: '46.40',
+            unrealizedTaxJpy: '-3246',
+          }),
+        ],
+        labels,
+      ),
+    )
+    expect(header).toContain('Cost (USD),Unrealized (USD),Unrealized for tax (JPY)')
+    expect(first).toContain('1565.30,46.40,-3246')
   })
 
   it('writes exact decimal strings, not display-formatted yen', () => {

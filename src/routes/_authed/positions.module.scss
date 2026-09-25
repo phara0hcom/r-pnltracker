@@ -14,6 +14,13 @@
   @include m.tabular-nums;
 }
 
+/* The yen beneath a US position's dollar figure. */
+.aside {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
 .profit {
   color: var(--color-profit);
 }

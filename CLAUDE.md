@@ -145,7 +145,9 @@ derivation and sources.
   of units than before is refused before writing.
 - **A US close is shown in dollars on price**: (sell − average buy) × shares,
   before commission (`lib/pnl/usdResult.ts`). The dashboard and calendar total
-  it at today's USD/JPY through `asShown`, so the two always agree. The JPY
+  it at today's USD/JPY through `asShown`, so the two always agree. An open US
+  position is valued the same way (`lib/pnl/positionValue.ts`): cost, value and
+  unrealized in dollars, with yen at one rate so they add up on the row. The JPY
   figure in tax, NISA and the Stats screen is each trade at its own day's rate,
   and can have the opposite sign.
 - **旧NISA is a separate system** and is excluded from the ¥18M lifetime cap.
