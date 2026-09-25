@@ -17,6 +17,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useCallback, useMemo, useState } from 'react'
 import styles from './trades.module.scss'
+import { money, yen } from '~/components/format'
 import { PageHeader, Pagination } from '~/components/screen'
 import { NewTradeDialog } from '~/components/trades/NewTradeDialog'
 import { TradeFilters } from '~/components/trades/TradeFilters'
@@ -44,8 +45,11 @@ const COLUMNS: Record<TradeSortKey, SortColumn<TradeRow>> = {
   displayPrice: { numeric: true, value: (row) => row.displayPrice },
   netAmountJpy: { numeric: true, value: (row) => row.netAmountJpy },
   // Null on an open position, which sorts last either way — an unclosed trade
-  // is unmeasured, not a loss.
-  realizedJpy: { numeric: true, value: (row) => row.realizedJpy },
+  // is unmeasured, not a loss. A US close sorts by its dollars in today's yen,
+  // the figure shown beneath them; its tax-basis yen can have the opposite sign
+  // and would file a gain among the losses. That is the fallback only until a
+  // rate has ever been fetched.
+  realizedJpy: { numeric: true, value: (row) => row.realizedUsdJpy ?? row.realizedJpy },
   returnPct: { numeric: true, value: (row) => row.returnPct },
 }
 
@@ -125,8 +129,10 @@ function TradesScreen() {
         return false
       }
       if (search.outcome) {
-        if (row.realizedJpy == null) return false
-        const realized = Number(row.realizedJpy)
+        // Win or loss by the figure the row shows: dollars for a US close.
+        const shown = row.realizedUsd ?? row.realizedJpy
+        if (shown == null) return false
+        const realized = Number(shown)
         if (search.outcome === 'win' && realized <= 0) return false
         if (search.outcome === 'loss' && realized >= 0) return false
       }
@@ -146,20 +152,34 @@ function TradesScreen() {
     [filtered, page, perPage],
   )
 
+  // Yen and dollar closes are totalled apart rather than converted into one
+  // figure: each row shows its own currency first, and a sum at any single rate
+  // would be a number no row on the screen adds up to.
   const totals = useMemo(() => {
-    let realized = 0
+    let realizedJpy = 0
+    let realizedUsd = 0
+    let usdCloses = 0
     let closes = 0
     let wins = 0
     for (const row of filtered) {
-      if (row.realizedJpy == null) continue
-      const value = Number(row.realizedJpy)
-      realized += value
+      let value: number
+      if (row.realizedUsd != null) {
+        value = Number(row.realizedUsd)
+        realizedUsd += value
+        usdCloses += 1
+      } else if (row.realizedJpy != null) {
+        value = Number(row.realizedJpy)
+        realizedJpy += value
+      } else continue
       closes += 1
       if (value > 0) wins += 1
     }
     return {
       count: filtered.length,
-      realized,
+      realizedJpy,
+      realizedUsd,
+      hasJpy: closes > usdCloses,
+      hasUsd: usdCloses > 0,
       winRate: closes ? wins / closes : null,
     }
   }, [filtered])
@@ -240,13 +260,17 @@ function TradesScreen() {
         meta={
           <>
             {totals.count} of {rows.length} shown
-            {totals.realized !== 0 ? (
-              <>
-                {' · realized '}
-                <span className={totals.realized >= 0 ? styles.profit : styles.loss}>
-                  ¥{totals.realized.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                </span>
-              </>
+            {totals.hasJpy || totals.hasUsd ? ' · realized ' : null}
+            {totals.hasJpy ? (
+              <span className={totals.realizedJpy >= 0 ? styles.profit : styles.loss}>
+                {yen(totals.realizedJpy)}
+              </span>
+            ) : null}
+            {totals.hasJpy && totals.hasUsd ? ' + ' : null}
+            {totals.hasUsd ? (
+              <span className={totals.realizedUsd >= 0 ? styles.profit : styles.loss}>
+                {money(totals.realizedUsd, 'USD')}
+              </span>
             ) : null}
             {totals.winRate != null ? ` · ${(totals.winRate * 100).toFixed(0)}% win` : null}
           </>

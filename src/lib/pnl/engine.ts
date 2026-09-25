@@ -12,6 +12,12 @@
  * Everything is tracked in JPY. For US positions the weighted-average entry FX
  * rate is carried alongside the cost basis so realized P&L can later be split
  * into stock movement vs currency movement (see fxAttribution.ts).
+ *
+ * Cost is also pooled a second time in the instrument's own currency. The JPY
+ * figure is the tax one — each trade converted at its own day's rate — and for
+ * a US round trip settled in dollars it can show a loss on a trade that made
+ * dollars: SOXL bought at ¥159/$ and sold at ¥155/$ for a higher dollar price.
+ * The native figure is what the trade made in the currency it was traded in.
  */
 import Decimal from 'decimal.js'
 import {
@@ -20,6 +26,7 @@ import {
   ZERO,
   type AccountType,
   type AssetClass,
+  type Currency,
   type NormalizedTrade,
 } from '../domain/types'
 
@@ -32,6 +39,10 @@ Decimal.set({ precision: 40 })
 /** Realized P&L is booked in whole yen, like every other JPY figure. */
 const toYen = (d: Decimal): Decimal => d.toDecimalPlaces(0, Decimal.ROUND_HALF_UP)
 
+/** The native-currency twin of `toYen`: cents for dollars, whole yen for yen. */
+const toMinorUnit = (d: Decimal, currency: Currency): Decimal =>
+  currency === 'USD' ? d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP) : toYen(d)
+
 export interface PositionState {
   symbol: string
   name: string
@@ -41,6 +52,12 @@ export interface PositionState {
   quantity: Decimal
   /** Total JPY acquisition cost of those units. */
   costBasisJpy: Decimal
+  /**
+   * The same cost in the instrument's own currency — Σ `netAmount`, so buy-side
+   * commission is inside it, as it is in `costBasisJpy`. Equal to the JPY
+   * figure for a yen instrument.
+   */
+  costBasisNative: Decimal
   /** Quantity-weighted average entry FX rate (1 for JPY instruments). */
   avgFxRate: Decimal
   /** Quantity-weighted average entry price in the instrument's native currency. */
@@ -62,6 +79,15 @@ export interface RealizedEvent {
   costJpy: Decimal
   /** proceeds − cost. */
   realizedJpy: Decimal
+  /** Net received in the instrument's own currency, after sell-side costs. */
+  proceedsNative: Decimal
+  /** Native-currency cost of exactly the units sold. */
+  costNative: Decimal
+  /**
+   * proceeds − cost in the instrument's own currency. For a US close this is
+   * the dollar result, which currency movement cannot turn into a loss.
+   */
+  realizedNative: Decimal
   /** Weighted-average entry price, native currency. */
   entryPriceNative: Decimal
   exitPriceNative: Decimal
@@ -148,6 +174,7 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
           accountType: trade.accountType,
           quantity: ZERO,
           costBasisJpy: ZERO,
+          costBasisNative: ZERO,
           avgFxRate: trade.fxRate,
           avgPriceNative: ZERO,
           weightedDateSum: ZERO,
@@ -159,6 +186,7 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
       // REINVEST carries a real acquisition cost (the distribution rolled in),
       // so it increases basis exactly like a cash buy.
       pool.costBasisJpy = pool.costBasisJpy.add(trade.netAmountJpy)
+      pool.costBasisNative = pool.costBasisNative.add(trade.netAmount)
       pool.avgFxRate = weightedAvg(pool.avgFxRate, pool.quantity, trade.fxRate, trade.quantity, newQty)
       pool.avgPriceNative = weightedAvg(
         pool.avgPriceNative,
@@ -204,6 +232,13 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
     const proceedsJpy = toYen(
       trade.quantity.eq(qty) ? trade.netAmountJpy : trade.netAmountJpy.mul(qty).div(trade.quantity),
     )
+    // The same averaging and rounding in native currency, so the pool empties
+    // to exactly zero on a full exit in both currencies at once.
+    const costNative = toMinorUnit(pool.costBasisNative.div(pool.quantity).mul(qty), trade.currency)
+    const proceedsNative = toMinorUnit(
+      trade.quantity.eq(qty) ? trade.netAmount : trade.netAmount.mul(qty).div(trade.quantity),
+      trade.currency,
+    )
 
     const avgEntryDays = pool.weightedDateSum.div(pool.quantity)
     const avgEntryDate = fromEpochDays(avgEntryDays.toNumber())
@@ -219,6 +254,9 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
       proceedsJpy,
       costJpy,
       realizedJpy: proceedsJpy.sub(costJpy),
+      proceedsNative,
+      costNative,
+      realizedNative: proceedsNative.sub(costNative),
       entryPriceNative: pool.avgPriceNative,
       exitPriceNative: trade.unitPrice,
       entryFxRate: pool.avgFxRate,
@@ -234,9 +272,11 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
       ? ZERO
       : pool.weightedDateSum.mul(remaining).div(pool.quantity)
     pool.costBasisJpy = pool.costBasisJpy.sub(costJpy)
+    pool.costBasisNative = pool.costBasisNative.sub(costNative)
     pool.quantity = remaining
     if (remaining.isZero()) {
       pool.costBasisJpy = ZERO
+      pool.costBasisNative = ZERO
       pool.avgPriceNative = ZERO
     }
   }

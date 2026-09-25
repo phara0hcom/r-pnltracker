@@ -6,15 +6,15 @@
  * formatted for display, never recomputed.
  */
 import { createServerFn } from '@tanstack/react-start'
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { engineFor } from './engine'
 import { authed } from './middleware'
 import { db } from '~/db'
 import { fromDividendRow, instrumentId } from '~/db/mappers'
 import { listNotes } from '~/db/notes.service'
+import { usdJpyRate } from '~/db/prices.service'
 import {
   dividends as dividendsTable,
-  fxRates,
   instruments,
   priceCache,
   priceOverrides,
@@ -48,19 +48,6 @@ async function overridesFor(userId: string) {
     .from(priceOverrides)
     .where(eq(priceOverrides.userId, userId))
   return new Map(rows.map((row) => [row.instrumentId, row.price]))
-}
-
-/**
- * Last fetched USD/JPY, or null when none has ever been stored.
- *
- * Unscoped by user on purpose: an exchange rate is market data, not user data.
- */
-async function usdJpyRate() {
-  const [row] = await db
-    .select({ rate: fxRates.rate })
-    .from(fxRates)
-    .where(and(eq(fxRates.base, 'USD'), eq(fxRates.quote, 'JPY')))
-  return row ? ZERO.add(row.rate) : null
 }
 
 /** Attributed dividends, read back from storage rather than re-derived. */
