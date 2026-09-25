@@ -56,6 +56,20 @@ export const feedDeliveryOutcomeEnum = pgEnum('feed_delivery_outcome', [
 ])
 /** How the exit-rule trailing stop is computed once Target 1 is taken. */
 export const trailingMethodEnum = pgEnum('trailing_method', ['ATR', 'SMA10', 'SMA20'])
+/** Mirrors `ExitActionKind` in `lib/exit/types.ts` — kept in sync by hand, like the enum above. */
+export const exitActionKindEnum = pgEnum('exit_action_kind', [
+  'HOLD',
+  'TAKE_PARTIAL',
+  'MOVE_TO_BREAKEVEN',
+  'TRAIL_ACTIVE',
+  'STOPPED_OUT',
+  'STOPPED_OUT_GAP',
+  'TIME_STOP',
+  'DATA_STALE',
+  'AWAITING_FEED',
+  'POSITION_CLOSED',
+  'PLAN_SUPERSEDED',
+])
 
 /** Monetary/quantity precision: 24 digits total, 8 decimal places. */
 const money = (name: string) => numeric(name, { precision: 24, scale: 8 })
@@ -645,6 +659,58 @@ export const exitSettings = pgTable('exit_settings', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
 
+// ── Push notifications ──────────────────────────────────────────────────────
+
+/**
+ * One row per subscribed browser.
+ *
+ * Primary-keyed by the endpoint itself rather than a synthetic id: the Push
+ * API already hands out a globally unique URL per subscription, and nothing
+ * ever needs to reference a subscription by anything else. Multiple rows
+ * share a `userId` when the same person subscribes from more than one device.
+ */
+export const pushSubscriptions = pgTable(
+  'push_subscriptions',
+  {
+    endpoint: text('endpoint').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    /** Informational only — lets a future screen show "iPhone", "Chrome" etc. */
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [index('push_subscriptions_user_idx').on(table.userId)],
+)
+
+/**
+ * The action kind an exit plan last had a push sent for.
+ *
+ * Deliberately its own table rather than a column on `exitRules`: that
+ * table's own header says every column there is a locked entry fact, edited
+ * only through the deliberate typo-correction path in `updateExitRule`. This
+ * value is the opposite of that — expected to change on nearly every webhook
+ * delivery for every open plan — and keeping it structurally apart means
+ * nothing in `lib/exit/rules.ts`'s `assess()` input path can ever join to it
+ * by accident, which is what the framework's "replayed, never re-read" rule
+ * for path-dependent state depends on. An absent row means "never evaluated",
+ * the honest state for a plan created before this shipped or whose first bar
+ * has not landed — a nullable sentinel column would express the same fact
+ * less directly.
+ */
+export const exitActionState = pgTable('exit_action_state', {
+  exitRuleId: text('exit_rule_id')
+    .primaryKey()
+    .references(() => exitRules.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  lastActionKind: exitActionKindEnum('last_action_kind').notNull(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+})
+
 // ── Relations ───────────────────────────────────────────────────────────────
 
 export const userRelations = relations(user, ({ many }) => ({
@@ -695,3 +761,5 @@ export type NewDbExitRule = typeof exitRules.$inferInsert
 export type DbExitFeedBar = typeof exitFeedBars.$inferSelect
 export type DbExitFeedDelivery = typeof exitFeedDeliveries.$inferSelect
 export type DbExitSettings = typeof exitSettings.$inferSelect
+export type DbPushSubscription = typeof pushSubscriptions.$inferSelect
+export type DbExitActionState = typeof exitActionState.$inferSelect

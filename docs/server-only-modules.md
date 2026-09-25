@@ -61,7 +61,10 @@ keeps the *modules* anyway.
 3. **Keep heavy or platform-bound dependencies in a module of their own.**
    `src/lib/import/decode.ts` exists solely so that the one `iconv-lite` import
    cannot be reached by anything that just wanted a string helper from
-   `lib/import/util.ts`.
+   `lib/import/util.ts`. `src/lib/notifications/webpush.ts` is the same idea
+   for `web-push`, which cannot resolve in a browser at all — the VAPID
+   predicate the client needs to check lives in the separate, isomorphic
+   `lib/notifications/vapid.ts` instead.
 4. **Where an import genuinely must stay inside a server-only body, import it
    there.** `lib/session.ts` and `server/middleware.ts` both do
    `await import('~/lib/auth')` inside the handler, because at module scope it

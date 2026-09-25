@@ -1,6 +1,6 @@
 {
-  "id": "fa021e6b-5a5e-4a90-af86-de8f246f276a",
-  "prevId": "4da91cf7-fa47-4d82-ad32-e053dd1c3e45",
+  "id": "f9d0155a-b49e-4792-b747-04e2476be3ae",
+  "prevId": "fa021e6b-5a5e-4a90-af86-de8f246f276a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2033,6 +2033,12 @@
         "motivation": {
           "name": "motivation",
           "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "day_sequence": {
+          "name": "day_sequence",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },

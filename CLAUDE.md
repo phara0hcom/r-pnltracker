@@ -97,6 +97,8 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/lib/observability/scrub.ts` | the single gate for everything reported to Sentry — pure, unit-tested |
 | `src/lib/offline/policy.ts` | what the service worker saves, never touches, and expires — pure, unit-tested |
 | `src/sw/sw.ts` | the service worker's event glue; bundled by the `serviceWorker()` plugin |
+| `src/lib/notifications/exitActionNotice.ts` | pure change detection + push payload shaping for exit-rule alerts |
+| `src/server/exitNotifications.ts` | re-evaluates and pushes on a webhook delivery — no `createServerFn` export |
 
 Every server function touching user data must `.middleware([authed])`. The typed
 `context.userId` means a handler that forgets the check does not compile.
@@ -152,6 +154,10 @@ derivation and sources.
   stored bars rather than mutated — a poisoned high-water mark on a one-way ratchet is
   uncorrectable. Trading-day maths compares exchange-local dates on both sides. See
   `docs/exit-rules.md`.
+- **`exit_action_state` is a comparison memo, not framework state.** It holds only the
+  action kind a plan was last evaluated at, so a push notification can fire on a real
+  change. Nothing in `assess()`'s input path may ever read it — that is what keeps it
+  from becoming the incrementally-mutated state the framework forbids above.
 
 `src/lib/pnl/reconcile.test.ts` replays the engine against 10 month-end 取引残高報告書
 snapshots. It is the strongest correctness check in the repo — a cost-basis or ordering bug
@@ -206,7 +212,9 @@ host), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIE
 `TRADINGVIEW_WEBHOOK_SECRET` (24+ chars; forms the `/api/tv/<secret>` path — unset disables
 the exit-rules feed rather than failing), `SENTRY_DSN` / `VITE_SENTRY_DSN` (unset disables
 reporting; the `VITE_` half is inlined at build time, so changing it on Vercel needs a
-redeploy), and build-only `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` for source maps.
+redeploy), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` / `VITE_VAPID_PUBLIC_KEY`
+(unset disables exit-rule push notifications — generate with `npx web-push generate-vapid-keys`),
+and build-only `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` for source maps.
 
 Price providers degrade rather than throw: Finnhub (US only) → JP scrape (Yahoo, then
 kabutan) → manual override → stale cache. Nothing in `src/lib/prices/providers.ts` may

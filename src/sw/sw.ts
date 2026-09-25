@@ -10,6 +10,7 @@
  * is emitted into. Not registered under `npm run dev`; try it with
  * `npm run build && npm start`.
  */
+import { parseExitPushPayload } from '~/lib/notifications/exitActionNotice'
 import type { SavedCopyMessage } from '~/lib/offline/messages'
 import { offlinePageHtml } from '~/lib/offline/offlinePage'
 import {
@@ -80,6 +81,49 @@ self.addEventListener('fetch', (event) => {
       event.respondWith(networkThenSaved(event, strategy))
       return
   }
+})
+
+self.addEventListener('push', (event) => {
+  if (!event.data) return
+
+  // `PushMessageData.json()` is typed `any`; parsed and validated immediately
+  // rather than trusted, the same shape as `parseFeedBody`'s `JSON.parse`.
+  let raw: unknown
+  try {
+    raw = event.data.json()
+  } catch {
+    return
+  }
+
+  const payload = parseExitPushPayload(raw)
+  if (!payload) return
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      tag: payload.tag,
+      data: payload.data,
+    }),
+  )
+})
+
+/** Focuses an already-open tab on the notification's screen, or opens one. */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const data = event.notification.data as { url?: string } | undefined
+  const url = data?.url ?? '/exits'
+
+  event.waitUntil(
+    (async () => {
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      const existing = clients.find((client) => new URL(client.url).pathname === url)
+      if (existing) {
+        await existing.focus()
+        return
+      }
+      await self.clients.openWindow(url)
+    })(),
+  )
 })
 
 /** A hashed file never changes, so the precache is authoritative when it has one. */

@@ -40,6 +40,7 @@ import {
   reportMeasurement,
   reportWarning,
 } from '~/lib/observability/report'
+import { notifyExitActionChanges } from '~/server/exitNotifications'
 
 const json = (body: unknown, status: number): Response =>
   new Response(JSON.stringify(body), {
@@ -312,6 +313,15 @@ async function processDelivery(delivery: PendingDelivery): Promise<void> {
       reportWarning(report.message, tags, report.fingerprint)
     } else {
       breadcrumb(report.message, tags)
+    }
+
+    // Its own try/catch, isolated from the store/price outcome reporting
+    // above: a notify failure is a different fault from a bar failing to
+    // store, and must not be folded into the same outcome tag.
+    try {
+      await notifyExitActionChanges(instrumentId)
+    } catch (error) {
+      reportError(error, { route: TV_WEBHOOK_ROUTE, phase: 'notify', symbol })
     }
   } catch (error) {
     /*
