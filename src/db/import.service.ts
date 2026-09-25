@@ -358,6 +358,9 @@ export async function commitImport(
           sourceRowHash: row.sourceRowHash,
           sourceFile: row.sourceFile,
           importBatchId: batchId,
+          // Its place was in the old day's order; the new day has to be
+          // ordered with it in, which the import preview offers.
+          daySequence: null,
           updatedAt: new Date(),
         })
         .where(

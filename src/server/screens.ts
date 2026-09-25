@@ -750,6 +750,8 @@ export interface CalendarTrade {
   holdingDays: number | null
   memo: string | null
   motivation: number | null
+  /** Its place in the day's hand-set order, or null while the day has none. */
+  daySequence: number | null
 }
 
 export interface CalendarDay {
@@ -761,6 +763,8 @@ export interface CalendarDay {
    */
   realizedJpy: string | null
   tradeCount: number
+  /** True when `trades` is in an order set by hand rather than grouped. */
+  ordered: boolean
   trades: CalendarTrade[]
   note: {
     title: string
@@ -866,15 +870,23 @@ export const getCalendar = createServerFn({ method: 'GET' })
         holdingDays: isClose ? (realized?.holdingDays ?? null) : null,
         memo: record.memo,
         motivation: record.motivation,
+        daySequence: trade.daySequence ?? null,
       })
       byDate.set(trade.tradeDate, dayTrades)
     }
 
-    // Rakuten's exports carry no execution time — only 約定日 — so there is no
-    // true intraday order to restore. Group by instrument instead, opens before
-    // closes, which puts a same-day round trip on adjacent rows and matches the
-    // order the engine processed that pool in.
+    // Rakuten's exports carry no execution time — only 約定日 — so unless the
+    // day's order has been set by hand there is no true intraday order to
+    // restore. Group by instrument instead, opens before closes, which puts a
+    // same-day round trip on adjacent rows and matches the order the engine
+    // processed that pool in.
+    const isOrdered = (dayTrades: CalendarTrade[]) =>
+      dayTrades.every((trade) => trade.daySequence != null)
     for (const dayTrades of byDate.values()) {
+      if (isOrdered(dayTrades)) {
+        dayTrades.sort((left, right) => (left.daySequence ?? 0) - (right.daySequence ?? 0))
+        continue
+      }
       dayTrades.sort((left, right) => {
         if (left.symbol !== right.symbol) return left.symbol.localeCompare(right.symbol)
         if (left.accountType !== right.accountType)
@@ -899,6 +911,7 @@ export const getCalendar = createServerFn({ method: 'GET' })
         date,
         realizedJpy: pnl ? pnl.toFixed(0) : null,
         tradeCount: dayTrades.length,
+        ordered: dayTrades.length > 0 && isOrdered(dayTrades),
         trades: dayTrades,
         note: note
           ? {

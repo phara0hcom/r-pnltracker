@@ -3,14 +3,16 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import styles from './import.module.scss'
 import { PageHeader, Section, Table } from '~/components/screen'
+import { DayOrderList } from '~/components/trades/DayOrderList'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
 import { reportError } from '~/lib/observability/report'
 import {
   commitFiles,
   previewFiles,
-  type CommitSummary,
-  type PreviewSummary,
+  type CommitResult,
+  type PreviewOrderTrade,
+  type PreviewResult,
   type UploadPayload,
 } from '~/server/uploads'
 
@@ -51,9 +53,14 @@ function Import() {
   const queryClient = useQueryClient()
   /** Chosen but not yet sent. Nothing leaves the browser until Upload is clicked. */
   const [staged, setStaged] = useState<Staged[]>([])
-  const [preview, setPreview] = useState<PreviewSummary[] | null>(null)
+  const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [payloads, setPayloads] = useState<UploadPayload[]>([])
-  const [result, setResult] = useState<CommitSummary[] | null>(null)
+  const [result, setResult] = useState<CommitResult | null>(null)
+  /**
+   * Days whose order the user has changed in the preview. Only these are sent:
+   * a day left alone keeps the engine's default rather than being frozen in it.
+   */
+  const [dayOrders, setDayOrders] = useState<Record<string, PreviewOrderTrade[]>>({})
   const [dragging, setDragging] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
 
@@ -61,6 +68,7 @@ function Import() {
     mutationFn: (files: UploadPayload[]) => previewFiles({ data: { files } }),
     onSuccess: (result) => {
       setPreview(result)
+      setDayOrders({})
       setResult(null)
       setFailure(null)
     },
@@ -75,10 +83,20 @@ function Import() {
   })
 
   const doCommit = useMutation({
-    mutationFn: (files: UploadPayload[]) => commitFiles({ data: { files } }),
+    mutationFn: (files: UploadPayload[]) =>
+      commitFiles({
+        data: {
+          files,
+          order: Object.entries(dayOrders).map(([date, trades]) => ({
+            date,
+            ids: trades.map((trade) => trade.id),
+          })),
+        },
+      }),
     onSuccess: (result) => {
       setResult(result)
       setPreview(null)
+      setDayOrders({})
       setStaged([])
       setPayloads([])
       setFailure(null)
@@ -126,9 +144,9 @@ function Import() {
   }
 
   const usableCount = staged.filter((staged) => !staged.problem).length
-  const totalNew = preview?.reduce((running, file) => running + file.newTrades + file.newDividends, 0) ?? 0
-  const totalRestated = preview?.reduce((running, file) => running + file.restated, 0) ?? 0
-  const totalDupes = preview?.reduce((running, file) => running + file.duplicates, 0) ?? 0
+  const totalNew = preview?.files.reduce((running, file) => running + file.newTrades + file.newDividends, 0) ?? 0
+  const totalRestated = preview?.files.reduce((running, file) => running + file.restated, 0) ?? 0
+  const totalDupes = preview?.files.reduce((running, file) => running + file.duplicates, 0) ?? 0
   // A file can be worth importing while adding nothing: an export taken after
   // settlement re-dates fills it already holds and corrects their FX.
   const totalChanges = totalNew + totalRestated
@@ -258,7 +276,7 @@ function Import() {
               </tr>
             </thead>
             <tbody>
-              {preview.map((filePreview) => (
+              {preview.files.map((filePreview) => (
                 <tr key={filePreview.filename}>
                   <td>{filePreview.filename}</td>
                   <td>{filePreview.format}</td>
@@ -283,11 +301,11 @@ function Import() {
             </p>
           ) : null}
 
-          {preview.some((filePreview) => filePreview.errors.length > 0) ? (
+          {preview.files.some((filePreview) => filePreview.errors.length > 0) ? (
             <div className={styles.errors}>
               <h3 className={styles.errorTitle}>Unreadable rows</h3>
               <ul>
-                {preview.flatMap((filePreview) =>
+                {preview.files.flatMap((filePreview) =>
                   filePreview.errors.slice(0, 8).map((rowError, index) => (
                     <li key={`${filePreview.filename}-${String(index)}`}>
                       <code>{filePreview.filename}</code>
@@ -299,6 +317,43 @@ function Import() {
               <p className={styles.dropHint}>
                 These rows are skipped; everything else still imports.
               </p>
+            </div>
+          ) : null}
+
+          {preview.days.length > 0 ? (
+            <div className={styles.dayOrders}>
+              <h3 className={styles.errorTitle}>Order within the day</h3>
+              <p className={styles.dropHint}>
+                Rakuten exports carry no execution time, so trades on the same day are taken buys
+                first. Where a sale came between two buys that changes the average it is measured
+                against. Move each day into the order it happened — first trade at the top — or
+                leave it as it is.
+              </p>
+              {preview.days.map((day) => (
+                <div key={day.date} className={styles.dayOrder}>
+                  <h4 className={styles.dayOrderDate}>
+                    {day.date}
+                    {dayOrders[day.date] ? (
+                      <button
+                        type="button"
+                        className={styles.secondary}
+                        onClick={() => {
+                          setDayOrders(({ [day.date]: _reset, ...rest }) => rest)
+                        }}
+                      >
+                        Reset
+                      </button>
+                    ) : null}
+                  </h4>
+                  <DayOrderList
+                    items={dayOrders[day.date] ?? day.trades}
+                    label={`Order of trades on ${day.date}`}
+                    onChange={(next) => {
+                      setDayOrders((prev) => ({ ...prev, [day.date]: next }))
+                    }}
+                  />
+                </div>
+              ))}
             </div>
           ) : null}
 
@@ -337,6 +392,19 @@ function Import() {
 
       {result ? (
         <Section title="Imported">
+          {result.orderProblems.length > 0 ? (
+            <div className={styles.errors} role="alert">
+              <h3 className={styles.errorTitle}>Order not applied</h3>
+              <ul>
+                {result.orderProblems.map((problem) => (
+                  <li key={problem}>{problem}</li>
+                ))}
+              </ul>
+              <p className={styles.dropHint}>
+                The trades imported; those days keep buys first. Set their order from the calendar.
+              </p>
+            </div>
+          ) : null}
           <Table>
             <thead>
               <tr>
@@ -349,7 +417,7 @@ function Import() {
               </tr>
             </thead>
             <tbody>
-              {result.map((result) => (
+              {result.files.map((result) => (
                 <tr key={result.filename}>
                   <td>{result.filename}</td>
                   <td data-numeric>{result.tradesInserted}</td>

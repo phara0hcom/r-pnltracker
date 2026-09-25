@@ -139,8 +139,22 @@ const fromEpochDays = (days: number): string =>
  * Without forcing opens ahead of closes on the same date, the sell can be
  * processed against a position that does not exist yet and the whole pool goes
  * negative. Ordering by trade date, then opens-first, then original file order.
+ *
+ * A day whose order has been set by hand is taken in that order instead — but
+ * only when *every* trade on it carries a `daySequence`. Mixing the two rules
+ * within one day would make the comparison intransitive, and a trade added to
+ * an ordered day has no known place in it; that day falls back to opens-first
+ * until it is ordered again.
  */
 export function sortTradesForEngine(trades: NormalizedTrade[]): NormalizedTrade[] {
+  const ordered = new Set<string>()
+  const unordered = new Set<string>()
+  for (const trade of trades) {
+    if (trade.daySequence == null) unordered.add(trade.tradeDate)
+    else ordered.add(trade.tradeDate)
+  }
+  for (const date of unordered) ordered.delete(date)
+
   return trades
     // The original index is carried alongside so the sort stays stable: equal
     // keys fall back to file order rather than an arbitrary engine ordering.
@@ -148,6 +162,11 @@ export function sortTradesForEngine(trades: NormalizedTrade[]): NormalizedTrade[
     .sort((left, right) => {
       if (left.trade.tradeDate !== right.trade.tradeDate)
         return left.trade.tradeDate < right.trade.tradeDate ? -1 : 1
+      if (ordered.has(left.trade.tradeDate)) {
+        const bySequence = (left.trade.daySequence ?? 0) - (right.trade.daySequence ?? 0)
+        if (bySequence !== 0) return bySequence
+        return left.fileOrder - right.fileOrder
+      }
       const leftOpens = OPENING_SIDES.includes(left.trade.side) ? 0 : 1
       const rightOpens = OPENING_SIDES.includes(right.trade.side) ? 0 : 1
       if (leftOpens !== rightOpens) return leftOpens - rightOpens

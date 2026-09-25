@@ -11,14 +11,17 @@
  * trip stores text the user has already read back on the calendar.
  */
 import * as Dialog from '@radix-ui/react-dialog'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import styles from './NoteDialog.module.scss'
 import { ScoreGroup } from './ScoreGroup'
 import { TradeJournalRow } from './TradeJournalRow'
 import { tone, yenSigned } from '~/components/format'
+import { DayOrderList, type DayOrderItem } from '~/components/trades/DayOrderList'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
 import type { CalendarDay } from '~/server/screens'
+import { reorderDay } from '~/server/trades'
 
 export interface NotePayload {
   date: string
@@ -28,6 +31,18 @@ export interface NotePayload {
   motivation?: number | null
   tags?: string[]
 }
+
+/** A calendar trade as the reorder list shows it. Fund prices are per 10,000 口. */
+const orderItem = (trade: CalendarDay['trades'][number]): DayOrderItem => ({
+  id: trade.id,
+  symbol: trade.symbol,
+  accountType: trade.accountType,
+  side: trade.side,
+  quantity: trade.quantity,
+  price: `${trade.currency === 'USD' ? '$' : '¥'}${Number(trade.unitPrice).toLocaleString('en-US', {
+    maximumFractionDigits: 4,
+  })}`,
+})
 
 const MOOD_LABELS = ['', 'Awful', 'Poor', 'Neutral', 'Good', 'Great']
 const MOTIVATION_LABELS = ['', 'Drained', 'Low', 'Steady', 'Driven', 'Sharp']
@@ -50,6 +65,24 @@ export function NoteDialog({
   const [tagText, setTagText] = useState((day.note?.tags ?? []).join(', '))
 
   const pnl = day.realizedJpy == null ? null : Number(day.realizedJpy)
+
+  /** The order being edited, or null when the list is showing normally. */
+  const [ordering, setOrdering] = useState<DayOrderItem[] | null>(null)
+  const [orderError, setOrderError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const saveOrder = useMutation({
+    mutationFn: (ids: string[]) => reorderDay({ data: { date: day.date, ids } }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setOrderError(result.message)
+        return
+      }
+      setOrdering(null)
+      setOrderError(null)
+      // Every realized figure after this day can move, not just this dialog's.
+      void queryClient.invalidateQueries()
+    },
+  })
 
   const submit = () => {
     onSave({
@@ -122,14 +155,64 @@ export function NoteDialog({
                     Trades ({day.trades.length})
                   </h3>
                   <span className={styles.tradesHint}>
-                    Grouped by instrument — Rakuten exports carry no execution time
+                    {ordering
+                      ? 'First trade of the day at the top'
+                      : day.ordered
+                        ? 'In the order you set'
+                        : 'Grouped by instrument — Rakuten exports carry no execution time'}
                   </span>
+                  {ordering || day.trades.length < 2 ? null : (
+                    <button
+                      type="button"
+                      className={styles.orderButton}
+                      onClick={() => {
+                        setOrdering(day.trades.map(orderItem))
+                      }}
+                    >
+                      Set order
+                    </button>
+                  )}
                 </div>
-                <ul className={styles.tradeList}>
-                  {day.trades.map((trade) => (
-                    <TradeJournalRow key={trade.id} trade={trade} />
-                  ))}
-                </ul>
+                {ordering ? (
+                  <>
+                    <DayOrderList
+                      items={ordering}
+                      onChange={setOrdering}
+                      label={`Order of trades on ${day.date}`}
+                    />
+                    <div className={styles.orderActions}>
+                      <button
+                        type="button"
+                        className={cx(styles.button, styles.primary)}
+                        disabled={saveOrder.isPending}
+                        onClick={() => {
+                          saveOrder.mutate(ordering.map((item) => item.id))
+                        }}
+                      >
+                        {saveOrder.isPending ? 'Saving…' : 'Save order'}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.button}
+                        onClick={() => {
+                          setOrdering(null)
+                          setOrderError(null)
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <span className={styles.orderError} role="status">
+                        {orderError ?? (saveOrder.isError ? 'Could not save the order.' : '')}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <ul className={styles.tradeList}>
+                    {day.trades.map((trade) => (
+                      <TradeJournalRow key={trade.id} trade={trade} />
+                    ))}
+                  </ul>
+                )}
               </section>
             ) : null}
 

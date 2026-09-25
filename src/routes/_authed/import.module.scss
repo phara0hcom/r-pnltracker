@@ -195,3 +195,24 @@
     color: var(--color-loss);
   }
 }
+
+.dayOrders {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.dayOrder {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.dayOrderDate {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}

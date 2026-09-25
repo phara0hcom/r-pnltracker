@@ -8,6 +8,9 @@
 import { createServerFn } from '@tanstack/react-start'
 import { authed } from './middleware'
 import { commitImport, previewImport } from '~/db/import.service'
+import { idFor } from '~/db/mappers'
+import { listTrades, setDayOrder } from '~/db/trades.service'
+import { daysToOrder, type OrderCandidate } from '~/lib/import/dayOrder'
 import { orderFilesForImport } from '~/lib/import/plan'
 
 export interface UploadPayload {
@@ -71,10 +74,33 @@ export interface PreviewSummary {
   errors: { line: number; message: string }[]
 }
 
+/** One trade in a day the preview offers for ordering. */
+export interface PreviewOrderTrade {
+  id: string
+  symbol: string
+  accountType: string
+  side: 'BUY' | 'SELL' | 'REINVEST' | 'REDEEM'
+  quantity: string
+  /** Formatted with its currency; funds per 10,000 口, as Rakuten quotes them. */
+  price: string
+  /** Added or re-dated by this import, rather than already stored. */
+  isNew: boolean
+}
+
+export interface PreviewResult {
+  files: PreviewSummary[]
+  /**
+   * Days where the import leaves a pool both bought and sold, in the order the
+   * engine would take them. Rakuten exports carry no execution time, so the
+   * user is shown them to put right before anything is written.
+   */
+  days: { date: string; trades: PreviewOrderTrade[] }[]
+}
+
 export const previewFiles = createServerFn({ method: 'POST' })
   .middleware([authed])
   .validator((data: { files: UploadPayload[] }) => data)
-  .handler(async ({ data, context }): Promise<PreviewSummary[]> => {
+  .handler(async ({ data, context }): Promise<PreviewResult> => {
     /*
      * Logged so a failed upload leaves a trace in the dev server output rather
      * than only in the browser.
@@ -92,10 +118,21 @@ export const previewFiles = createServerFn({ method: 'POST' })
         data.files.map((file) => file.filename).join(', '),
     )
     const out: PreviewSummary[] = []
+    // Keyed by row id: overlapping exports in one upload carry the same fill,
+    // which the commit will insert once.
+    const incoming = new Map<string, OrderCandidate>()
     // Previewed in the order they will actually be committed, so the summary
     // describes the run the user is about to approve.
     for (const file of orderFilesForImport(decodeChecked(data.files))) {
       const preview = await previewImport(context.userId, file.filename, file.bytes)
+      for (const trade of preview.plan.newTrades) {
+        // The id the commit will insert it under — see `toTradeRow`.
+        const id = idFor('trade', context.userId, trade.sourceRowHash)
+        incoming.set(id, { id, trade, incoming: true })
+      }
+      for (const restated of preview.plan.restatedTrades) {
+        incoming.set(restated.id, { id: restated.id, trade: restated.trade, incoming: true })
+      }
       out.push({
         filename: preview.filename,
         format: preview.format,
@@ -109,7 +146,26 @@ export const previewFiles = createServerFn({ method: 'POST' })
         errors: preview.plan.errors.map((error) => ({ line: error.line, message: error.message })),
       })
     }
-    return out
+
+    const stored = (await listTrades(context.userId)).map(
+      (record): OrderCandidate => ({ id: record.id, trade: record.trade, incoming: false }),
+    )
+    const days = daysToOrder(stored, [...incoming.values()]).map((day) => ({
+      date: day.date,
+      trades: day.trades.map(({ id, trade, incoming: isNew }) => ({
+        id,
+        symbol: trade.symbol,
+        accountType: trade.accountType,
+        side: trade.side,
+        quantity: trade.quantity.toFixed(),
+        price: `${trade.currency === 'USD' ? '$' : '¥'}${(trade.assetClass === 'FUND'
+          ? trade.unitPrice.mul(10_000)
+          : trade.unitPrice
+        ).toFixed()}`,
+        isNew,
+      })),
+    }))
+    return { files: out, days }
   })
 
 export interface CommitSummary {
@@ -122,10 +178,18 @@ export interface CommitSummary {
   errors: number
 }
 
+export interface CommitResult {
+  files: CommitSummary[]
+  /** Days whose order was refused, with why. The trades themselves imported. */
+  orderProblems: string[]
+}
+
 export const commitFiles = createServerFn({ method: 'POST' })
   .middleware([authed])
-  .validator((data: { files: UploadPayload[] }) => data)
-  .handler(async ({ data, context }): Promise<CommitSummary[]> => {
+  .validator(
+    (data: { files: UploadPayload[]; order?: { date: string; ids: string[] }[] }) => data,
+  )
+  .handler(async ({ data, context }): Promise<CommitResult> => {
     const out: CommitSummary[] = []
     // Sequential, not parallel: dividend attribution reads the trade history,
     // so a trade file must be committed before a statement that references it.
@@ -143,5 +207,13 @@ export const commitFiles = createServerFn({ method: 'POST' })
         errors: result.errors,
       })
     }
-    return out
+
+    // After every file, because an order can span rows from several of them.
+    // Each day is its own write: one refused order must not undo the import.
+    const orderProblems: string[] = []
+    for (const day of data.order ?? []) {
+      const applied = await setDayOrder(context.userId, day.date, day.ids)
+      if (!applied.ok) orderProblems.push(`${day.date}: ${applied.message}`)
+    }
+    return { files: out, orderProblems }
   })

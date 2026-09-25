@@ -7,6 +7,7 @@
  */
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import type { NormalizedTrade } from '../lib/domain/types'
+import { orderProblem } from '../lib/import/dayOrder'
 import {
   applyTradeEdit,
   buildManualTrade,
@@ -170,6 +171,9 @@ export async function updateTrade(
       isEdited: true,
       editedAt: new Date(),
       memo: row.memo,
+      // A place in one day's order means nothing on another day.
+      daySequence:
+        row.tradeDate === existing.trade.tradeDate ? (existing.trade.daySequence ?? null) : null,
       updatedAt: new Date(),
     })
     .where(and(eq(trades.userId, userId), eq(trades.id, tradeId)))
@@ -247,4 +251,60 @@ export async function setTradeJournal(
       updatedAt: new Date(),
     })
     .where(and(eq(trades.userId, userId), eq(trades.id, tradeId)))
+}
+
+export type DayOrderResult = { ok: true } | { ok: false; message: string }
+
+/**
+ * Fix the order of one 約定日's trades, as the user says they happened.
+ *
+ * `ids` may be a subset — the calendar can be filtered to one account — and
+ * the day's other trades are appended after them in their current order.
+ * Pools are per account, so a trade the caller could not see is never in a
+ * pool it reordered, and where it lands relative to them changes nothing.
+ *
+ * Refused, writing nothing, when the order would sell units the pool does not
+ * hold at that point: the engine would clamp the sale and every figure after
+ * it would be wrong in a way no screen could explain.
+ */
+export async function setDayOrder(
+  userId: string,
+  date: string,
+  ids: readonly string[],
+): Promise<DayOrderResult> {
+  const rows = await db
+    .select({ id: trades.id, daySequence: trades.daySequence, createdAt: trades.createdAt })
+    .from(trades)
+    .where(and(eq(trades.userId, userId), eq(trades.tradeDate, date), isNull(trades.deletedAt)))
+
+  const onDay = new Set(rows.map((row) => row.id))
+  if (new Set(ids).size !== ids.length || ids.some((id) => !onDay.has(id))) {
+    return { ok: false, message: `Those trades are not all on ${date} — reload and try again.` }
+  }
+
+  const given = new Set(ids)
+  const rest = rows
+    .filter((row) => !given.has(row.id))
+    .sort(
+      (left, right) =>
+        (left.daySequence ?? Number.MAX_SAFE_INTEGER) - (right.daySequence ?? Number.MAX_SAFE_INTEGER) ||
+        left.createdAt.getTime() - right.createdAt.getTime(),
+    )
+    .map((row) => row.id)
+  const sequence = new Map([...ids, ...rest].map((id, index) => [id, index]))
+
+  // Replayed before it is written: the proposed order must not add a warning
+  // on this date that the current order does not already have.
+  const problem = orderProblem(await listTrades(userId), date, sequence)
+  if (problem) return { ok: false, message: problem }
+
+  await db.transaction(async (tx) => {
+    for (const [id, position] of sequence) {
+      await tx
+        .update(trades)
+        .set({ daySequence: position, updatedAt: new Date() })
+        .where(and(eq(trades.userId, userId), eq(trades.id, id)))
+    }
+  })
+  return { ok: true }
 }

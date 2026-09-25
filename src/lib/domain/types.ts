@@ -111,6 +111,16 @@ export interface NormalizedTrade {
   isSettled: boolean
   /** Rakuten points applied to the purchase. Informational — already inside `netAmount`. */
   pointsUsed?: Decimal
+  /**
+   * Position within its 約定日, when the order of that day has been set by hand.
+   *
+   * Rakuten exports no execution time, so without this a day's trades are
+   * ordered opens-first. That is safe but not always true — buy 29, sell 20,
+   * buy 2, sell 11 is averaged as if all 31 were bought first, which moves
+   * realized P&L between the two sells. Only honoured when every trade on the
+   * date carries one; see `sortTradesForEngine`.
+   */
+  daySequence?: number
   /** sha256 of the identifying fields — makes re-importing overlapping exports idempotent. */
   sourceRowHash: string
   sourceFile: string

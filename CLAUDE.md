@@ -134,6 +134,14 @@ derivation and sources.
   not April–March. Rate is 20.315%.
 - **Unsettled rows carry `受渡金額 = "-"`** — the amount must be derived and `isSettled` set false.
 - **`再投資` rows are zero-cash buys** that add units *and* cost basis.
+- **Within one 約定日 the engine takes opens first**, because no export carries an
+  execution time. A user can set the real order of a day from the calendar or
+  the import preview (`trades.day_sequence`); it is honoured only when *every*
+  trade on that date has one, and a re-dated or date-edited trade loses its
+  place. Orders that would sell units not yet held are refused before writing.
+- **A US close is shown in dollars on price**: (sell − average buy) × shares,
+  before commission (`lib/pnl/usdResult.ts`). The JPY figure beside it in tax
+  and stats is each trade at its own day's rate, and can have the opposite sign.
 - **旧NISA is a separate system** and is excluded from the ¥18M lifetime cap.
 - **Exit-rule entry facts are locked**: `initialStop`, R and Target 1 are fixed from the
   entry-date ATR *and the stop/target multiples stored on the plan*, never re-read from

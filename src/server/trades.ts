@@ -16,7 +16,9 @@ import {
   deleteTrade,
   listTrades,
   restoreTrade,
+  setDayOrder,
   updateTrade,
+  type DayOrderResult,
 } from '~/db/trades.service'
 import type { AssetClass } from '~/lib/domain/types'
 import { runEngine } from '~/lib/pnl/engine'
@@ -207,6 +209,19 @@ export const removeTrade = createServerFn({ method: 'POST' })
     await deleteTrade(context.userId, data.id)
     return { ok: true, id: data.id }
   })
+
+/**
+ * Set the order one day's trades happened in — see `setDayOrder`.
+ *
+ * Rakuten exports no execution time, so this is the only way to say that a
+ * sell came between two buys rather than after both.
+ */
+export const reorderDay = createServerFn({ method: 'POST' })
+  .middleware([authed])
+  .validator((data: { date: string; ids: string[] }) => data)
+  .handler(({ data, context }): Promise<DayOrderResult> =>
+    setDayOrder(context.userId, data.date, data.ids),
+  )
 
 export const undoRemoveTrade = createServerFn({ method: 'POST' })
   .middleware([authed])

@@ -90,6 +90,7 @@ export function toTradeRow({
     isEdited,
     editedAt: isEdited ? new Date() : null,
     memo,
+    daySequence: trade.daySequence ?? null,
   }
 }
 
@@ -118,6 +119,7 @@ export function fromTradeRow(
     netAmountJpy: dec(row.netAmountJpy),
     pointsUsed: decOrNull(row.pointsUsed) ?? undefined,
     isSettled: row.isSettled,
+    daySequence: row.daySequence ?? undefined,
     sourceRowHash: row.sourceRowHash,
     sourceFile: row.sourceFile,
   }
