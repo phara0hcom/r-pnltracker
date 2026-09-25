@@ -20,6 +20,7 @@ import {
 } from '~/db/trades.service'
 import type { AssetClass } from '~/lib/domain/types'
 import { runEngine } from '~/lib/pnl/engine'
+import { usdResult } from '~/lib/pnl/usdResult'
 import { validateManualTrade, type ManualTradeInput } from '~/lib/trades/manual'
 
 /** One row as the table needs it. Decimals are strings — exact on the wire. */
@@ -55,18 +56,15 @@ export interface TradeRow {
   /** Cost basis of the units sold, in yen. */
   costJpy: string | null
   /**
-   * What a US close made in dollars, net of commission on both sides. The
-   * table leads with this for US trades: settled in dollars, a trade that
-   * sold above its average cost is a gain even when the yen weakened enough
-   * to make `realizedJpy` a loss.
+   * A US close's dollar result on price alone — (sell price − average buy
+   * price) × shares — which the table leads with. See `lib/pnl/usdResult.ts`.
    */
   realizedUsd: string | null
-  /** Dollar cost of the units sold — the denominator for a US close's return. */
+  /** Average buy price × shares — the denominator for a US close's return. */
   costUsd: string | null
-  /**
-   * `realizedUsd` at the latest stored USD/JPY — what the dollars are worth in
-   * yen now. Null when no rate has ever been fetched.
-   */
+  /** The dollar result after commission on both sides, for the hover text. */
+  netUsd: string | null
+  /** `realizedUsd` at the latest stored USD/JPY. Null when no rate has been fetched. */
   realizedUsdJpy: string | null
   /** The rate `realizedUsdJpy` used, so the screen can say which it was. */
   usdJpy: string | null
@@ -85,7 +83,14 @@ export interface TradeRow {
 /** The part of a row that comes from the engine's closing event rather than the trade. */
 type RealizedFields = Pick<
   TradeRow,
-  'realizedJpy' | 'costJpy' | 'realizedUsd' | 'costUsd' | 'realizedUsdJpy' | 'usdJpy' | 'returnPct'
+  | 'realizedJpy'
+  | 'costJpy'
+  | 'realizedUsd'
+  | 'costUsd'
+  | 'netUsd'
+  | 'realizedUsdJpy'
+  | 'usdJpy'
+  | 'returnPct'
 >
 
 /**
@@ -104,18 +109,21 @@ export const listTradeRows = createServerFn({ method: 'GET' })
     // back by (date, symbol, account, quantity) — the engine's own key.
     const realizedBy = new Map<string, RealizedFields>()
     for (const e of engine.realized) {
-      const isUsd = e.assetClass === 'US_EQUITY'
-      // The return is measured in the currency the row leads with.
-      const [gain, cost] = isUsd ? [e.realizedNative, e.costNative] : [e.realizedJpy, e.costJpy]
+      const usd = usdResult(e, liveFx)
       realizedBy.set(`${e.tradeDate}|${e.symbol}|${e.accountType}|${e.quantity.toFixed()}`, {
         realizedJpy: e.realizedJpy.toFixed(),
         costJpy: e.costJpy.toFixed(),
-        realizedUsd: isUsd ? e.realizedNative.toFixed(2) : null,
-        costUsd: isUsd ? e.costNative.toFixed(2) : null,
-        realizedUsdJpy: isUsd && liveFx ? e.realizedNative.mul(liveFx).toFixed(0) : null,
-        usdJpy: isUsd && liveFx ? liveFx.toFixed(2) : null,
+        realizedUsd: usd?.gainUsd ?? null,
+        costUsd: usd?.costUsd ?? null,
+        netUsd: usd?.netUsd ?? null,
+        realizedUsdJpy: usd?.gainJpyNow ?? null,
+        usdJpy: usd?.usdJpy ?? null,
         // A zero cost basis would divide by zero; report null rather than Infinity.
-        returnPct: cost.gt(0) ? gain.div(cost).toNumber() : null,
+        returnPct: usd
+          ? usd.returnPct
+          : e.costJpy.gt(0)
+            ? e.realizedJpy.div(e.costJpy).toNumber()
+            : null,
       })
     }
 
@@ -150,6 +158,7 @@ export const listTradeRows = createServerFn({ method: 'GET' })
         costJpy: hit?.costJpy ?? null,
         realizedUsd: hit?.realizedUsd ?? null,
         costUsd: hit?.costUsd ?? null,
+        netUsd: hit?.netUsd ?? null,
         realizedUsdJpy: hit?.realizedUsdJpy ?? null,
         usdJpy: hit?.usdJpy ?? null,
         returnPct: hit?.returnPct ?? null,

@@ -34,6 +34,7 @@ const soxlSell: TradeRow = {
   costJpy: '455112',
   realizedUsd: '46.40',
   costUsd: '2860.05',
+  netUsd: '31.86',
   realizedUsdJpy: '6960',
   usdJpy: '150.00',
   returnPct: 0.0162,
@@ -67,10 +68,10 @@ describe('realized cell', () => {
     expect(cell.textContent).toBe('$46.40(¥6,960)')
   })
 
-  it('keeps the tax-basis yen and the selling cost in the hover text', () => {
+  it('keeps the after-commission and tax-basis figures in the hover text', () => {
     renderRow(soxlSell)
     const title = screen.getByText('$46.40').getAttribute('title') ?? ''
-    expect(title).toContain('$46.40 after $14.54 of selling costs')
+    expect(title).toContain('$31.86 after commission on both sides')
     expect(title).toContain('¥6,960 at ¥150.00/$')
     expect(title).toContain('For tax: ¥-3,246')
   })
@@ -90,6 +91,7 @@ describe('realized cell', () => {
       realizedJpy: '12500',
       realizedUsd: null,
       costUsd: null,
+      netUsd: null,
       realizedUsdJpy: null,
       usdJpy: null,
     })

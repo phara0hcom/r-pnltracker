@@ -17,15 +17,15 @@ import type { TradeRow } from '~/server/trades'
 /**
  * The hover text on a realized figure.
  *
- * A US close leads with dollars, so this is where the other two figures live:
- * what the dollars are worth in yen now, and the yen figure tax is computed on.
- * The selling cost is named because it is the usual gap between the cell and
- * `(sell price − average cost) × shares` worked out by hand.
+ * A US close leads with its price-only dollar result, so this is where the
+ * rest lives: the result after commission, what the dollars are worth in yen
+ * now, and the yen figure tax is computed on.
  */
 function realizedTitle(row: TradeRow): string | undefined {
   if (row.realizedUsd == null) return undefined
   return [
-    `${money(row.realizedUsd, 'USD')} after ${money(row.commission, 'USD')} of selling costs`,
+    `${money(row.realizedUsd, 'USD')} on price: (sell − average buy) × shares`,
+    row.netUsd == null ? null : `${money(row.netUsd, 'USD')} after commission on both sides`,
     row.realizedUsdJpy == null || row.usdJpy == null
       ? null
       : `${yen(row.realizedUsdJpy)} at ¥${row.usdJpy}/$, the latest rate`,

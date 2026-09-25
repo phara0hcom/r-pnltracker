@@ -11,7 +11,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import styles from './TradeJournalRow.module.scss'
-import { ACCOUNT_LABEL, qty, tone, yen, yenSigned } from '~/components/format'
+import { ACCOUNT_LABEL, moneySigned, qty, tone, yen, yenSigned } from '~/components/format'
 import { CloseIcon } from '~/components/icons/CloseIcon'
 import { PenIcon } from '~/components/icons/PenIcon'
 import { InstrumentLink } from '~/components/InstrumentLink'
@@ -155,6 +155,22 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
         <span className={styles.pnl}>
           {trade.realizedJpy == null ? (
             <span className={styles.muted}>—</span>
+          ) : trade.realizedUsd != null ? (
+            // A US close in dollars on price, as on the Trades screen.
+            <span
+              className={tone(trade.realizedUsd) === 'loss' ? styles.loss : styles.profit}
+              title={[
+                trade.netUsd == null ? null : `${moneySigned(trade.netUsd, 'USD')} after commission`,
+                `For tax: ${yenSigned(trade.realizedJpy)}, each trade in yen at its own day's rate`,
+              ]
+                .filter((line) => line != null)
+                .join('\n')}
+            >
+              {moneySigned(trade.realizedUsd, 'USD')}
+              {trade.realizedUsdJpy == null ? null : (
+                <span className={styles.aside}>({yenSigned(trade.realizedUsdJpy)})</span>
+              )}
+            </span>
           ) : (
             <span className={tone(trade.realizedJpy) === 'profit' ? styles.profit : styles.loss}>
               {yenSigned(trade.realizedJpy)}

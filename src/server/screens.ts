@@ -37,6 +37,7 @@ import {
 } from '~/lib/nisa/quota'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
+import { usdResult, type UsdResult } from '~/lib/pnl/usdResult'
 import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
 import { findReinvestment } from '~/lib/tax/reinvestment'
 import { buildYearOverYear, type TaxYearBasis } from '~/lib/tax/report'
@@ -727,8 +728,15 @@ export interface CalendarTrade {
   currency: string
   /** Cash paid on a buy, or received on a sell. Always JPY. */
   amountJpy: string
-  /** Null on opening trades — a buy has no realized P&L. */
+  /** Null on opening trades — a buy has no realized P&L. The tax-basis yen. */
   realizedJpy: string | null
+  /** A US close's price-only dollar result — see `lib/pnl/usdResult.ts`. */
+  realizedUsd: string | null
+  /** The same after commission on both sides. */
+  netUsd: string | null
+  /** `realizedUsd` at the latest stored USD/JPY. */
+  realizedUsdJpy: string | null
+  /** In dollars for a US close, matching the figure shown. */
   returnPct: number | null
   /**
    * Weighted-average cost of the units sold, in the instrument's own currency.
@@ -746,6 +754,11 @@ export interface CalendarTrade {
 
 export interface CalendarDay {
   date: string
+  /**
+   * The day's realized result in yen, as the rows show it: yen closes as they
+   * are, US closes as their dollar result at the latest USD/JPY — not the tax
+   * figure, which a weaker yen can turn into a loss on a day that made dollars.
+   */
   realizedJpy: string | null
   tradeCount: number
   trades: CalendarTrade[]
@@ -773,21 +786,40 @@ export const getCalendar = createServerFn({ method: 'GET' })
     const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
     const last = `${String(year)}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
-    const { engine, records } = await engineFor(context.userId, data.account)
-    const daily = dailyPnl(engine.realized)
+    const [{ engine, records }, liveFx] = await Promise.all([
+      engineFor(context.userId, data.account),
+      usdJpyRate(),
+    ])
 
     // Realized events keyed the same way the engine keys them, so a close can
     // be matched back to the row that produced it.
     const realizedByKey = new Map<
       string,
-      { realized: string; pct: number | null; entryPrice: string; holdingDays: number }
+      {
+        realized: string
+        usd: UsdResult | null
+        pct: number | null
+        entryPrice: string
+        holdingDays: number
+      }
     >()
+    const daily = new Map<string, typeof ZERO>()
     for (const close of engine.realized) {
+      const usd = usdResult(close, liveFx)
+      // Until a rate has ever been fetched a US close can only be counted at
+      // its tax-basis yen.
+      const shown = usd?.gainJpyNow ?? close.realizedJpy
+      daily.set(close.tradeDate, (daily.get(close.tradeDate) ?? ZERO).add(shown))
       realizedByKey.set(
         `${close.tradeDate}|${close.symbol}|${close.accountType}|${close.quantity.toFixed()}`,
         {
           realized: close.realizedJpy.toFixed(0),
-          pct: close.costJpy.gt(0) ? close.realizedJpy.div(close.costJpy).toNumber() : null,
+          usd,
+          pct: usd
+            ? usd.returnPct
+            : close.costJpy.gt(0)
+              ? close.realizedJpy.div(close.costJpy).toNumber()
+              : null,
           // Same per-10,000 convention as the exit price, so the two are
           // directly comparable on screen.
           entryPrice:
@@ -826,6 +858,9 @@ export const getCalendar = createServerFn({ method: 'GET' })
         currency: trade.currency,
         amountJpy: trade.netAmountJpy.toFixed(0),
         realizedJpy: isClose ? (realized?.realized ?? null) : null,
+        realizedUsd: isClose ? (realized?.usd?.gainUsd ?? null) : null,
+        netUsd: isClose ? (realized?.usd?.netUsd ?? null) : null,
+        realizedUsdJpy: isClose ? (realized?.usd?.gainJpyNow ?? null) : null,
         returnPct: isClose ? (realized?.pct ?? null) : null,
         entryPrice: isClose ? (realized?.entryPrice ?? null) : null,
         holdingDays: isClose ? (realized?.holdingDays ?? null) : null,
