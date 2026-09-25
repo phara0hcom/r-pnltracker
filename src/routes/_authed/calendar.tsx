@@ -68,7 +68,9 @@ function Calendar() {
   const [account, setAccount] = useAccountFilter()
   const navigate = Route.useNavigate()
   const queryClient = useQueryClient()
-  const [openDay, setOpenDay] = useState<CalendarDay | null>(null)
+  // The date, not a copy of the day: the dialog must re-render from the query,
+  // or saving a day's order leaves it showing the grouping and total from before.
+  const [openDate, setOpenDate] = useState<string | null>(null)
   const isMobile = useIsMobile()
 
   const calendarKey = ['calendar', month, account]
@@ -77,6 +79,10 @@ function Calendar() {
     queryKey: calendarKey,
     queryFn: () => getCalendar({ data: { month, account } }),
   })
+  const openDay = openDate == null ? null : (dayList?.find((day) => day.date === openDate) ?? null)
+  const setOpenDay = (day: CalendarDay | null) => {
+    setOpenDate(day?.date ?? null)
+  }
 
   /**
    * Apply an edit to the cached month straight away.

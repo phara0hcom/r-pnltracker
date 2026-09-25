@@ -12,6 +12,12 @@
  * Everything is tracked in JPY. For US positions the weighted-average entry FX
  * rate is carried alongside the cost basis so realized P&L can later be split
  * into stock movement vs currency movement (see fxAttribution.ts).
+ *
+ * Cost is also pooled a second time in the instrument's own currency. The JPY
+ * figure is the tax one — each trade converted at its own day's rate — and for
+ * a US round trip settled in dollars it can show a loss on a trade that made
+ * dollars: SOXL bought at ¥159/$ and sold at ¥155/$ for a higher dollar price.
+ * The native figure is what the trade made in the currency it was traded in.
  */
 import Decimal from 'decimal.js'
 import {
@@ -20,6 +26,7 @@ import {
   ZERO,
   type AccountType,
   type AssetClass,
+  type Currency,
   type NormalizedTrade,
 } from '../domain/types'
 
@@ -32,6 +39,10 @@ Decimal.set({ precision: 40 })
 /** Realized P&L is booked in whole yen, like every other JPY figure. */
 const toYen = (d: Decimal): Decimal => d.toDecimalPlaces(0, Decimal.ROUND_HALF_UP)
 
+/** The native-currency twin of `toYen`: cents for dollars, whole yen for yen. */
+const toMinorUnit = (d: Decimal, currency: Currency): Decimal =>
+  currency === 'USD' ? d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP) : toYen(d)
+
 export interface PositionState {
   symbol: string
   name: string
@@ -41,6 +52,12 @@ export interface PositionState {
   quantity: Decimal
   /** Total JPY acquisition cost of those units. */
   costBasisJpy: Decimal
+  /**
+   * The same cost in the instrument's own currency — Σ `netAmount`, so buy-side
+   * commission is inside it, as it is in `costBasisJpy`. Equal to the JPY
+   * figure for a yen instrument.
+   */
+  costBasisNative: Decimal
   /** Quantity-weighted average entry FX rate (1 for JPY instruments). */
   avgFxRate: Decimal
   /** Quantity-weighted average entry price in the instrument's native currency. */
@@ -62,6 +79,15 @@ export interface RealizedEvent {
   costJpy: Decimal
   /** proceeds − cost. */
   realizedJpy: Decimal
+  /** Net received in the instrument's own currency, after sell-side costs. */
+  proceedsNative: Decimal
+  /** Native-currency cost of exactly the units sold. */
+  costNative: Decimal
+  /**
+   * proceeds − cost in the instrument's own currency. For a US close this is
+   * the dollar result, which currency movement cannot turn into a loss.
+   */
+  realizedNative: Decimal
   /** Weighted-average entry price, native currency. */
   entryPriceNative: Decimal
   exitPriceNative: Decimal
@@ -106,6 +132,38 @@ const toEpochDays = (iso: string): number => Math.floor(Date.parse(`${iso}T00:00
 const fromEpochDays = (days: number): string =>
   new Date(Math.round(days) * 86_400_000).toISOString().slice(0, 10)
 
+/** The unit a hand-set order applies to: one pool on one 約定日. */
+const poolDayKey = (trade: { tradeDate: string; symbol: string; accountType: AccountType }) =>
+  `${trade.tradeDate}\0${poolKey(trade.symbol, trade.accountType)}`
+
+/**
+ * The pool-days whose order has been set by hand: every trade in them carries
+ * a `daySequence`.
+ *
+ * Per pool rather than per date, so the answer cannot depend on which other
+ * accounts are in view — the account filter drops whole pools, never part of
+ * one. A trade added to an ordered pool-day has no known place in it, so that
+ * pool-day falls back to opens-first until it is ordered again.
+ */
+export function orderedPoolDays(
+  trades: readonly {
+    tradeDate: string
+    symbol: string
+    accountType: AccountType
+    daySequence?: number | null
+  }[],
+): Set<string> {
+  const ordered = new Set<string>()
+  const unordered = new Set<string>()
+  for (const trade of trades) {
+    const key = poolDayKey(trade)
+    if (trade.daySequence == null) unordered.add(key)
+    else ordered.add(key)
+  }
+  for (const key of unordered) ordered.delete(key)
+  return ordered
+}
+
 /**
  * Chronological ordering with a deliberate tie-break.
  *
@@ -113,9 +171,14 @@ const fromEpochDays = (days: number): string =>
  * Without forcing opens ahead of closes on the same date, the sell can be
  * processed against a position that does not exist yet and the whole pool goes
  * negative. Ordering by trade date, then opens-first, then original file order.
+ *
+ * A pool-day ordered by hand (see `orderedPoolDays`) is then rearranged within
+ * the positions it already occupies. Everything else keeps exactly the order it
+ * would have had, and mixing the two rules in one comparator — which would not
+ * be transitive — is avoided.
  */
 export function sortTradesForEngine(trades: NormalizedTrade[]): NormalizedTrade[] {
-  return trades
+  const sorted = trades
     // The original index is carried alongside so the sort stays stable: equal
     // keys fall back to file order rather than an arbitrary engine ordering.
     .map((trade, fileOrder) => ({ trade, fileOrder }))
@@ -127,7 +190,32 @@ export function sortTradesForEngine(trades: NormalizedTrade[]): NormalizedTrade[
       if (leftOpens !== rightOpens) return leftOpens - rightOpens
       return left.fileOrder - right.fileOrder
     })
-    .map(({ trade }) => trade)
+
+  const ordered = orderedPoolDays(trades)
+  if (ordered.size === 0) return sorted.map(({ trade }) => trade)
+
+  const slots = new Map<string, number[]>()
+  sorted.forEach(({ trade }, index) => {
+    const key = poolDayKey(trade)
+    if (!ordered.has(key)) return
+    const list = slots.get(key)
+    if (list) list.push(index)
+    else slots.set(key, [index])
+  })
+  const result = [...sorted]
+  for (const indices of slots.values()) {
+    const bySequence = indices
+      .map((index) => sorted[index]!)
+      .sort(
+        (left, right) =>
+          (left.trade.daySequence ?? 0) - (right.trade.daySequence ?? 0) ||
+          left.fileOrder - right.fileOrder,
+      )
+    indices.forEach((index, n) => {
+      result[index] = bySequence[n]!
+    })
+  }
+  return result.map(({ trade }) => trade)
 }
 
 export function runEngine(trades: NormalizedTrade[]): EngineResult {
@@ -148,6 +236,7 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
           accountType: trade.accountType,
           quantity: ZERO,
           costBasisJpy: ZERO,
+          costBasisNative: ZERO,
           avgFxRate: trade.fxRate,
           avgPriceNative: ZERO,
           weightedDateSum: ZERO,
@@ -159,6 +248,7 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
       // REINVEST carries a real acquisition cost (the distribution rolled in),
       // so it increases basis exactly like a cash buy.
       pool.costBasisJpy = pool.costBasisJpy.add(trade.netAmountJpy)
+      pool.costBasisNative = pool.costBasisNative.add(trade.netAmount)
       pool.avgFxRate = weightedAvg(pool.avgFxRate, pool.quantity, trade.fxRate, trade.quantity, newQty)
       pool.avgPriceNative = weightedAvg(
         pool.avgPriceNative,
@@ -204,6 +294,13 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
     const proceedsJpy = toYen(
       trade.quantity.eq(qty) ? trade.netAmountJpy : trade.netAmountJpy.mul(qty).div(trade.quantity),
     )
+    // The same averaging and rounding in native currency, so the pool empties
+    // to exactly zero on a full exit in both currencies at once.
+    const costNative = toMinorUnit(pool.costBasisNative.div(pool.quantity).mul(qty), trade.currency)
+    const proceedsNative = toMinorUnit(
+      trade.quantity.eq(qty) ? trade.netAmount : trade.netAmount.mul(qty).div(trade.quantity),
+      trade.currency,
+    )
 
     const avgEntryDays = pool.weightedDateSum.div(pool.quantity)
     const avgEntryDate = fromEpochDays(avgEntryDays.toNumber())
@@ -219,6 +316,9 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
       proceedsJpy,
       costJpy,
       realizedJpy: proceedsJpy.sub(costJpy),
+      proceedsNative,
+      costNative,
+      realizedNative: proceedsNative.sub(costNative),
       entryPriceNative: pool.avgPriceNative,
       exitPriceNative: trade.unitPrice,
       entryFxRate: pool.avgFxRate,
@@ -234,9 +334,11 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
       ? ZERO
       : pool.weightedDateSum.mul(remaining).div(pool.quantity)
     pool.costBasisJpy = pool.costBasisJpy.sub(costJpy)
+    pool.costBasisNative = pool.costBasisNative.sub(costNative)
     pool.quantity = remaining
     if (remaining.isZero()) {
       pool.costBasisJpy = ZERO
+      pool.costBasisNative = ZERO
       pool.avgPriceNative = ZERO
     }
   }

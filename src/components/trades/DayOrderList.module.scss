@@ -1,0 +1,91 @@
+@use '../../styles/mixins' as m;
+
+.list {
+  overflow: hidden;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(3rem, 1fr) auto 3rem auto 2.5rem auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  border-bottom: 1px solid var(--color-border);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.position {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}
+
+.symbol {
+  font-weight: var(--weight-medium);
+
+  @include m.truncate;
+}
+
+.account {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.side {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.03em;
+}
+
+.sideBuy {
+  color: var(--color-accent);
+}
+
+.sideSell {
+  color: var(--color-warn);
+}
+
+.size {
+  text-align: right;
+
+  @include m.tabular-nums;
+}
+
+.tag {
+  padding: 1px var(--space-1);
+  font-size: 0.6875rem;
+  color: var(--color-text-subtle);
+  text-align: center;
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+}
+
+.moves {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.move {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.35;
+  }
+}

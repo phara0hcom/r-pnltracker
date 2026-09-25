@@ -224,6 +224,12 @@ export const trades = pgTable(
      * keeping.
      */
     motivation: smallint('motivation'),
+    /**
+     * Where this trade falls within its 約定日, set by hand from the calendar
+     * or the import preview. Null until the day is ordered; see
+     * `NormalizedTrade.daySequence`.
+     */
+    daySequence: integer('day_sequence'),
 
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),

@@ -23,11 +23,15 @@ const trade = (id: string): CalendarDay['trades'][number] => ({
   currency: 'JPY',
   amountJpy: '280000',
   realizedJpy: '12000',
+  realizedUsd: null,
+  netUsd: null,
+  realizedUsdJpy: null,
   returnPct: 0.04,
   entryPrice: '2680.0',
   holdingDays: 21,
   memo: null,
   motivation: null,
+  daySequence: null,
 })
 
 const note = (title: string): CalendarDay['note'] => ({
@@ -39,8 +43,8 @@ const note = (title: string): CalendarDay['note'] => ({
 })
 
 const month = (): CalendarDay[] => [
-  { date: '2026-08-03', realizedJpy: '12000', tradeCount: 2, trades: [trade('a'), trade('b')], note: null },
-  { date: '2026-08-04', realizedJpy: null, tradeCount: 0, trades: [], note: note('kept') },
+  { date: '2026-08-03', realizedJpy: '12000', tradeCount: 2, ordered: false, trades: [trade('a'), trade('b')], note: null },
+  { date: '2026-08-04', realizedJpy: null, tradeCount: 0, ordered: false, trades: [], note: note('kept') },
 ]
 
 describe('withNote', () => {

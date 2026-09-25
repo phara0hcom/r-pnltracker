@@ -9,8 +9,9 @@
  * A hand-entered `price_overrides` row still wins, because the screens resolve
  * `override ?? cached`. Nothing here has to know about overrides.
  */
-import { eq, lt, sql } from 'drizzle-orm'
-import { exitFeedBars, priceCache } from './schema'
+import Decimal from 'decimal.js'
+import { and, eq, lt, sql } from 'drizzle-orm'
+import { exitFeedBars, fxRates, priceCache } from './schema'
 import { db } from './index'
 import type { AssetClass } from '~/lib/domain/types'
 import { feedCurrencyFor } from '~/lib/prices/feed'
@@ -147,4 +148,20 @@ export async function cacheFeedClose(input: FeedClose): Promise<boolean> {
     },
     { onlyIfNewer: true, onlyIfNewestBar: input.tradingDay },
   )
+}
+
+/**
+ * Last fetched USD/JPY, or null when none has ever been stored.
+ *
+ * Unscoped by user on purpose: an exchange rate is market data, not user data.
+ * Here rather than beside either caller because both Positions and Trades read
+ * it, and each is a module exporting server functions — see
+ * `docs/server-only-modules.md`.
+ */
+export async function usdJpyRate(): Promise<Decimal | null> {
+  const [row] = await db
+    .select({ rate: fxRates.rate })
+    .from(fxRates)
+    .where(and(eq(fxRates.base, 'USD'), eq(fxRates.quote, 'JPY')))
+  return row ? new Decimal(row.rate) : null
 }

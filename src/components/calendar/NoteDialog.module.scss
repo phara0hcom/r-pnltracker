@@ -184,3 +184,26 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
+
+.orderButton {
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+}
+
+.orderActions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-3);
+}
+
+.orderError {
+  font-size: var(--text-xs);
+  color: var(--color-loss);
+}

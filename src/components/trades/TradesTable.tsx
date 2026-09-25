@@ -58,7 +58,8 @@ const TRADE_COLUMNS: TradeColumn[] = [
   { key: 'fee', label: 'Fee', numeric: true },
   { key: 'fx', label: 'FX', numeric: true },
   { key: 'amount', label: 'Amount ¥', col: 'netAmountJpy', numeric: true },
-  { key: 'realized', label: 'Realized ¥', col: 'realizedJpy', numeric: true },
+  // No currency in the label: a US close shows dollars, with yen beneath.
+  { key: 'realized', label: 'Realized', col: 'realizedJpy', numeric: true },
   { key: 'returnPct', label: 'Return', col: 'returnPct', numeric: true },
   { key: 'actions', label: 'Actions', hideLabel: true, locked: true },
 ]

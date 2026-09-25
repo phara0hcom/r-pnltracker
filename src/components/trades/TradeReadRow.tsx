@@ -8,11 +8,32 @@
 import { memo, useRef } from 'react'
 import { ACCOUNT_LABEL } from './accountLabel'
 import styles from './TradesTable.module.scss'
-import { qty, yen } from '~/components/format'
+import { money, qty, yen } from '~/components/format'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { useLongPress } from '~/components/ui/useLongPress'
 import { cx } from '~/lib/cx'
 import type { TradeRow } from '~/server/trades'
+
+/**
+ * The hover text on a realized figure.
+ *
+ * A US close leads with its price-only dollar result, so this is where the
+ * rest lives: the result after commission, what the dollars are worth in yen
+ * now, and the yen figure tax is computed on.
+ */
+function realizedTitle(row: TradeRow): string | undefined {
+  if (row.realizedUsd == null) return undefined
+  return [
+    `${money(row.realizedUsd, 'USD')} on price: (sell − average buy) × shares`,
+    row.netUsd == null ? null : `${money(row.netUsd, 'USD')} after commission on both sides`,
+    row.realizedUsdJpy == null || row.usdJpy == null
+      ? null
+      : `${yen(row.realizedUsdJpy)} at ¥${row.usdJpy}/$, the latest rate`,
+    `For tax: ${yen(row.realizedJpy)}, each trade in yen at its own day's rate`,
+  ]
+    .filter((line) => line != null)
+    .join('\n')
+}
 
 export const TradeReadRow = memo(function TradeReadRow({
   row,
@@ -42,7 +63,9 @@ export const TradeReadRow = memo(function TradeReadRow({
   onDelete: (row: TradeRow) => void
   deleting: boolean
 }) {
-  const realized = row.realizedJpy == null ? null : Number(row.realizedJpy)
+  // A US close is coloured by its dollar result — the figure it shows first.
+  const realized = row.realizedUsd ?? row.realizedJpy
+  const realizedValue = realized == null ? null : Number(realized)
 
   /*
    * Funds carry no ticker, so their symbol *is* their name. The first line then
@@ -102,7 +125,11 @@ export const TradeReadRow = memo(function TradeReadRow({
           {row.currency === 'USD' ? <span className={styles.unit}>$</span> : null}
         </td>
       )}
-      {visible.has('fee') && <td className={styles.numeric}>{Number(row.fee) === 0 ? '—' : yen(row.fee)}</td>}
+      {visible.has('fee') && (
+        <td className={styles.numeric}>
+          {Number(row.fee) === 0 ? '—' : money(row.fee, row.currency)}
+        </td>
+      )}
       {visible.has('fx') && (
         <td className={styles.numeric}>
           {row.currency === 'USD' ? Number(row.fxRate).toFixed(2) : '—'}
@@ -113,10 +140,20 @@ export const TradeReadRow = memo(function TradeReadRow({
         <td
           className={cx(
             styles.numeric,
-            realized != null && (realized >= 0 ? styles.profit : styles.loss),
+            realizedValue != null && (realizedValue >= 0 ? styles.profit : styles.loss),
           )}
+          title={realizedTitle(row)}
         >
-          {yen(row.realizedJpy)}
+          {row.realizedUsd == null ? (
+            yen(row.realizedJpy)
+          ) : (
+            <>
+              {money(row.realizedUsd, 'USD')}
+              {row.realizedUsdJpy == null ? null : (
+                <span className={styles.aside}>({yen(row.realizedUsdJpy)})</span>
+              )}
+            </>
+          )}
         </td>
       )}
       {visible.has('returnPct') && (
@@ -125,7 +162,13 @@ export const TradeReadRow = memo(function TradeReadRow({
             styles.numeric,
             row.returnPct != null && (row.returnPct >= 0 ? styles.profit : styles.loss),
           )}
-          title={row.costJpy ? `on ${yen(row.costJpy)} cost basis` : undefined}
+          title={
+            row.costUsd
+              ? `on ${money(row.costUsd, 'USD')} cost basis`
+              : row.costJpy
+                ? `on ${yen(row.costJpy)} cost basis`
+                : undefined
+          }
         >
           {row.returnPct == null
             ? '—'
