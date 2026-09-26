@@ -9,7 +9,6 @@ import { createServerFn } from '@tanstack/react-start'
 import { eq } from 'drizzle-orm'
 import { authed } from './middleware'
 import { db } from '~/db'
-import { usdJpyRate } from '~/db/prices.service'
 import { cashMovements, dividends, instruments } from '~/db/schema'
 import {
   createManualTrade,
@@ -20,7 +19,7 @@ import {
   updateTrade,
   type DayOrderResult,
 } from '~/db/trades.service'
-import type { AssetClass } from '~/lib/domain/types'
+import type { AssetClass, NormalizedTrade } from '~/lib/domain/types'
 import { runEngine } from '~/lib/pnl/engine'
 import { usdResult } from '~/lib/pnl/usdResult'
 import { validateManualTrade, type ManualTradeInput } from '~/lib/trades/manual'
@@ -51,25 +50,21 @@ export interface TradeRow {
   currency: 'JPY' | 'USD'
   netAmountJpy: string
   /**
-   * Present only on closing trades. The tax figure: every trade converted at its
-   * own day's rate, so on a US close it moves with the yen as well as the stock.
+   * Present only on closing trades. The engine's figure: every trade converted
+   * at its own day's rate, so on a US close it includes the currency move.
    */
   realizedJpy: string | null
   /** Cost basis of the units sold, in yen. */
   costJpy: string | null
   /**
-   * A US close's dollar result on price alone — (sell price − average buy
-   * price) × shares — which the table leads with. See `lib/pnl/usdResult.ts`.
+   * A US close's dollar result as Rakuten shows it, which the table leads
+   * with. See `lib/pnl/usdResult.ts`.
    */
   realizedUsd: string | null
-  /** Average buy price × shares — the denominator for a US close's return. */
+  /** Cost of the shares sold, buy commission included — the denominator for a US close's return. */
   costUsd: string | null
   /** The dollar result after commission on both sides, for the hover text. */
   netUsd: string | null
-  /** `realizedUsd` at the latest stored USD/JPY. Null when no rate has been fetched. */
-  realizedUsdJpy: string | null
-  /** The rate `realizedUsdJpy` used, so the screen can say which it was. */
-  usdJpy: string | null
   /**
    * Realized P&L as a fraction of the cost of the units sold, so a ¥10k gain on
    * a ¥20k position (+50%) is not read the same as ¥10k on ¥2M (+0.5%). In
@@ -90,8 +85,6 @@ type RealizedFields = Pick<
   | 'realizedUsd'
   | 'costUsd'
   | 'netUsd'
-  | 'realizedUsdJpy'
-  | 'usdJpy'
   | 'returnPct'
 >
 
@@ -104,22 +97,21 @@ const FUND_DISPLAY_MULTIPLIER = 10_000
 export const listTradeRows = createServerFn({ method: 'GET' })
   .middleware([authed])
   .handler(async ({ context }): Promise<TradeRow[]> => {
-    const [records, liveFx] = await Promise.all([listTrades(context.userId), usdJpyRate()])
+    const records = await listTrades(context.userId)
     const engine = runEngine(records.map((r) => r.trade))
 
-    // Realized P&L belongs to a closing event, not a trade row, so it is matched
-    // back by (date, symbol, account, quantity) — the engine's own key.
-    const realizedBy = new Map<string, RealizedFields>()
+    // Realized P&L belongs to a closing event, not a trade row. Each event
+    // carries the trade that closed it, so a row finds its own close even when
+    // another sell that day shares its symbol, account and size.
+    const realizedBy = new Map<NormalizedTrade, RealizedFields>()
     for (const e of engine.realized) {
-      const usd = usdResult(e, liveFx)
-      realizedBy.set(`${e.tradeDate}|${e.symbol}|${e.accountType}|${e.quantity.toFixed()}`, {
+      const usd = usdResult(e)
+      realizedBy.set(e.trade, {
         realizedJpy: e.realizedJpy.toFixed(),
         costJpy: e.costJpy.toFixed(),
         realizedUsd: usd?.gainUsd ?? null,
         costUsd: usd?.costUsd ?? null,
         netUsd: usd?.netUsd ?? null,
-        realizedUsdJpy: usd?.gainJpyNow ?? null,
-        usdJpy: usd?.usdJpy ?? null,
         // A zero cost basis would divide by zero; report null rather than Infinity.
         returnPct: usd
           ? usd.returnPct
@@ -135,9 +127,7 @@ export const listTradeRows = createServerFn({ method: 'GET' })
           ? trade.unitPrice.mul(FUND_DISPLAY_MULTIPLIER).toFixed()
           : trade.unitPrice.toFixed()
 
-      const key = `${trade.tradeDate}|${trade.symbol}|${trade.accountType}|${trade.quantity.toFixed()}`
-      const isClose = trade.side === 'SELL' || trade.side === 'REDEEM'
-      const hit = isClose ? realizedBy.get(key) : undefined
+      const hit = realizedBy.get(trade)
 
       return {
         id,
@@ -161,8 +151,6 @@ export const listTradeRows = createServerFn({ method: 'GET' })
         realizedUsd: hit?.realizedUsd ?? null,
         costUsd: hit?.costUsd ?? null,
         netUsd: hit?.netUsd ?? null,
-        realizedUsdJpy: hit?.realizedUsdJpy ?? null,
-        usdJpy: hit?.usdJpy ?? null,
         returnPct: hit?.returnPct ?? null,
         isSettled: trade.isSettled,
         origin,

@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { withNote, withTradeJournal } from './calendarPatch'
-import type { CalendarDay } from '~/server/screens'
+import type { CalendarDay, CalendarMonth } from '~/server/screens'
 
 const trade = (id: string): CalendarDay['trades'][number] => ({
   id,
@@ -25,7 +25,6 @@ const trade = (id: string): CalendarDay['trades'][number] => ({
   realizedJpy: '12000',
   realizedUsd: null,
   netUsd: null,
-  realizedUsdJpy: null,
   returnPct: 0.04,
   entryPrice: '2680.0',
   holdingDays: 21,
@@ -42,29 +41,32 @@ const note = (title: string): CalendarDay['note'] => ({
   tags: [],
 })
 
-const month = (): CalendarDay[] => [
-  { date: '2026-08-03', realizedJpy: '12000', tradeCount: 2, ordered: false, trades: [trade('a'), trade('b')], note: null },
-  { date: '2026-08-04', realizedJpy: null, tradeCount: 0, ordered: false, trades: [], note: note('kept') },
-]
+const month = (): CalendarMonth => ({
+  markets: null,
+  days: [
+    { date: '2026-08-03', realizedJpy: '12000', markets: { jpyRealizedJpy: '12000', usdRealizedUsd: null, usdRealizedJpy: null, totalJpy: '12000' }, tradeCount: 2, ordered: false, trades: [trade('a'), trade('b')], note: null },
+    { date: '2026-08-04', realizedJpy: null, markets: null, tradeCount: 0, ordered: false, trades: [], note: note('kept') },
+  ],
+})
 
 describe('withNote', () => {
   it('replaces one day and leaves the others untouched', () => {
     const patched = withNote(month(), '2026-08-03', note('new'))
-    expect(patched?.[0]?.note?.title).toBe('new')
-    expect(patched?.[1]?.note?.title).toBe('kept')
+    expect(patched?.days[0]?.note?.title).toBe('new')
+    expect(patched?.days[1]?.note?.title).toBe('kept')
   })
 
   it('clears an entry with null, which is also how a delete rolls back', () => {
     const cleared = withNote(month(), '2026-08-04', null)
-    expect(cleared?.[1]?.note).toBeNull()
+    expect(cleared?.days[1]?.note).toBeNull()
     // Round trip: re-applying the previous value restores it exactly.
-    expect(withNote(cleared, '2026-08-04', note('kept'))?.[1]?.note?.title).toBe('kept')
+    expect(withNote(cleared, '2026-08-04', note('kept'))?.days[1]?.note?.title).toBe('kept')
   })
 
   it('leaves a day’s figures alone — a journal entry cannot move P&L', () => {
     const patched = withNote(month(), '2026-08-03', note('new'))
-    expect(patched?.[0]?.realizedJpy).toBe('12000')
-    expect(patched?.[0]?.tradeCount).toBe(2)
+    expect(patched?.days[0]?.realizedJpy).toBe('12000')
+    expect(patched?.days[0]?.tradeCount).toBe(2)
   })
 
   it('is a no-op on an uncached month', () => {
@@ -75,8 +77,8 @@ describe('withNote', () => {
 describe('withTradeJournal', () => {
   it('patches the matching trade only', () => {
     const patched = withTradeJournal(month(), 'a', { memo: 'chased it', motivation: 2 })
-    expect(patched?.[0]?.trades[0]?.memo).toBe('chased it')
-    expect(patched?.[0]?.trades[1]?.memo).toBeNull()
+    expect(patched?.days[0]?.trades[0]?.memo).toBe('chased it')
+    expect(patched?.days[0]?.trades[1]?.memo).toBeNull()
   })
 
   it('rolls one trade back without disturbing a sibling saved meanwhile', () => {
@@ -87,15 +89,15 @@ describe('withTradeJournal', () => {
 
     const rolledBack = withTradeJournal(withBoth, 'a', { memo: null, motivation: null })
 
-    expect(rolledBack?.[0]?.trades[0]?.memo).toBeNull()
-    expect(rolledBack?.[0]?.trades[0]?.motivation).toBeNull()
-    expect(rolledBack?.[0]?.trades[1]?.memo).toBe('B')
-    expect(rolledBack?.[0]?.trades[1]?.motivation).toBe(1)
+    expect(rolledBack?.days[0]?.trades[0]?.memo).toBeNull()
+    expect(rolledBack?.days[0]?.trades[0]?.motivation).toBeNull()
+    expect(rolledBack?.days[0]?.trades[1]?.memo).toBe('B')
+    expect(rolledBack?.days[0]?.trades[1]?.motivation).toBe(1)
   })
 
   it('leaves the trade’s figures alone', () => {
     const patched = withTradeJournal(month(), 'a', { memo: 'note', motivation: 3 })
-    expect(patched?.[0]?.trades[0]?.realizedJpy).toBe('12000')
-    expect(patched?.[0]?.trades[0]?.quantity).toBe('100')
+    expect(patched?.days[0]?.trades[0]?.realizedJpy).toBe('12000')
+    expect(patched?.days[0]?.trades[0]?.quantity).toBe('100')
   })
 })

@@ -7,14 +7,13 @@
  */
 import { createServerFn } from '@tanstack/react-start'
 import { authed } from './middleware'
-import { usdJpyRate } from '~/db/prices.service'
 import { listTrades } from '~/db/trades.service'
 import { accountFilterInput } from '~/lib/accountScope'
 import { matchesAccountFilter, ZERO } from '~/lib/domain/types'
 import { buildNisaReport } from '~/lib/nisa/quota'
 import { runEngine, type RealizedEvent } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
-import { asShown } from '~/lib/pnl/usdResult'
+import { splitByMarket, toSplitView, type MarketSplitView } from '~/lib/pnl/markets'
 import { computeStats } from '~/lib/stats/stats'
 
 /** Aggregates for one time window — reused for week, month and all-time. */
@@ -39,6 +38,8 @@ export interface PeriodSummary {
   winCount: number
   lossCount: number
   winRate: number | null
+  /** The same window split as Rakuten's app splits it — see `lib/pnl/markets.ts`. */
+  markets: MarketSplitView
 }
 
 export interface MonthlyPoint {
@@ -62,12 +63,12 @@ export interface DashboardData {
   tradeCount: number
   openPositions: number
   /**
-   * Net realized, with US closes as their dollar result at `usdJpy` — the
-   * same figure the calendar totals. Moves with the rate from day to day.
+   * Net realized in yen, the currency move on US closes included — every
+   * trade at its own day's rate, as the calendar totals it.
    */
   realizedJpy: string
-  /** The USD/JPY US closes were converted at. Null when there are none, or no rate yet. */
-  usdJpy: string | null
+  /** All time, split as Rakuten's app splits it: yen side in yen, US side in dollars. */
+  markets: MarketSplitView
   /** Total acquisition cost of positions still held — capital currently invested. */
   investedAtCostJpy: string
   /** All-time gross loss, as a positive magnitude. */
@@ -131,6 +132,7 @@ function summarize(events: RealizedEvent[], label: string, from: string, to: str
     winCount: wins.length,
     lossCount: losses.length,
     winRate: inRange.length ? wins.length / inRange.length : null,
+    markets: toSplitView(splitByMarket(inRange)),
   }
 }
 
@@ -188,7 +190,7 @@ export const getDashboard = createServerFn({ method: 'GET' })
   .middleware([authed])
   .validator(accountFilterInput)
   .handler(async ({ data, context }): Promise<DashboardData> => {
-    const [records, liveFx] = await Promise.all([listTrades(context.userId), usdJpyRate()])
+    const records = await listTrades(context.userId)
     // Filtered before the engine runs: pools are keyed (symbol × accountType),
     // so removing whole accounts leaves the rest identical.
     const trades = records
@@ -196,13 +198,10 @@ export const getDashboard = createServerFn({ method: 'GET' })
       .filter((trade) => matchesAccountFilter(trade.accountType, data.account))
 
     const engine = runEngine(trades)
-    // Performance figures count a US close as its dollar result at today's
-    // rate — the figure the Trades screen and calendar show — not the tax yen,
-    // which a weaker yen can turn into a loss on a trade that made dollars.
-    // NISA quota and the stock/currency split keep the engine's own events.
-    const shown = engine.realized.map((close) => asShown(close, liveFx))
-    const hasUsdCloses = engine.realized.some((close) => close.assetClass === 'US_EQUITY')
-    const stats = computeStats(shown)
+    // Every figure here is in yen with the currency move included: a US trade
+    // that made dollars while the yen strengthened counts for what it made in
+    // yen. The dollar side is shown alongside, not instead — see `markets`.
+    const stats = computeStats(engine.realized)
     const now = new Date()
     const nisa = buildNisaReport(trades, engine.realized, now.getFullYear())
     const fx = attributeFx(engine.realized)
@@ -227,10 +226,10 @@ export const getDashboard = createServerFn({ method: 'GET' })
       winRate: stats.winRate,
       profitFactor: stats.profitFactor,
       maxDrawdownJpy: stats.maxDrawdown.toFixed(0),
-      week: summarize(shown, 'This week', week.from, week.to),
-      month: summarize(shown, 'This month', monthStart, monthEnd),
-      monthly: monthlySeries(shown),
-      usdJpy: hasUsdCloses && liveFx ? liveFx.toFixed(2) : null,
+      week: summarize(engine.realized, 'This week', week.from, week.to),
+      month: summarize(engine.realized, 'This month', monthStart, monthEnd),
+      monthly: monthlySeries(engine.realized),
+      markets: toSplitView(splitByMarket(engine.realized)),
       nisaLifetimeUsed: nisa.lifetime.used.toFixed(0),
       nisaLifetimeRemaining: nisa.lifetime.remaining.toFixed(0),
       nisaPendingRestoration: nisa.lifetime.pendingRestoration.toFixed(0),

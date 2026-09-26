@@ -17,6 +17,8 @@ const engine = runEngine(trades)
 
 function ev(over: Partial<RealizedEvent>): RealizedEvent {
   return {
+    // Stats never read the closing trade; any stored one stands in for it.
+    trade: trades[0]!,
     tradeDate: '2026-01-01',
     settleDate: '2026-01-05',
     symbol: 'X',

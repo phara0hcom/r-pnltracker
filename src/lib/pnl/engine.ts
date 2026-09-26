@@ -18,6 +18,15 @@
  * a US round trip settled in dollars it can show a loss on a trade that made
  * dollars: SOXL bought at ¥159/$ and sold at ¥155/$ for a higher dollar price.
  * The native figure is what the trade made in the currency it was traded in.
+ *
+ * A Japanese stock's average cost per share is rounded *up* to the whole yen
+ * (1円未満切り上げ) once each day's acquisitions are in, and the pool carries
+ * that rounded figure forward — the 特定口座 rule, and what Rakuten books.
+ * At ¥160 a share it is not noise: 8729 bought at an average of ¥161.115 was
+ * sold against ¥162, which is ¥2,930 on 3,000 shares. Every September 2026
+ * sell reproduces Rakuten's 実現損益 to the yen with it and none do without.
+ * Funds and US stocks are left exact; neither has been checked against the
+ * broker, and a fund's unit is a single 口 rather than the 10,000 it is priced in.
  */
 import Decimal from 'decimal.js'
 import {
@@ -66,6 +75,12 @@ export interface PositionState {
 
 /** One closing trade, with everything needed for tax, stats, and attribution. */
 export interface RealizedEvent {
+  /**
+   * The closing trade itself, as passed in. Screens find a row's close by this
+   * reference: two sells of one size on one day share every other key, and
+   * matching on those gave both rows whichever close was booked last.
+   */
+  trade: NormalizedTrade
   tradeDate: string
   settleDate: string
   symbol: string
@@ -117,6 +132,26 @@ export interface EngineWarning {
 interface Pool extends PositionState {
   /** Running Σ(qty × entryDateEpochDays), for weighted mean holding period. */
   weightedDateSum: Decimal
+  /**
+   * The 約定日 of acquisitions whose cost is not yet rounded to a whole yen per
+   * share — see `roundUpPerShare`. One day's buys are rounded together, not
+   * one by one: 8411's two buys on 2026-09-14 match Rakuten only that way.
+   */
+  unroundedSince: string | null
+}
+
+/**
+ * Rounds a Japanese stock pool's average cost up to the whole yen per share,
+ * and carries the rounded figure as the pool's cost from here on.
+ */
+function roundUpPerShare(pool: Pool): void {
+  pool.unroundedSince = null
+  if (pool.assetClass !== 'JP_EQUITY' || pool.quantity.lte(0)) return
+  const perShare = pool.costBasisJpy.div(pool.quantity).toDecimalPlaces(0, Decimal.ROUND_CEIL)
+  pool.costBasisJpy = perShare.mul(pool.quantity)
+  // A yen instrument's native cost is the same figure; keeping them equal is
+  // what lets both pools empty to exactly zero on a full exit.
+  pool.costBasisNative = pool.costBasisJpy
 }
 
 /**
@@ -226,8 +261,15 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
   for (const trade of sortTradesForEngine(trades)) {
     const key = poolKey(trade.symbol, trade.accountType)
     let pool = pools.get(key)
+    const opens = OPENING_SIDES.includes(trade.side)
 
-    if (OPENING_SIDES.includes(trade.side)) {
+    // A day's acquisitions are complete once anything else touches the pool:
+    // a close, or a trade on a later date.
+    if (pool?.unroundedSince != null && (!opens || trade.tradeDate !== pool.unroundedSince)) {
+      roundUpPerShare(pool)
+    }
+
+    if (opens) {
       if (!pool) {
         pool = {
           symbol: trade.symbol,
@@ -240,6 +282,7 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
           avgFxRate: trade.fxRate,
           avgPriceNative: ZERO,
           weightedDateSum: ZERO,
+          unroundedSince: null,
         }
         pools.set(key, pool)
       }
@@ -259,6 +302,7 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
       )
       pool.weightedDateSum = pool.weightedDateSum.add(trade.quantity.mul(toEpochDays(trade.tradeDate)))
       pool.quantity = newQty
+      if (pool.assetClass === 'JP_EQUITY') pool.unroundedSince = trade.tradeDate
       continue
     }
 
@@ -306,6 +350,7 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
     const avgEntryDate = fromEpochDays(avgEntryDays.toNumber())
 
     realized.push({
+      trade,
       tradeDate: trade.tradeDate,
       settleDate: trade.settleDate,
       symbol: trade.symbol,
@@ -343,9 +388,12 @@ export function runEngine(trades: NormalizedTrade[]): EngineResult {
     }
   }
 
+  // Positions still held carry the rounded figure too, as Rakuten shows them.
+  for (const pool of pools.values()) if (pool.unroundedSince != null) roundUpPerShare(pool)
+
   const positions = [...pools.values()]
     .filter((position) => position.quantity.gt(0))
-    .map(({ weightedDateSum: _drop, ...rest }) => rest)
+    .map(({ weightedDateSum: _drop, unroundedSince: _done, ...rest }) => rest)
 
   return { positions, realized, warnings }
 }

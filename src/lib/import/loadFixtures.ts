@@ -10,7 +10,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { emptyParseResult, type NormalizedTrade, type ParseResult } from '../domain/types'
 import { decodeShiftJis } from './decode'
-import type { StoredTrade } from './plan'
+import { figuresOf, type StoredTrade } from './plan'
 import { parseTorizan } from './torizan'
 import { parseTradeHistory } from './tradeHistory'
 
@@ -102,6 +102,9 @@ export function asStored(
     settleDate: trade.settleDate,
     isEdited: false,
     origin: 'IMPORT' as const,
+    isSettled: trade.isSettled,
+    isDeleted: false,
+    figures: figuresOf(trade),
     ...overrides,
   }))
 }

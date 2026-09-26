@@ -17,19 +17,16 @@ import type { TradeRow } from '~/server/trades'
 /**
  * The hover text on a realized figure.
  *
- * A US close leads with its price-only dollar result, so this is where the
- * rest lives: the result after commission, what the dollars are worth in yen
- * now, and the yen figure tax is computed on.
+ * A US close leads with its dollar result as Rakuten shows it, so this is
+ * where the rest lives: the result after the sell commission too, and what
+ * the yen in brackets is.
  */
 function realizedTitle(row: TradeRow): string | undefined {
   if (row.realizedUsd == null) return undefined
   return [
-    `${money(row.realizedUsd, 'USD')} on price: (sell − average buy) × shares`,
-    row.netUsd == null ? null : `${money(row.netUsd, 'USD')} after commission on both sides`,
-    row.realizedUsdJpy == null || row.usdJpy == null
-      ? null
-      : `${yen(row.realizedUsdJpy)} at ¥${row.usdJpy}/$, the latest rate`,
-    `For tax: ${yen(row.realizedJpy)}, each trade in yen at its own day's rate`,
+    `${money(row.realizedUsd, 'USD')} as Rakuten shows it: the sale, less what the shares cost with buy commission`,
+    row.netUsd == null ? null : `${money(row.netUsd, 'USD')} after the sell commission as well`,
+    `${yen(row.realizedJpy)} in yen, the currency move included — each trade at its own day's rate`,
   ]
     .filter((line) => line != null)
     .join('\n')
@@ -149,8 +146,8 @@ export const TradeReadRow = memo(function TradeReadRow({
           ) : (
             <>
               {money(row.realizedUsd, 'USD')}
-              {row.realizedUsdJpy == null ? null : (
-                <span className={styles.aside}>({yen(row.realizedUsdJpy)})</span>
+              {row.realizedJpy == null ? null : (
+                <span className={styles.aside}>({yen(row.realizedJpy)})</span>
               )}
             </>
           )}

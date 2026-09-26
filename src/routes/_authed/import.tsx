@@ -295,9 +295,11 @@ function Import() {
 
           {totalRestated > 0 ? (
             <p className={styles.dropHint}>
-              Restated: fills Rakuten has re-dated since the export they first arrived in — a US
-              trade is dated by its US day until it settles, then by the JST day. They update the
-              trade already held, with its settlement FX rate, rather than being added again.
+              Restated: fills Rakuten has changed since the export they first arrived in. Once a
+              trade settles, a Japanese fill gains its commission and settled amount, a US fill
+              its settled FX rate — and is re-dated from its US day to the JST one — and a day
+              Rakuten regroups replaces the part-fills an earlier export listed. They update the
+              trades already held rather than being added again.
             </p>
           ) : null}
 

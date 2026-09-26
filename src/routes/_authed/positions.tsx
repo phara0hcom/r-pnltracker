@@ -51,7 +51,8 @@ const ACCOUNT_COLOR: Record<string, string> = {
 
 /**
  * A US position's figure: dollars first — the currency it is held and judged
- * in — with its yen at today's rate beneath, as on the Trades screen.
+ * in — with its yen at today's rate beneath. A close's yen uses its sale rate;
+ * a position still held has none yet.
  */
 function Dual({
   usd,

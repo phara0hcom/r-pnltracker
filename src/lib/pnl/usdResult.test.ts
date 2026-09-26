@@ -1,108 +1,117 @@
 /**
- * The SOXL round trip, worked the way its owner works it: price only.
+ * A US close in dollars, the way Rakuten's 実現損益 screen states it: the sale,
+ * less what the shares cost with their buy commission.
  *
- * Bought 29 @ 142.1166, sold 20 @ 146.0497, bought 2 @ 144.94, sold 11 @
- * 143.75 — $90.9826 over the round trip. Rakuten's export carries no execution
- * time and dates the 2-share buy a day *before* the 20-share sell, so the
- * engine pools it first; that moves dollars between the two sells but cannot
- * change their sum.
+ * The fills are real September 2026 ones, copied from the export, and every
+ * expected dollar figure is the one Rakuten's app showed for that sell.
  */
 import Decimal from 'decimal.js'
 import { describe, expect, it } from 'vitest'
 import { ZERO, type NormalizedTrade } from '../domain/types'
-import { computeStats, dailyPnl } from '../stats/stats'
 import { runEngine } from './engine'
-import { asShown, usdResult } from './usdResult'
+import { usdGain, usdResult } from './usdResult'
 
-function fill(side: 'BUY' | 'SELL', tradeDate: string, qty: number, price: string): NormalizedTrade {
-  const quantity = new Decimal(qty)
-  const unitPrice = new Decimal(price)
-  const gross = quantity.mul(unitPrice)
+/** One fill as the export states it: 約定代金 and 受渡金額 in dollars. */
+function fill(
+  symbol: string,
+  side: 'BUY' | 'SELL',
+  tradeDate: string,
+  qty: number,
+  price: string,
+  gross: string,
+  net: string,
+  fx = '158',
+): NormalizedTrade {
+  const netAmount = new Decimal(net)
   return {
     tradeDate,
     settleDate: '2026-09-28',
-    symbol: 'SOXL',
-    name: 'SOXL',
+    symbol,
+    name: symbol,
     assetClass: 'US_EQUITY',
     accountType: 'SPECIFIC',
     side,
-    quantity,
-    unitPrice,
+    quantity: new Decimal(qty),
+    unitPrice: new Decimal(price),
     currency: 'USD',
     fee: ZERO,
     feeTax: ZERO,
     otherCost: ZERO,
-    fxRate: new Decimal(158),
-    grossAmount: gross,
-    netAmount: gross,
-    netAmountJpy: gross.mul(158).round(),
+    fxRate: new Decimal(fx),
+    grossAmount: new Decimal(gross),
+    netAmount,
+    netAmountJpy: netAmount.mul(fx).round(),
     isSettled: true,
-    sourceRowHash: `${side}${String(qty)}`,
+    sourceRowHash: `${symbol}${side}${String(qty)}${tradeDate}`,
     sourceFile: 'synthetic',
   }
 }
 
 const gains = (trades: NormalizedTrade[]) =>
-  runEngine(trades).realized.map((close) => usdResult(close, new Decimal(150))!.gainUsd)
+  runEngine(trades).realized.map((close) => usdResult(close)!.gainUsd)
 
-describe('price-only dollar result', () => {
-  it('matches the round trip worked in the order it happened', () => {
-    const result = gains([
-      fill('BUY', '2026-09-21', 29, '142.1166'),
-      fill('SELL', '2026-09-22', 20, '146.0497'),
-      fill('BUY', '2026-09-23', 2, '144.94'),
-      fill('SELL', '2026-09-24', 11, '143.75'),
-    ])
-    expect(result).toEqual(['78.66', '12.32'])
-    expect(result.reduce((sum, gain) => sum.add(gain), ZERO).toFixed(2)).toBe('90.98')
+describe('dollar result', () => {
+  it('matches Rakuten: the sale, less cost with buy commission, sell commission not taken off', () => {
+    expect(
+      gains([
+        fill('SOFI', 'BUY', '2026-08-25', 200, '18.85', '3770.00', '3788.65'),
+        fill('SOFI', 'SELL', '2026-09-02', 200, '16.99', '3398.00', '3381.12'),
+      ]),
+    ).toEqual(['-390.65'])
+    expect(
+      gains([
+        fill('SMCI', 'BUY', '2026-08-26', 50, '38.66', '1933.00', '1942.55'),
+        fill('SMCI', 'SELL', '2026-09-02', 50, '36.51', '1825.50', '1816.43'),
+      ]),
+    ).toEqual(['-117.05'])
+    expect(
+      gains([
+        fill('AMZN', 'BUY', '2026-09-04', 44, '259.315', '11409.86', '11431.86'),
+        fill('AMZN', 'SELL', '2026-09-10', 44, '252.88', '11126.72', '11104.49'),
+      ]),
+    ).toEqual(['-305.14'])
   })
 
-  it('keeps the total when the export dates the small buy first', () => {
-    const result = gains([
-      fill('BUY', '2026-09-23', 2, '144.94'),
-      fill('SELL', '2026-09-24', 20, '146.0497'),
-      fill('BUY', '2026-09-24', 29, '142.1166'),
-      fill('SELL', '2026-09-24', 11, '143.75'),
-    ])
-    expect(result).toEqual(['75.02', '15.96'])
-    expect(result.reduce((sum, gain) => sum.add(gain), ZERO).toFixed(2)).toBe('90.98')
+  it('matches Rakuten on SOXL, bought and sold twice in one day', () => {
+    // No execution time in the export, so the day's buys pool first — which
+    // is also how Rakuten counts it: both sells reproduce to the cent.
+    expect(
+      gains([
+        fill('SOXL', 'BUY', '2026-09-23', 2, '144.94', '289.88', '291.31'),
+        fill('SOXL', 'SELL', '2026-09-24', 11, '143.75', '1581.25', '1573.39'),
+        fill('SOXL', 'BUY', '2026-09-24', 29, '142.1166', '4121.38', '4141.77'),
+        fill('SOXL', 'SELL', '2026-09-24', 20, '146.0497', '2920.99', '2906.47'),
+      ]),
+    ).toEqual(['8.22', '60.94'])
   })
 
-  it('values the gain at the latest rate, and is null for a yen close', () => {
+  it('keeps the after-commission figure and the yen, currency included, beside it', () => {
+    // Bought at ¥159/$ and sold above the dollar cost at ¥155/$: a gain in
+    // dollars, a loss in yen.
     const [close] = runEngine([
-      fill('BUY', '2026-09-21', 10, '100'),
-      fill('SELL', '2026-09-22', 10, '101'),
+      fill('X', 'BUY', '2026-09-23', 10, '100', '1000.00', '1000.00', '159'),
+      fill('X', 'SELL', '2026-09-24', 10, '102', '1020.00', '1015.00', '155'),
     ]).realized
-    expect(usdResult(close!, new Decimal(150))!.gainJpyNow).toBe('1500')
-    expect(usdResult(close!, null)!.gainJpyNow).toBeNull()
-    expect(usdResult({ ...close!, assetClass: 'JP_EQUITY' }, null)).toBeNull()
-  })
-})
-
-describe('asShown', () => {
-  // Bought at ¥159/$ and sold at ¥155/$ above the dollar cost: a gain in
-  // dollars, a loss in tax-basis yen.
-  const buy = { ...fill('BUY', '2026-09-23', 10, '100'), fxRate: new Decimal(159), netAmountJpy: new Decimal(159_000) }
-  const sell = { ...fill('SELL', '2026-09-24', 10, '102'), fxRate: new Decimal(155), netAmountJpy: new Decimal(158_100) }
-  const [close] = runEngine([buy, sell]).realized
-
-  it('turns the tax loss into the dollar gain at today’s rate', () => {
-    expect(close!.realizedJpy.toFixed()).toBe('-900')
-    const shown = asShown(close!, new Decimal(150))
-    expect(shown.realizedJpy.toFixed()).toBe('3000')
-    expect(shown.costJpy.toFixed()).toBe('150000')
+    const result = usdResult(close!)!
+    expect(result.gainUsd).toBe('20.00')
+    expect(result.netUsd).toBe('15.00')
+    expect(result.gainJpy).toBe('-1675')
+    expect(result.returnPct).toBeCloseTo(0.02)
   })
 
-  it('gives the dashboard stats and the calendar day the same total', () => {
-    const shown = [asShown(close!, new Decimal(150))]
-    expect(computeStats(shown).netPnl.toFixed()).toBe('3000')
-    expect(dailyPnl(shown).get('2026-09-24')?.toFixed()).toBe('3000')
-    // …and the row's own bracketed yen.
-    expect(usdResult(close!, new Decimal(150))!.gainJpyNow).toBe('3000')
+  it('scales the sale down when the engine clamps an oversized close', () => {
+    const [close] = runEngine([
+      fill('X', 'BUY', '2026-09-23', 10, '100', '1000.00', '1000.00'),
+      fill('X', 'SELL', '2026-09-24', 20, '101', '2020.00', '2020.00'),
+    ]).realized
+    expect(usdGain(close!).toFixed(2)).toBe('10.00')
   })
 
-  it('leaves a yen close, and a US close with no rate yet, as the engine booked them', () => {
-    expect(asShown({ ...close!, assetClass: 'JP_EQUITY' }, new Decimal(150)).realizedJpy.toFixed()).toBe('-900')
-    expect(asShown(close!, null)).toBe(close)
+  it('is null for a yen close', () => {
+    const [close] = runEngine([
+      fill('X', 'BUY', '2026-09-23', 10, '100', '1000.00', '1000.00'),
+      fill('X', 'SELL', '2026-09-24', 10, '101', '1010.00', '1010.00'),
+    ]).realized
+    expect(usdResult({ ...close!, assetClass: 'JP_EQUITY' })).toBeNull()
   })
 })

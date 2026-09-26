@@ -45,11 +45,9 @@ const COLUMNS: Record<TradeSortKey, SortColumn<TradeRow>> = {
   displayPrice: { numeric: true, value: (row) => row.displayPrice },
   netAmountJpy: { numeric: true, value: (row) => row.netAmountJpy },
   // Null on an open position, which sorts last either way — an unclosed trade
-  // is unmeasured, not a loss. A US close sorts by its dollars in today's yen,
-  // the figure shown beneath them; its tax-basis yen can have the opposite sign
-  // and would file a gain among the losses. That is the fallback only until a
-  // rate has ever been fetched.
-  realizedJpy: { numeric: true, value: (row) => row.realizedUsdJpy ?? row.realizedJpy },
+  // is unmeasured, not a loss. Every close sorts by its yen, the currency move
+  // included — the one figure yen and dollar rows share, bracketed on a US row.
+  realizedJpy: { numeric: true, value: (row) => row.realizedJpy },
   returnPct: { numeric: true, value: (row) => row.returnPct },
 }
 

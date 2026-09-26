@@ -11,11 +11,12 @@
  * trade history produces confidently wrong cost basis.
  */
 import * as Sentry from '@sentry/tanstackstart-react'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { emptyParseResult, type ParseResult } from '../lib/domain/types'
 import { decodeShiftJis } from '../lib/import/decode'
 import {
   describePlan,
+  figuresOf,
   planImport,
   type ImportPlan,
   type StoredTrade,
@@ -109,6 +110,15 @@ async function existingRows(userId: string): Promise<{
         settleDate: trades.settleDate,
         isEdited: trades.isEdited,
         origin: trades.origin,
+        isSettled: trades.isSettled,
+        deletedAt: trades.deletedAt,
+        fee: trades.fee,
+        feeTax: trades.feeTax,
+        otherCost: trades.otherCost,
+        fxRate: trades.fxRate,
+        grossAmount: trades.grossAmount,
+        netAmount: trades.netAmount,
+        netAmountJpy: trades.netAmountJpy,
       })
       .from(trades)
       .innerJoin(instruments, eq(trades.instrumentId, instruments.id))
@@ -120,9 +130,28 @@ async function existingRows(userId: string): Promise<{
     // renders `250`. Both sides are normalised here or the planner's key never
     // matches and every restatement looks like a new trade.
     trades: tradeRows.map((row) => ({
-      ...row,
+      id: row.id,
+      sourceRowHash: row.sourceRowHash,
+      symbol: row.symbol,
+      accountType: row.accountType,
+      side: row.side,
       quantity: dec(row.quantity).toFixed(),
       unitPrice: dec(row.unitPrice).toFixed(),
+      tradeDate: row.tradeDate,
+      settleDate: row.settleDate,
+      isEdited: row.isEdited,
+      origin: row.origin,
+      isSettled: row.isSettled,
+      isDeleted: row.deletedAt != null,
+      figures: figuresOf({
+        fee: dec(row.fee),
+        feeTax: dec(row.feeTax),
+        otherCost: dec(row.otherCost),
+        fxRate: dec(row.fxRate),
+        grossAmount: dec(row.grossAmount),
+        netAmount: dec(row.netAmount),
+        netAmountJpy: dec(row.netAmountJpy),
+      }),
     })),
     dividends: new Set(dividendRows.map((row) => row.h)),
   }
@@ -166,6 +195,8 @@ export async function previewImport(
 
       span.setAttribute('newTrades', plan.newTrades.length)
       span.setAttribute('restatedTrades', plan.restatedTrades.length)
+      span.setAttribute('settledTrades', plan.settledTrades.length)
+      span.setAttribute('supersededTrades', plan.supersededTrades.length)
       span.setAttribute('duplicateTrades', plan.duplicateTrades)
 
       return {
@@ -183,7 +214,10 @@ export async function previewImport(
 export interface ImportResult {
   batchId: string
   tradesInserted: number
-  /** Stored rows the broker re-dated, updated in place rather than added. */
+  /**
+   * Stored rows the broker restated — re-dated, settled, re-rated, or
+   * regrouped at settlement — updated or replaced rather than added.
+   */
   tradesRestated: number
   dividendsInserted: number
   snapshotsInserted: number
@@ -301,34 +335,67 @@ export async function commitImport(
             toTradeRow({ userId, trade, importBatchId: batchId, origin: 'IMPORT' }),
           ),
         )
-        /**
-         * Normally a duplicate is a no-op, with one exception.
-         *
-         * A trade exported before it settled has `受渡金額 = "-"`, so its amount
-         * was derived rather than reported. Re-importing after settlement must
-         * be allowed to replace that with Rakuten's own figure — otherwise the
-         * `unsettled` flag is permanent and the row never becomes authoritative.
-         *
-         * `setWhere` restricts this to rows that are still unsettled and have
-         * not been hand-corrected, so a user's edit is never overwritten.
-         */
-        .onConflictDoUpdate({
-          target: [trades.userId, trades.sourceRowHash],
-          set: {
-            netAmount: sql`excluded.net_amount`,
-            netAmountJpy: sql`excluded.net_amount_jpy`,
-            fee: sql`excluded.fee`,
-            feeTax: sql`excluded.fee_tax`,
-            otherCost: sql`excluded.other_cost`,
-            isSettled: sql`excluded.is_settled`,
-            updatedAt: new Date(),
-          },
-          setWhere: and(
+        // A stored hash never reaches here — the plan routes it to
+        // `settledTrades` or counts it a duplicate — so a conflict is only a
+        // concurrent import of the same file, and the first one stands.
+        .onConflictDoNothing()
+    }
+
+    /*
+     * Rows the file states at their final figures: a JP fill now settled, with
+     * its commission and 受渡金額, or a US fill at the day's settled rate.
+     *
+     * Only the money moves. The date, hash and day order stay, being the same
+     * execution on the same day. `isEdited` and `deletedAt` are re-checked in
+     * the WHERE for the reason given on the restatements below.
+     */
+    for (const settled of plan.settledTrades) {
+      const row = toTradeRow({ userId, trade: settled.trade, importBatchId: batchId, origin: 'IMPORT' })
+      await tx
+        .update(trades)
+        .set({
+          fee: row.fee,
+          feeTax: row.feeTax,
+          otherCost: row.otherCost,
+          fxRate: row.fxRate,
+          grossAmount: row.grossAmount,
+          netAmount: row.netAmount,
+          netAmountJpy: row.netAmountJpy,
+          pointsUsed: row.pointsUsed,
+          isSettled: row.isSettled,
+          sourceFile: row.sourceFile,
+          importBatchId: batchId,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(trades.userId, userId),
+            eq(trades.id, settled.id),
+            eq(trades.isEdited, false),
+            isNull(trades.deletedAt),
+          ),
+        )
+    }
+
+    /*
+     * Intraday fills the settled export has regrouped: soft-deleted, so the
+     * hash stays claimed and the intraday export cannot bring them back. Only
+     * a row still unsettled and untouched by hand qualifies, re-checked here.
+     */
+    const supersededIds = plan.supersededTrades.map((row) => row.id)
+    if (supersededIds.length) {
+      await tx
+        .update(trades)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(trades.userId, userId),
+            inArray(trades.id, supersededIds),
             eq(trades.isSettled, false),
             eq(trades.isEdited, false),
-            sql`excluded.is_settled = true`,
+            isNull(trades.deletedAt),
           ),
-        })
+        )
     }
 
     /*
@@ -421,7 +488,8 @@ export async function commitImport(
     return {
       batchId,
       tradesInserted: plan.newTrades.length,
-      tradesRestated: plan.restatedTrades.length,
+      tradesRestated:
+        plan.restatedTrades.length + plan.settledTrades.length + plan.supersededTrades.length,
       dividendsInserted: plan.newDividends.length,
       snapshotsInserted: parsed.snapshots.length,
       cashInserted: parsed.cashMovements.length,

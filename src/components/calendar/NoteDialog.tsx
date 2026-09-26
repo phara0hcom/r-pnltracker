@@ -16,7 +16,7 @@ import { useState } from 'react'
 import styles from './NoteDialog.module.scss'
 import { ScoreGroup } from './ScoreGroup'
 import { TradeJournalRow } from './TradeJournalRow'
-import { tone, yenSigned } from '~/components/format'
+import { MarketInline } from '~/components/pnl/MarketSplit'
 import { DayOrderList, type DayOrderItem } from '~/components/trades/DayOrderList'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
@@ -63,8 +63,6 @@ export function NoteDialog({
   const [mood, setMood] = useState<number | null>(day.note?.mood ?? null)
   const [motivation, setMotivation] = useState<number | null>(day.note?.motivation ?? null)
   const [tagText, setTagText] = useState((day.note?.tags ?? []).join(', '))
-
-  const pnl = day.realizedJpy == null ? null : Number(day.realizedJpy)
 
   /** The order being edited, or null when the list is showing normally. */
   const [ordering, setOrdering] = useState<DayOrderItem[] | null>(null)
@@ -124,20 +122,10 @@ export function NoteDialog({
                 {day.tradeCount > 0
                   ? `${String(day.tradeCount)} trade${day.tradeCount === 1 ? '' : 's'}`
                   : 'No trades'}
-                {pnl != null ? (
+                {day.markets ? (
                   <>
-                    {' · '}
-                    <span
-                      className={
-                        tone(pnl) === 'profit'
-                          ? styles.profit
-                          : tone(pnl) === 'loss'
-                            ? styles.loss
-                            : undefined
-                      }
-                    >
-                      {yenSigned(pnl)} realized
-                    </span>
+                    {' · realized '}
+                    <MarketInline split={day.markets} />
                   </>
                 ) : null}
               </Dialog.Description>
