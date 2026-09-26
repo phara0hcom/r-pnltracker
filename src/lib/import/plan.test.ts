@@ -302,3 +302,126 @@ describe('broker restatements', () => {
     expect(plan.newTrades).toHaveLength(1)
   })
 })
+
+/**
+ * Settlement, as the production 8729 sell of 2026-09-15 went through it.
+ *
+ * One sell order of 4,400 shares. The export taken at 14:34 that day listed
+ * its fills so far as 1,000 + 800 + 2,600 with no commission and `受渡金額 =
+ * "-"`; the one taken on the 18th, after settlement, listed the order as
+ * 1,800 + 2,600 with the commission split across them. The 1,800 was stored
+ * beside the 1,000 and 800 it replaces, and neither settled row's figures ever
+ * reached the 2,600 that was already there.
+ */
+describe('settlement', () => {
+  const JP_HEADER =
+    '約定日,受渡日,銘柄コード,銘柄名,市場名称,口座区分,取引区分,売買区分,信用区分,弁済期限,' +
+    '数量［株］,単価［円］,手数料［円］,税金等［円］,諸費用［円］,税区分,受渡金額［円］,建約定日,' +
+    '建単価［円］,建手数料［円］,建手数料消費税［円］,金利（支払）〔円〕,金利（受取）〔円〕,' +
+    '逆日歩／特別空売り料（支払）〔円〕,逆日歩（受取）〔円〕,貸株料,事務管理費〔円〕（税抜）,' +
+    '名義書換料〔円〕（税抜）'
+
+  /** One 8729 sell at ¥163.2 on the 15th, before settlement or after. */
+  const sell = (qty: string, settled?: { fee: string; tax: string; amount: string }) =>
+    `"2026/9/15","2026/9/17","8729","ソニーフィナンシャルグループ","東証","特定","現物","売付","-","-",` +
+    `"${qty}","163.2","${settled?.fee ?? '0'}","${settled?.tax ?? '0'}","0","源徴あり",` +
+    `"${settled?.amount ?? '-'}","-","0.0","0","0","0","0","0","0","0","0","0"`
+  /** A later trade, which is what dates an export as taken after the 17th. */
+  const later = `"2026/9/18","2026/9/25","2502","アサヒＧＨＤ","東証","特定","現物","買付","-","-","200","1631.9","0","0","0","-","-","-","0.0","0","0","0","0","0","0","0","0","0"`
+
+  const exportOf = (filename: string, rows: string[]) =>
+    parseTradeHistory([JP_HEADER, ...rows].join('\n'), filename)
+
+  const intraday = () => exportOf('tradehistory(JP)_20260915.csv', [sell('1,000'), sell('800'), sell('2,600')])
+  const settledExport = () =>
+    exportOf('tradehistory(JP)_20260918.csv', [
+      sell('1,800', { fee: '198', tax: '18', amount: '293,544' }),
+      sell('2,600', { fee: '289', tax: '30', amount: '424,001' }),
+      later,
+    ])
+
+  it('settles the fill it already holds, with its commission', () => {
+    const stored = asStored(intraday().trades)
+    const plan = planImport(settledExport(), stored)
+    expect(plan.settledTrades).toHaveLength(1)
+    const [settled] = plan.settledTrades
+    expect(settled!.id).toBe(stored[2]!.id)
+    expect(settled!.trade.isSettled).toBe(true)
+    expect(settled!.trade.netAmountJpy.toFixed()).toBe('424001')
+  })
+
+  it('replaces the intraday partials the settled export regroups', () => {
+    const stored = asStored(intraday().trades)
+    const plan = planImport(settledExport(), stored)
+    expect(plan.newTrades.map((trade) => trade.quantity.toFixed())).toEqual(['1800', '200'])
+    expect(plan.supersededTrades.map((row) => row.id)).toEqual([stored[0]!.id, stored[1]!.id])
+  })
+
+  it('repairs a day already stored twice over', () => {
+    // What production holds now: the three partials and the 1,800 beside them.
+    const stored = asStored([...intraday().trades, settledExport().trades[0]!])
+    const plan = planImport(settledExport(), stored)
+    expect(plan.supersededTrades.map((row) => row.quantity)).toEqual(['1000', '800'])
+    expect(plan.settledTrades.map((row) => row.trade.quantity.toFixed())).toEqual(['2600'])
+    expect(plan.newTrades.map((trade) => trade.quantity.toFixed())).toEqual(['200'])
+  })
+
+  it('adds nothing when the intraday export arrives after the settled one', () => {
+    const stored = asStored(settledExport().trades)
+    const plan = planImport(intraday(), stored)
+    expect(plan.newTrades).toHaveLength(0)
+    expect(plan.settledTrades).toHaveLength(0)
+    expect(plan.supersededTrades).toHaveLength(0)
+    // The 2,600 matches by hash; the 1,000 and 800 are the day's partials.
+    expect(plan.duplicateTrades).toBe(3)
+  })
+
+  it('leaves a hand-corrected or deleted row as it is', () => {
+    for (const override of [{ isEdited: true }, { isDeleted: true }]) {
+      const plan = planImport(settledExport(), asStored(intraday().trades, override))
+      expect(plan.settledTrades).toHaveLength(0)
+      expect(plan.supersededTrades).toHaveLength(0)
+    }
+  })
+
+  it('leaves a day the file does not cover alone', () => {
+    const stored = asStored(intraday().trades)
+    const plan = planImport(exportOf('tradehistory(JP)_20260919.csv', [later]), stored)
+    expect(plan.supersededTrades).toHaveLength(0)
+  })
+})
+
+/**
+ * A US fill keeps its hash once it settles, but not its rate: SMCI's sell of
+ * 2026-09-02 arrived at the rate of the moment, 159.86, and every export from
+ * the 10th onwards states the day's settled 160.14.
+ */
+describe('settled FX rate', () => {
+  const US_HEADER =
+    '約定日,受渡日,ティッカー,銘柄名,口座,取引区分,売買区分,信用区分,弁済期限,決済通貨,' +
+    '数量［株］,単価［USドル］,約定代金［USドル］,為替レート,手数料［USドル］,税金［USドル］,' +
+    '受渡金額［USドル］,受渡金額［円］'
+  const smci = (fxRate: string) =>
+    `"2026/9/2","2026/9/4","SMCI","SUPER MICRO COMP","特定","現物","売付","-","-","ＵＳドル",` +
+    `"50","36.5100","1,825.50","${fxRate}","8.25","0.82","1,816.43","-"`
+  const amzn =
+    `"2026/9/10","2026/9/14","AMZN","AMAZON.COM INC","特定","現物","売付","-","-","ＵＳドル",` +
+    `"44","252.8800","11,126.72","153.120","20.23","2.00","11,104.49","-"`
+  const exportOf = (filename: string, rows: string[]) =>
+    parseTradeHistory([US_HEADER, ...rows].join('\n'), filename)
+
+  it('takes the settled rate from an export made after settlement', () => {
+    const stored = asStored(exportOf('tradehistory(US)_20260902.csv', [smci('159.860')]).trades)
+    const plan = planImport(exportOf('tradehistory(US)_20260923.csv', [smci('160.140'), amzn]), stored)
+    expect(plan.settledTrades).toHaveLength(1)
+    expect(plan.settledTrades[0]!.trade.fxRate.toFixed()).toBe('160.14')
+  })
+
+  it('ignores a rate from an export made before settlement', () => {
+    // Nothing in it is dated after the 4th, so it cannot know the settled rate.
+    const stored = asStored(exportOf('tradehistory(US)_20260923.csv', [smci('160.140'), amzn]).trades)
+    const plan = planImport(exportOf('tradehistory(US)_20260902.csv', [smci('159.860')]), stored)
+    expect(plan.settledTrades).toHaveLength(0)
+    expect(plan.duplicateTrades).toBe(1)
+  })
+})

@@ -11,7 +11,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useCallback, useMemo } from 'react'
 import styles from './positions.module.scss'
 import { AccountDot } from '~/components/AccountDot'
-import { ACCOUNT_LABEL, ASSET_LABEL, pct, qty, tone, yen, yenSigned } from '~/components/format'
+import { ACCOUNT_LABEL, ASSET_LABEL, money, moneySigned, pct, qty, tone, yen, yenSigned } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { Empty, HeroStat, PageHeader, SegmentedTabs, SortHeader, StatStrip, StripCell, Table } from '~/components/screen'
 import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
@@ -47,6 +47,32 @@ const ACCOUNT_COLOR: Record<string, string> = {
   NISA_GROWTH: 'var(--color-nisa-growth)',
   NISA_TSUMITATE: 'var(--color-nisa-tsumitate)',
   NISA_OLD: 'var(--color-nisa-old)',
+}
+
+/**
+ * A US position's figure: dollars first — the currency it is held and judged
+ * in — with its yen at today's rate beneath. A close's yen uses its sale rate;
+ * a position still held has none yet.
+ */
+function Dual({
+  usd,
+  jpy,
+  signed = false,
+  title,
+}: {
+  usd: string
+  jpy: string | null
+  signed?: boolean
+  title?: string
+}) {
+  return (
+    <span title={title}>
+      {signed ? moneySigned(usd, 'USD') : money(usd, 'USD')}
+      {jpy == null ? null : (
+        <span className={styles.aside}>({signed ? yenSigned(jpy) : yen(jpy)})</span>
+      )}
+    </span>
+  )
 }
 
 const signedPct = (value: number) => `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}%`
@@ -125,8 +151,19 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
   costBasisJpy: {
     label: 'Cost basis',
     numeric: true,
-    value: (row) => row.costBasisJpy,
-    cell: (row) => yen(row.costBasisJpy),
+    // Sorted by the yen beneath a US figure, so the column still compares
+    // across the whole book.
+    value: (row) => row.costShownJpy,
+    cell: (row) =>
+      row.costUsd == null ? (
+        yen(row.costBasisJpy)
+      ) : (
+        <Dual
+          usd={row.costUsd}
+          jpy={row.costShownJpy}
+          title={`Paid ${yen(row.costBasisJpy)}, each buy in yen at its own day's rate — the tax cost basis`}
+        />
+      ),
   },
   price: {
     label: 'Price',
@@ -144,13 +181,36 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
     label: 'Value',
     numeric: true,
     value: (row) => row.marketValueJpy,
-    cell: (row) => yen(row.marketValueJpy),
+    cell: (row) =>
+      row.marketValueUsd == null ? (
+        yen(row.marketValueJpy)
+      ) : (
+        <Dual usd={row.marketValueUsd} jpy={row.marketValueJpy} />
+      ),
   },
   unrealizedJpy: {
     label: 'Unrealized',
     numeric: true,
     value: (row) => row.unrealizedJpy,
-    cell: (row) => yenSigned(row.unrealizedJpy),
+    cell: (row) =>
+      row.unrealizedUsd == null ? (
+        yenSigned(row.unrealizedJpy)
+      ) : (
+        <Dual
+          usd={row.unrealizedUsd}
+          jpy={row.unrealizedJpy}
+          signed
+          title={[
+            `On price: (price − average buy) × shares, before commission`,
+            row.usdJpy == null ? null : `Yen at ¥${row.usdJpy}/$`,
+            row.unrealizedTaxJpy == null
+              ? null
+              : `For tax: ${yenSigned(row.unrealizedTaxJpy)}, against the yen paid at each buy's rate`,
+          ]
+            .filter((line) => line != null)
+            .join('\n')}
+        />
+      ),
     tone: (row) => toneClass(row.unrealizedJpy),
   },
   unrealizedPct: {
@@ -252,6 +312,12 @@ function PositionCard({
         ? `$${Number(row.currentPrice).toFixed(2)}`
         : yen(row.currentPrice)
   const unrealValue = row.unrealizedJpy == null ? null : Number(row.unrealizedJpy)
+  const unrealLabel =
+    row.unrealizedUsd != null
+      ? moneySigned(row.unrealizedUsd, 'USD')
+      : unrealValue == null
+        ? '—'
+        : yenSigned(unrealValue)
   const unrealTone = unrealValue == null ? 'flat' : tone(unrealValue)
 
   return (
@@ -270,7 +336,7 @@ function PositionCard({
         <span
           className={cx(styles.cardUnreal, unrealTone === 'profit' && styles.profit, unrealTone === 'loss' && styles.loss)}
         >
-          {unrealValue == null ? '—' : yenSigned(unrealValue)}{' '}
+          {unrealLabel}{' '}
           <span className={styles.cardDim}>{pct(row.unrealizedPct)}</span>
         </span>
       </div>
@@ -351,7 +417,9 @@ function Positions() {
    */
   const summary = useMemo(() => {
     const priced = rows.filter((row) => row.marketValueJpy != null)
-    const totalCost = rows.reduce((running, row) => running + Number(row.costBasisJpy), 0)
+    // The shown cost, not the tax one: a US position's is its dollar cost at
+    // today's rate, so value − cost = unrealized in the totals as on each row.
+    const totalCost = rows.reduce((running, row) => running + Number(row.costShownJpy), 0)
     const totalValue = priced.reduce((running, row) => running + Number(row.marketValueJpy), 0)
     const totalUnrealized = priced.reduce((running, row) => running + Number(row.unrealizedJpy), 0)
 
@@ -363,6 +431,7 @@ function Positions() {
     return {
       priced,
       totalCost,
+      usdJpy: rows.find((row) => row.usdJpy != null)?.usdJpy ?? null,
       totalValue,
       totalUnrealized,
       unpriced: rows.length - priced.length,
@@ -392,8 +461,17 @@ function Positions() {
     }
   }, [rows])
 
-  const { priced, totalCost, totalValue, totalUnrealized, unpriced, unrealizedPctOfCost, allocation, highlights } =
-    summary
+  const {
+    priced,
+    totalCost,
+    usdJpy,
+    totalValue,
+    totalUnrealized,
+    unpriced,
+    unrealizedPctOfCost,
+    allocation,
+    highlights,
+  } = summary
 
   return (
     <>
@@ -420,6 +498,7 @@ function Positions() {
             <span className={cx(styles.heroContext, tone(totalUnrealized) === 'profit' && styles.profit, tone(totalUnrealized) === 'loss' && styles.loss)}>
               {yenSigned(totalUnrealized)} unrealized
               {unrealizedPctOfCost != null ? ` · ${signedPct(unrealizedPctOfCost)}` : ''}
+              {usdJpy == null ? '' : ` · US in dollars at ¥${usdJpy}/$`}
             </span>
           ) : null}
           {isMobile ? <AllocationBar segments={allocation} /> : null}

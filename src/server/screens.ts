@@ -26,6 +26,7 @@ import {
   ZERO,
   type AccountType,
   type AssetClass,
+  type NormalizedTrade,
   type TradeSide,
 } from '~/lib/domain/types'
 import { todayLocal } from '~/lib/localDate'
@@ -39,6 +40,8 @@ import {
 import { orderedPoolDays, poolKey } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
+import { splitByDay, splitByMarket, toSplitView, type MarketSplitView } from '~/lib/pnl/markets'
+import { valuePosition, type PositionValue } from '~/lib/pnl/positionValue'
 import { usdResult, type UsdResult } from '~/lib/pnl/usdResult'
 import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
 import { findReinvestment } from '~/lib/tax/reinvestment'
@@ -64,7 +67,8 @@ async function dividendsFor(userId: string) {
 
 // ── Positions ───────────────────────────────────────────────────────────────
 
-export interface PositionRow {
+/** Valuation fields come from `valuePosition` — see `lib/pnl/positionValue.ts`. */
+export interface PositionRow extends PositionValue {
   symbol: string
   name: string
   assetClass: 'JP_EQUITY' | 'US_EQUITY' | 'FUND'
@@ -79,9 +83,6 @@ export interface PositionRow {
   currentPrice: string | null
   priceAsOf: string | null
   priceSource: string | null
-  marketValueJpy: string | null
-  unrealizedJpy: string | null
-  unrealizedPct: number | null
 }
 
 export const getPositions = createServerFn({ method: 'GET' })
@@ -108,27 +109,6 @@ export const getPositions = createServerFn({ method: 'GET' })
         // A manual override always wins over a fetched quote.
         const currentPrice = override ?? cached?.price ?? null
 
-        let marketValueJpy: string | null = null
-        let unrealizedJpy: string | null = null
-        let unrealizedPct: number | null = null
-
-        if (currentPrice) {
-          // USD quotes convert at the live rate, so unrealized P&L includes the
-          // currency move — for a JPY-based holder that is a real part of the
-          // position's value, not a rounding detail. The entry rate is used only
-          // until a rate has ever been fetched; it makes the currency component
-          // read as zero, which is wrong but at least not invented.
-          const rate =
-            position.assetClass === 'US_EQUITY' ? (liveFx ?? position.avgFxRate) : ZERO.add(1)
-          const marketValue = ZERO.add(currentPrice).mul(position.quantity).mul(rate)
-          marketValueJpy = marketValue.toFixed(0)
-          const gain = marketValue.sub(position.costBasisJpy)
-          unrealizedJpy = gain.toFixed(0)
-          unrealizedPct = position.costBasisJpy.gt(0)
-            ? gain.div(position.costBasisJpy).toNumber()
-            : null
-        }
-
         return {
           symbol: position.symbol,
           name: position.name,
@@ -143,12 +123,11 @@ export const getPositions = createServerFn({ method: 'GET' })
           currentPrice,
           priceAsOf: cached?.asOf.toISOString() ?? null,
           priceSource: override ? 'MANUAL' : (cached?.source ?? null),
-          marketValueJpy,
-          unrealizedJpy,
-          unrealizedPct,
+          ...valuePosition(position, currentPrice, liveFx),
         }
       })
-      .sort((left, right) => Number(right.costBasisJpy) - Number(left.costBasisJpy))
+      // By the cost the screen shows, which is what its default column sorts on.
+      .sort((left, right) => Number(right.costShownJpy) - Number(left.costShownJpy))
   })
 
 // ── NISA ────────────────────────────────────────────────────────────────────
@@ -730,14 +709,15 @@ export interface CalendarTrade {
   currency: string
   /** Cash paid on a buy, or received on a sell. Always JPY. */
   amountJpy: string
-  /** Null on opening trades — a buy has no realized P&L. The tax-basis yen. */
+  /**
+   * Null on opening trades — a buy has no realized P&L. The engine's yen, so
+   * on a US close it includes the currency move.
+   */
   realizedJpy: string | null
-  /** A US close's price-only dollar result — see `lib/pnl/usdResult.ts`. */
+  /** A US close's dollar result as Rakuten shows it — see `lib/pnl/usdResult.ts`. */
   realizedUsd: string | null
   /** The same after commission on both sides. */
   netUsd: string | null
-  /** `realizedUsd` at the latest stored USD/JPY. */
-  realizedUsdJpy: string | null
   /** In dollars for a US close, matching the figure shown. */
   returnPct: number | null
   /**
@@ -759,11 +739,15 @@ export interface CalendarTrade {
 export interface CalendarDay {
   date: string
   /**
-   * The day's realized result in yen, as the rows show it: yen closes as they
-   * are, US closes as their dollar result at the latest USD/JPY — not the tax
-   * figure, which a weaker yen can turn into a loss on a day that made dollars.
+   * The day's realized result in yen, the currency move on US closes included
+   * — `markets.totalJpy`, repeated here for tinting and sorting.
    */
   realizedJpy: string | null
+  /**
+   * The same split as Rakuten's app splits it: yen side in yen, US side in
+   * dollars with its yen beside it. Null on a day with no closes.
+   */
+  markets: MarketSplitView | null
   tradeCount: number
   /** True when every trade shown is in an order set by hand, and listed in it. */
   ordered: boolean
@@ -777,13 +761,20 @@ export interface CalendarDay {
   } | null
 }
 
+/** One month of the calendar: its days, and the month's total split by account. */
+export interface CalendarMonth {
+  days: CalendarDay[]
+  /** Every close in the month, split as the days are. Null when nothing closed. */
+  markets: MarketSplitView | null
+}
+
 export const getCalendar = createServerFn({ method: 'GET' })
   .middleware([authed])
   .validator((data: { month: string; account?: string }) => ({
     month: data.month,
     ...accountFilterInput(data),
   }))
-  .handler(async ({ data, context }): Promise<CalendarDay[]> => {
+  .handler(async ({ data, context }): Promise<CalendarMonth> => {
     // `month` is YYYY-MM; build the inclusive day range for it.
     const [y, m] = data.month.split('-').map(Number)
     const year = y ?? new Date().getFullYear()
@@ -792,15 +783,12 @@ export const getCalendar = createServerFn({ method: 'GET' })
     const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
     const last = `${String(year)}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
-    const [{ engine, records }, liveFx] = await Promise.all([
-      engineFor(context.userId, data.account),
-      usdJpyRate(),
-    ])
+    const { engine, records } = await engineFor(context.userId, data.account)
 
-    // Realized events keyed the same way the engine keys them, so a close can
-    // be matched back to the row that produced it.
-    const realizedByKey = new Map<
-      string,
+    // Each close carries the trade that made it, so a row finds its own close
+    // even when another sell that day shares its symbol, account and size.
+    const realizedBy = new Map<
+      NormalizedTrade,
       {
         realized: string
         usd: UsdResult | null
@@ -809,32 +797,27 @@ export const getCalendar = createServerFn({ method: 'GET' })
         holdingDays: number
       }
     >()
-    const daily = new Map<string, typeof ZERO>()
+    // Day totals through the same split the dashboard uses, so the two screens
+    // cannot disagree about a day.
+    const daily = splitByDay(engine.realized)
     for (const close of engine.realized) {
-      const usd = usdResult(close, liveFx)
-      // Until a rate has ever been fetched a US close can only be counted at
-      // its tax-basis yen.
-      const shown = usd?.gainJpyNow ?? close.realizedJpy
-      daily.set(close.tradeDate, (daily.get(close.tradeDate) ?? ZERO).add(shown))
-      realizedByKey.set(
-        `${close.tradeDate}|${close.symbol}|${close.accountType}|${close.quantity.toFixed()}`,
-        {
-          realized: close.realizedJpy.toFixed(0),
-          usd,
-          pct: usd
-            ? usd.returnPct
-            : close.costJpy.gt(0)
-              ? close.realizedJpy.div(close.costJpy).toNumber()
-              : null,
-          // Same per-10,000 convention as the exit price, so the two are
-          // directly comparable on screen.
-          entryPrice:
-            close.assetClass === 'FUND'
-              ? close.entryPriceNative.mul(10_000).toFixed(0)
-              : close.entryPriceNative.toFixed(close.assetClass === 'US_EQUITY' ? 2 : 1),
-          holdingDays: close.holdingDays,
-        },
-      )
+      const usd = usdResult(close)
+      realizedBy.set(close.trade, {
+        realized: close.realizedJpy.toFixed(0),
+        usd,
+        pct: usd
+          ? usd.returnPct
+          : close.costJpy.gt(0)
+            ? close.realizedJpy.div(close.costJpy).toNumber()
+            : null,
+        // Same per-10,000 convention as the exit price, so the two are
+        // directly comparable on screen.
+        entryPrice:
+          close.assetClass === 'FUND'
+            ? close.entryPriceNative.mul(10_000).toFixed(0)
+            : close.entryPriceNative.toFixed(close.assetClass === 'US_EQUITY' ? 2 : 1),
+        holdingDays: close.holdingDays,
+      })
     }
 
     const byDate = new Map<string, CalendarTrade[]>()
@@ -843,9 +826,7 @@ export const getCalendar = createServerFn({ method: 'GET' })
       if (trade.tradeDate < first || trade.tradeDate > last) continue
       if (!matchesAccountFilter(trade.accountType, data.account)) continue
       const isClose = trade.side === 'SELL' || trade.side === 'REDEEM'
-      const realized = realizedByKey.get(
-        `${trade.tradeDate}|${trade.symbol}|${trade.accountType}|${trade.quantity.toFixed()}`,
-      )
+      const realized = realizedBy.get(trade)
       const dayTrades = byDate.get(trade.tradeDate) ?? []
       dayTrades.push({
         id: record.id,
@@ -866,7 +847,6 @@ export const getCalendar = createServerFn({ method: 'GET' })
         realizedJpy: isClose ? (realized?.realized ?? null) : null,
         realizedUsd: isClose ? (realized?.usd?.gainUsd ?? null) : null,
         netUsd: isClose ? (realized?.usd?.netUsd ?? null) : null,
-        realizedUsdJpy: isClose ? (realized?.usd?.gainJpyNow ?? null) : null,
         returnPct: isClose ? (realized?.pct ?? null) : null,
         entryPrice: isClose ? (realized?.entryPrice ?? null) : null,
         holdingDays: isClose ? (realized?.holdingDays ?? null) : null,
@@ -908,15 +888,17 @@ export const getCalendar = createServerFn({ method: 'GET' })
       (await listNotes(context.userId, first, last)).map((note) => [note.date, note]),
     )
 
+    const inMonth = engine.realized.filter((close) => close.tradeDate >= first && close.tradeDate <= last)
     const days: CalendarDay[] = []
     for (let dayOfMonth = 1; dayOfMonth <= lastDay; dayOfMonth++) {
       const date = `${String(year)}-${String(month).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`
-      const pnl = daily.get(date)
+      const split = daily.get(date)
       const note = journal.get(date)
       const dayTrades = byDate.get(date) ?? []
       days.push({
         date,
-        realizedJpy: pnl ? pnl.toFixed(0) : null,
+        realizedJpy: split ? split.totalJpy.toFixed(0) : null,
+        markets: split ? toSplitView(split) : null,
         tradeCount: dayTrades.length,
         ordered: dayTrades.length > 0 && dayTrades.every((trade) => placed(trade, date)),
         trades: dayTrades,
@@ -931,5 +913,5 @@ export const getCalendar = createServerFn({ method: 'GET' })
           : null,
       })
     }
-    return days
+    return { days, markets: inMonth.length ? toSplitView(splitByMarket(inMonth)) : null }
   })

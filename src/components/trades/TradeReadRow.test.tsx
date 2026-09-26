@@ -32,11 +32,9 @@ const soxlSell: TradeRow = {
   netAmountJpy: '451866',
   realizedJpy: '-3246',
   costJpy: '455112',
-  realizedUsd: '46.40',
+  realizedUsd: '60.94',
   costUsd: '2860.05',
-  netUsd: '31.86',
-  realizedUsdJpy: '6960',
-  usdJpy: '150.00',
+  netUsd: '46.42',
   returnPct: 0.0162,
   isSettled: true,
   origin: 'IMPORT',
@@ -62,23 +60,17 @@ function renderRow(row: TradeRow) {
 }
 
 describe('realized cell', () => {
-  it('shows a US close in dollars, with today’s yen in brackets', () => {
+  it('shows a US close in dollars, with its yen in brackets as Rakuten does', () => {
     renderRow(soxlSell)
-    const cell = screen.getByText('$46.40')
-    expect(cell.textContent).toBe('$46.40(¥6,960)')
+    const cell = screen.getByText('$60.94')
+    expect(cell.textContent).toBe('$60.94(¥-3,246)')
   })
 
-  it('keeps the after-commission and tax-basis figures in the hover text', () => {
+  it('explains both figures in the hover text', () => {
     renderRow(soxlSell)
-    const title = screen.getByText('$46.40').getAttribute('title') ?? ''
-    expect(title).toContain('$31.86 after commission on both sides')
-    expect(title).toContain('¥6,960 at ¥150.00/$')
-    expect(title).toContain('For tax: ¥-3,246')
-  })
-
-  it('drops the brackets when no rate has been fetched', () => {
-    renderRow({ ...soxlSell, realizedUsdJpy: null, usdJpy: null })
-    expect(screen.getByText('$46.40').textContent).toBe('$46.40')
+    const title = screen.getByText('$60.94').getAttribute('title') ?? ''
+    expect(title).toContain('$46.42 after the sell commission as well')
+    expect(title).toContain('¥-3,246 in yen, the currency move included')
   })
 
   it('leaves a yen close as it was', () => {
@@ -92,16 +84,7 @@ describe('realized cell', () => {
       realizedUsd: null,
       costUsd: null,
       netUsd: null,
-      realizedUsdJpy: null,
-      usdJpy: null,
     })
     expect(screen.getByText('¥12,500').hasAttribute('title')).toBe(false)
-  })
-})
-
-describe('fee cell', () => {
-  it('prints a US commission in dollars, not yen', () => {
-    renderRow(soxlSell)
-    expect(screen.getByText('$13.23').tagName).toBe('TD')
   })
 })

@@ -250,3 +250,74 @@ describe.skipIf(!containerAvailable)('a re-dated fill that was deleted', () => {
     expect(await storedSells({ withDeleted: true })).toHaveLength(1)
   })
 })
+
+/**
+ * A JP day regrouped at settlement — the production 8729 sell of 2026-09-15.
+ *
+ * The intraday export listed the order's fills so far as 1,000 + 800 + 2,600
+ * with no commission; the settled one lists the same 4,400 shares as 1,800 +
+ * 2,600, commission split across them. What only a database can answer is
+ * whether the commit leaves exactly the settled pair live, with the 2,600's
+ * figures replaced in place and the partials tombstoned rather than removed.
+ */
+describe.skipIf(!containerAvailable)('a JP day regrouped at settlement', () => {
+  const JP_HEADER =
+    '約定日,受渡日,銘柄コード,銘柄名,市場名称,口座区分,取引区分,売買区分,信用区分,弁済期限,' +
+    '数量［株］,単価［円］,手数料［円］,税金等［円］,諸費用［円］,税区分,受渡金額［円］,建約定日,' +
+    '建単価［円］,建手数料［円］,建手数料消費税［円］,金利（支払）〔円〕,金利（受取）〔円〕,' +
+    '逆日歩／特別空売り料（支払）〔円〕,逆日歩（受取）〔円〕,貸株料,事務管理費〔円〕（税抜）,' +
+    '名義書換料〔円〕（税抜）'
+  const jpBytes = (rows: string[]): Uint8Array =>
+    Uint8Array.from(iconv.encode([JP_HEADER, ...rows].join('\r\n'), 'Shift_JIS'))
+  const tail = '"-","0.0","0","0","0","0","0","0","0","0","0"'
+  const bought = `"2026/9/14","2026/9/16","8729","ソニーフィナンシャルグループ","東証","特定","現物","買付","-","-","4,400","160.3","0","0","0","-","705,320",${tail}`
+  const sold = (qty: string, fee: string, tax: string, amount: string) =>
+    `"2026/9/15","2026/9/17","8729","ソニーフィナンシャルグループ","東証","特定","現物","売付","-","-","${qty}","163.2","${fee}","${tax}","0","源徴あり","${amount}",${tail}`
+  const later = `"2026/9/18","2026/9/25","2502","アサヒＧＨＤ","東証","特定","現物","買付","-","-","200","1631.9","0","0","0","-","-",${tail}`
+
+  const intraday = () =>
+    jpBytes([bought, sold('1,000', '0', '0', '-'), sold('800', '0', '0', '-'), sold('2,600', '0', '0', '-')])
+  const settled = () =>
+    jpBytes([bought, sold('1,800', '198', '18', '293,544'), sold('2,600', '289', '30', '424,001'), later])
+
+  async function sells(withDeleted = false) {
+    const { rows } = await sql!.query<{ quantity: string; net_amount_jpy: string; is_settled: boolean; deleted_at: Date | null }>(
+      `select quantity::float::text as quantity, net_amount_jpy::float::text as net_amount_jpy, is_settled, deleted_at
+         from trades where side = 'SELL' ${withDeleted ? '' : 'and deleted_at is null'}
+        order by trades.quantity`,
+    )
+    return rows
+  }
+
+  it('keeps the settled pair live, settles the 2,600 in place, and tombstones the partials', async () => {
+    await imports!.commitImport(USER, 'tradehistory(JP)_20260915.csv', intraday())
+    const result = await imports!.commitImport(USER, 'tradehistory(JP)_20260918.csv', settled())
+    expect(result.tradesInserted).toBe(2) // the 1,800 and the later buy
+    expect(result.tradesRestated).toBe(3) // the 2,600 settled, the 1,000 and 800 replaced
+
+    expect(await sells()).toEqual([
+      { quantity: '1800', net_amount_jpy: '293544', is_settled: true, deleted_at: null },
+      { quantity: '2600', net_amount_jpy: '424001', is_settled: true, deleted_at: null },
+    ])
+    expect((await sells(true)).filter((row) => row.deleted_at != null).map((row) => row.quantity)).toEqual([
+      '800',
+      '1000',
+    ])
+
+    const records = await tradesService!.listTrades(USER)
+    const engine = runEngine(records.map((row) => row.trade))
+    expect(engine.warnings).toEqual([])
+    // Both sells book, and between them they close the 4,400 bought.
+    expect(engine.realized.map((close) => close.quantity.toFixed()).sort()).toEqual(['1800', '2600'])
+    expect(engine.positions.filter((position) => position.symbol === '8729')).toEqual([])
+  })
+
+  it('does not bring the partials back when the intraday export is uploaded again', async () => {
+    await imports!.commitImport(USER, 'tradehistory(JP)_20260915.csv', intraday())
+    await imports!.commitImport(USER, 'tradehistory(JP)_20260918.csv', settled())
+    const again = await imports!.commitImport(USER, 'tradehistory(JP)_20260915.csv', intraday())
+    expect(again.tradesInserted).toBe(0)
+    expect(again.tradesRestated).toBe(0)
+    expect((await sells()).map((row) => row.quantity)).toEqual(['1800', '2600'])
+  })
+})

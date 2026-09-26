@@ -32,6 +32,29 @@
  * The later date wins, being the one Rakuten settles on and reports on the
  * 年間取引報告書; an older export arriving afterwards is skipped rather than
  * allowed to revert the row.
+ *
+ * ## Settlement
+ *
+ * A row exported before it settles is provisional even when its hash never
+ * changes. A JP row has `受渡金額 = "-"` and no commission yet; a US row carries
+ * the rate of the moment rather than the day's settled one (SMCI and SOFI on
+ * 2026-09-02: 159.86 and 159.99 against the 160.14 every later export shows).
+ * Matching the hash used to mean "already imported", so the final figures
+ * never landed: 34 JP rows sat at ¥0 commission for up to two months. A matched row is
+ * now updated in place when the file is final for it — the row is settled in
+ * the file and not yet in storage, or the file was exported after the row's
+ * 受渡日 and states different figures.
+ *
+ * Settlement can also regroup fills. An intraday export listed 8729's one
+ * sell order of 2026-09-15 as 1,000 + 800 + 2,600 shares; after settlement
+ * Rakuten lists the same 4,400 as 1,800 + 2,600. The 1,800 has a new hash, so
+ * it was inserted beside the 1,000 and 800 it replaces, and the day sold 6,200
+ * shares of a 4,400 position. An export lists every fill of any date it
+ * covers, so where it states a day's fills as settled, stored rows for that
+ * day that are still unsettled and that it no longer lists are superseded —
+ * soft-deleted, so the intraday export cannot bring them back. The reverse
+ * holds too: an intraday export arriving after the settled one adds nothing
+ * to a day already stored as settled.
  */
 import type {
   AccountType,
@@ -91,6 +114,35 @@ export interface StoredTrade {
   isEdited: boolean
   /** Manual rows are never matched, overwritten, or removed by an import. */
   origin: 'IMPORT' | 'MANUAL'
+  /** False while the row still holds pre-settlement figures. */
+  isSettled: boolean
+  /** A tombstone: it still claims its hash, but nothing updates or supersedes it. */
+  isDeleted: boolean
+  /** The figures settlement can change — see `figuresOf`. */
+  figures: string
+}
+
+/** The money on a row that settlement can restate, in one comparable string. */
+export function figuresOf(row: {
+  fee: { toFixed(): string }
+  feeTax: { toFixed(): string }
+  otherCost: { toFixed(): string }
+  fxRate: { toFixed(): string }
+  grossAmount: { toFixed(): string }
+  netAmount: { toFixed(): string }
+  netAmountJpy: { toFixed(): string }
+}): string {
+  return [
+    row.fee,
+    row.feeTax,
+    row.otherCost,
+    row.fxRate,
+    row.grossAmount,
+    row.netAmount,
+    row.netAmountJpy,
+  ]
+    .map((value) => value.toFixed())
+    .join('|')
 }
 
 /** A stored row the broker restated — updated in place rather than inserted. */
@@ -101,12 +153,22 @@ export interface RestatedTrade {
   trade: NormalizedTrade
 }
 
+/** A stored row the file carries final figures for — updated in place. */
+export interface SettledTrade {
+  id: string
+  trade: NormalizedTrade
+}
+
 export interface ImportPlan {
   /** Rows not already stored — these would be inserted. */
   newTrades: NormalizedTrade[]
   newDividends: NormalizedDividend[]
   /** Stored rows the file re-dates — these would be updated, not inserted. */
   restatedTrades: RestatedTrade[]
+  /** Stored rows the file settles or re-rates — updated with its figures. */
+  settledTrades: SettledTrade[]
+  /** Stored intraday fills the settled export regroups — soft-deleted. */
+  supersededTrades: StoredTrade[]
   /** Rows already stored, skipped. */
   duplicateTrades: number
   duplicateDividends: number
@@ -136,6 +198,13 @@ function executionKey(row: {
 
 const epochDays = (iso: string): number => Math.floor(Date.parse(`${iso}T00:00:00Z`) / 86_400_000)
 
+/** One day's fills of one instrument on one side — what an export lists whole. */
+const dayKey = (row: { tradeDate: string; symbol: string; accountType: AccountType; side: TradeSide }) =>
+  [row.tradeDate, row.symbol, row.accountType, row.side].join('\0')
+
+/** Stored rows an import may rewrite: imported, not hand-corrected, not deleted. */
+const rewritable = (row: StoredTrade) => row.origin === 'IMPORT' && !row.isEdited && !row.isDeleted
+
 /**
  * Compare a parse result against what is already stored.
  *
@@ -151,7 +220,18 @@ export function planImport(
   const seenTrades = new Set(storedByHash.keys())
   const newTrades: NormalizedTrade[] = []
   const restatedTrades: RestatedTrade[] = []
+  const settledTrades: SettledTrade[] = []
   let duplicateTrades = 0
+
+  // The export was taken no earlier than its latest trade, so a row settling
+  // before that date is stated at its final figures.
+  const exportedAfter = parsed.trades.reduce(
+    (latest, trade) => (trade.tradeDate > latest ? trade.tradeDate : latest),
+    '',
+  )
+  const isFinalFor = (trade: NormalizedTrade, row: StoredTrade) =>
+    trade.isSettled &&
+    (!row.isSettled || (exportedAfter > trade.settleDate && figuresOf(trade) !== row.figures))
 
   // Pass one, on the hash alone. A stored row matched here is spoken for, so
   // pass two cannot also claim it as the restatement of some other row.
@@ -162,9 +242,10 @@ export function planImport(
     // Guards both against re-importing a stored row and against the same row
     // appearing twice within one upload batch.
     if (seenTrades.has(trade.sourceRowHash)) {
-      duplicateTrades++
       const row = storedByHash.get(trade.sourceRowHash)
       if (row) claimed.add(row.id)
+      if (row && rewritable(row) && isFinalFor(trade, row)) settledTrades.push({ id: row.id, trade })
+      else duplicateTrades++
       continue
     }
     seenTrades.add(trade.sourceRowHash)
@@ -205,6 +286,7 @@ export function planImport(
     }
 
     const [row] = bucket!.splice(index, 1)
+    claimed.add(row!.id)
     if (row!.isEdited || trade.tradeDate < row!.tradeDate) {
       // An older export, or a row the user has corrected by hand. Either way
       // what is stored is the better answer; count it as already imported.
@@ -213,6 +295,31 @@ export function planImport(
     }
     restatedTrades.push({ id: row!.id, previousTradeDate: row!.tradeDate, trade })
   }
+
+  // Pass three, on whole days. Where the file states a day's fills as
+  // settled, stored fills of that day still unsettled and no longer listed
+  // were intraday partials it has regrouped. Where it states them unsettled
+  // and storage already holds the day settled, its new rows are those same
+  // partials arriving late.
+  const fileDays = new Map<string, boolean>()
+  for (const trade of parsed.trades) {
+    const key = dayKey(trade)
+    fileDays.set(key, (fileDays.get(key) ?? true) && trade.isSettled)
+  }
+  const supersededTrades: StoredTrade[] = []
+  const settledDays = new Set<string>()
+  for (const row of stored) {
+    if (row.isDeleted || row.origin !== 'IMPORT') continue
+    const key = dayKey(row)
+    if (row.isSettled) settledDays.add(key)
+    else if (fileDays.get(key) === true && !claimed.has(row.id) && !row.isEdited) {
+      supersededTrades.push(row)
+    }
+  }
+  const lateIntraday = (trade: NormalizedTrade) =>
+    !trade.isSettled && fileDays.get(dayKey(trade)) === false && settledDays.has(dayKey(trade))
+  duplicateTrades += newTrades.filter(lateIntraday).length
+  const inserted = newTrades.filter((trade) => !lateIntraday(trade))
 
   const seenDividends = new Set(existingDividendHashes)
   const newDividends: NormalizedDividend[] = []
@@ -228,9 +335,11 @@ export function planImport(
   }
 
   return {
-    newTrades,
+    newTrades: inserted,
     newDividends,
     restatedTrades,
+    settledTrades,
+    supersededTrades,
     duplicateTrades,
     duplicateDividends,
     errors: parsed.errors,
@@ -244,6 +353,9 @@ export function describePlan(plan: ImportPlan): string {
   ]
   if (plan.newDividends.length) parts.push(`${plan.newDividends.length} new dividends`)
   if (plan.restatedTrades.length) parts.push(`${plan.restatedTrades.length} restated by the broker`)
+  if (plan.settledTrades.length) parts.push(`${plan.settledTrades.length} now settled`)
+  if (plan.supersededTrades.length)
+    parts.push(`${plan.supersededTrades.length} intraday fills regrouped at settlement`)
   if (plan.duplicateTrades) parts.push(`${plan.duplicateTrades} already imported`)
   if (plan.duplicateDividends) parts.push(`${plan.duplicateDividends} dividends already imported`)
   if (plan.errors.length) parts.push(`${plan.errors.length} unreadable rows`)

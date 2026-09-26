@@ -20,7 +20,7 @@ import { withTradeJournal } from '~/lib/calendarPatch'
 import { cx } from '~/lib/cx'
 import { reportError } from '~/lib/observability/report'
 import { saveTradeJournal } from '~/server/notes'
-import type { CalendarDay, CalendarTrade } from '~/server/screens'
+import type { CalendarMonth, CalendarTrade } from '~/server/screens'
 
 /** Native-currency price. Fund figures already arrive per 10,000 口. */
 const price = (amount: string, currency: string) =>
@@ -51,8 +51,8 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
    * open dialog was drawn from.
    */
   const patchCache = (journal: { memo: string | null; motivation: number | null }) => {
-    queryClient.setQueriesData<CalendarDay[]>({ queryKey: ['calendar'] }, (days) =>
-      withTradeJournal(days, trade.id, journal),
+    queryClient.setQueriesData<CalendarMonth>({ queryKey: ['calendar'] }, (month) =>
+      withTradeJournal(month, trade.id, journal),
     )
   }
 
@@ -156,20 +156,20 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
           {trade.realizedJpy == null ? (
             <span className={styles.muted}>—</span>
           ) : trade.realizedUsd != null ? (
-            // A US close in dollars on price, as on the Trades screen.
+            // A US close in dollars with its yen in brackets, as Rakuten shows it.
             <span
               className={tone(trade.realizedUsd) === 'loss' ? styles.loss : styles.profit}
               title={[
-                trade.netUsd == null ? null : `${moneySigned(trade.netUsd, 'USD')} after commission`,
-                `For tax: ${yenSigned(trade.realizedJpy)}, each trade in yen at its own day's rate`,
+                trade.netUsd == null
+                  ? null
+                  : `${moneySigned(trade.netUsd, 'USD')} after the sell commission as well`,
+                `${yenSigned(trade.realizedJpy)} in yen, the currency move included`,
               ]
                 .filter((line) => line != null)
                 .join('\n')}
             >
               {moneySigned(trade.realizedUsd, 'USD')}
-              {trade.realizedUsdJpy == null ? null : (
-                <span className={styles.aside}>({yenSigned(trade.realizedUsdJpy)})</span>
-              )}
+              <span className={styles.aside}>({yenSigned(trade.realizedJpy)})</span>
             </span>
           ) : (
             <span className={tone(trade.realizedJpy) === 'profit' ? styles.profit : styles.loss}>

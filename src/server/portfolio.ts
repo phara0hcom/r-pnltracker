@@ -13,6 +13,7 @@ import { matchesAccountFilter, ZERO } from '~/lib/domain/types'
 import { buildNisaReport } from '~/lib/nisa/quota'
 import { runEngine, type RealizedEvent } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
+import { splitByMarket, toSplitView, type MarketSplitView } from '~/lib/pnl/markets'
 import { computeStats } from '~/lib/stats/stats'
 
 /** Aggregates for one time window — reused for week, month and all-time. */
@@ -37,6 +38,8 @@ export interface PeriodSummary {
   winCount: number
   lossCount: number
   winRate: number | null
+  /** The same window split as Rakuten's app splits it — see `lib/pnl/markets.ts`. */
+  markets: MarketSplitView
 }
 
 export interface MonthlyPoint {
@@ -59,7 +62,13 @@ export interface MonthlyPoint {
 export interface DashboardData {
   tradeCount: number
   openPositions: number
+  /**
+   * Net realized in yen, the currency move on US closes included — every
+   * trade at its own day's rate, as the calendar totals it.
+   */
   realizedJpy: string
+  /** All time, split as Rakuten's app splits it: yen side in yen, US side in dollars. */
+  markets: MarketSplitView
   /** Total acquisition cost of positions still held — capital currently invested. */
   investedAtCostJpy: string
   /** All-time gross loss, as a positive magnitude. */
@@ -123,6 +132,7 @@ function summarize(events: RealizedEvent[], label: string, from: string, to: str
     winCount: wins.length,
     lossCount: losses.length,
     winRate: inRange.length ? wins.length / inRange.length : null,
+    markets: toSplitView(splitByMarket(inRange)),
   }
 }
 
@@ -188,6 +198,9 @@ export const getDashboard = createServerFn({ method: 'GET' })
       .filter((trade) => matchesAccountFilter(trade.accountType, data.account))
 
     const engine = runEngine(trades)
+    // Every figure here is in yen with the currency move included: a US trade
+    // that made dollars while the yen strengthened counts for what it made in
+    // yen. The dollar side is shown alongside, not instead — see `markets`.
     const stats = computeStats(engine.realized)
     const now = new Date()
     const nisa = buildNisaReport(trades, engine.realized, now.getFullYear())
@@ -216,6 +229,7 @@ export const getDashboard = createServerFn({ method: 'GET' })
       week: summarize(engine.realized, 'This week', week.from, week.to),
       month: summarize(engine.realized, 'This month', monthStart, monthEnd),
       monthly: monthlySeries(engine.realized),
+      markets: toSplitView(splitByMarket(engine.realized)),
       nisaLifetimeUsed: nisa.lifetime.used.toFixed(0),
       nisaLifetimeRemaining: nisa.lifetime.remaining.toFixed(0),
       nisaPendingRestoration: nisa.lifetime.pendingRestoration.toFixed(0),

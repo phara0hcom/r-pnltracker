@@ -6,6 +6,7 @@ import { MonthlyPnlChart } from '~/components/charts/MonthlyPnlChart'
 import { MonthlyZeroBars } from '~/components/charts/MonthlyZeroBars'
 import { EquitySparkline } from '~/components/dashboard/EquitySparkline'
 import { pct, ratio, tone, yen, yenSigned } from '~/components/format'
+import { MarketBreakdown, MarketInline } from '~/components/pnl/MarketSplit'
 import { HeroStat, PageHeader, Section, Stat, StatStrip, StripCell } from '~/components/screen'
 import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
@@ -145,6 +146,7 @@ function RecentCard({ period }: { period: PeriodSummary }) {
               · {period.winCount}W / {period.lossCount}L
             </span>
           </div>
+          <MarketInline split={period.markets} className={styles.recentSplit} />
         </>
       )}
     </div>
@@ -228,13 +230,15 @@ function Dashboard() {
           label="Realized P&L · all time"
           value={yen(d.realizedJpy)}
           tone={tone(realized)}
-          context={`${yen(d.grossProfitJpy)} gains · ${yen(d.grossLossJpy)} losses`}
+          context={`${yen(d.grossProfitJpy)} gains · ${yen(d.grossLossJpy)} losses · in yen, currency moves included`}
           aside={
             d.equityCurve.length >= 2 ? (
               <EquitySparkline points={d.equityCurve} tone={tone(realized)} />
             ) : undefined
           }
-        />
+        >
+          <MarketBreakdown split={d.markets} currencyEffectJpy={d.fxEffectJpy} />
+        </HeroStat>
         <div className={styles.recentGrid}>
           <RecentCard period={d.week} />
           <RecentCard period={d.month} />

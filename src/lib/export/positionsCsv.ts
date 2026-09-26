@@ -31,8 +31,12 @@ export interface PositionCsvRow {
   costBasisJpy: string
   currentPrice: string | null
   marketValueJpy: string | null
+  /** For a US position, its dollar gain at today's rate — see `PositionRow`. */
   unrealizedJpy: string | null
   unrealizedPct: number | null
+  costUsd: string | null
+  unrealizedUsd: string | null
+  unrealizedTaxJpy: string | null
   priceAsOf: string | null
   priceSource: string | null
 }
@@ -86,6 +90,13 @@ const COLUMNS: readonly Column[] = [
     header: 'Unrealized %',
     value: (row) => (row.unrealizedPct == null ? '' : row.unrealizedPct.toFixed(6)),
   },
+  // US positions only. The screen judges them in dollars, and its Unrealized
+  // (JPY) is that dollar gain at today's rate; the tax figure — value against
+  // the yen paid at each buy's rate — is kept so the file still reconciles
+  // with Cost basis (JPY).
+  { header: 'Cost (USD)', value: (row) => blank(row.costUsd) },
+  { header: 'Unrealized (USD)', value: (row) => blank(row.unrealizedUsd) },
+  { header: 'Unrealized for tax (JPY)', value: (row) => blank(row.unrealizedTaxJpy) },
   {
     // The full UTC timestamp, verbatim. Truncating it to a date would reintroduce
     // exactly the bug `localDate.ts` exists to prevent — for JST the UTC date is

@@ -8,15 +8,15 @@
  * request was in flight — a day dialog holds one of these mutations per trade,
  * and they overlap freely.
  */
-import type { CalendarDay } from '~/server/screens'
+import type { CalendarDay, CalendarMonth } from '~/server/screens'
 
 /** Replace one day's journal entry. `null` clears it. */
 export function withNote(
-  days: CalendarDay[] | undefined,
+  month: CalendarMonth | undefined,
   date: string,
   note: CalendarDay['note'],
-): CalendarDay[] | undefined {
-  return days?.map((day) => (day.date === date ? { ...day, note } : day))
+): CalendarMonth | undefined {
+  return month && { ...month, days: month.days.map((day) => (day.date === date ? { ...day, note } : day)) }
 }
 
 /**
@@ -26,14 +26,19 @@ export function withNote(
  * inside the open dialog does not know which month query it was drawn from.
  */
 export function withTradeJournal(
-  days: CalendarDay[] | undefined,
+  month: CalendarMonth | undefined,
   tradeId: string,
   journal: { memo: string | null; motivation: number | null },
-): CalendarDay[] | undefined {
-  return days?.map((day) => ({
-    ...day,
-    trades: day.trades.map((trade) =>
-      trade.id === tradeId ? { ...trade, ...journal } : trade,
-    ),
-  }))
+): CalendarMonth | undefined {
+  return (
+    month && {
+      ...month,
+      days: month.days.map((day) => ({
+        ...day,
+        trades: day.trades.map((trade) =>
+          trade.id === tradeId ? { ...trade, ...journal } : trade,
+        ),
+      })),
+    }
+  )
 }

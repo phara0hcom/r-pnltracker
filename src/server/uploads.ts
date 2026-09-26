@@ -12,7 +12,7 @@ import { idFor } from '~/db/mappers'
 import { listTrades, setDayOrder } from '~/db/trades.service'
 import type { NormalizedTrade } from '~/lib/domain/types'
 import { daysToOrder, type OrderCandidate } from '~/lib/import/dayOrder'
-import { orderFilesForImport, type StoredTrade } from '~/lib/import/plan'
+import { figuresOf, orderFilesForImport, type StoredTrade } from '~/lib/import/plan'
 
 export interface UploadPayload {
   filename: string
@@ -67,7 +67,10 @@ export interface PreviewSummary {
   summary: string
   newTrades: number
   newDividends: number
-  /** Stored rows Rakuten re-dated — updated in place, not added. */
+  /**
+   * Stored rows Rakuten restated — re-dated, settled, re-rated, or regrouped
+   * at settlement — updated or replaced, not added.
+   */
   restated: number
   duplicates: number
   snapshots: number
@@ -127,6 +130,8 @@ export const previewFiles = createServerFn({ method: 'POST' })
     // What earlier files will have written by the time the commit reaches the
     // next one, keyed by row id.
     const pending = new Map<string, StoredTrade>()
+    // Stored rows a settled export regroups away, which the commit deletes.
+    const removed = new Set<string>()
     const asStored = (id: string, trade: NormalizedTrade): StoredTrade => ({
       id,
       sourceRowHash: trade.sourceRowHash,
@@ -139,6 +144,9 @@ export const previewFiles = createServerFn({ method: 'POST' })
       settleDate: trade.settleDate,
       isEdited: false,
       origin: 'IMPORT',
+      isSettled: trade.isSettled,
+      isDeleted: false,
+      figures: figuresOf(trade),
     })
     for (const file of orderFilesForImport(decodeChecked(data.files))) {
       const preview = await previewImport(
@@ -158,13 +166,25 @@ export const previewFiles = createServerFn({ method: 'POST' })
         incoming.set(restated.id, { id: restated.id, trade: restated.trade, incoming: true })
         pending.set(restated.id, asStored(restated.id, restated.trade))
       }
+      for (const settled of preview.plan.settledTrades) {
+        pending.set(settled.id, asStored(settled.id, settled.trade))
+      }
+      for (const superseded of preview.plan.supersededTrades) {
+        pending.set(superseded.id, { ...superseded, isDeleted: true })
+        // Out of the day being offered for ordering, as the commit removes it.
+        incoming.delete(superseded.id)
+        removed.add(superseded.id)
+      }
       out.push({
         filename: preview.filename,
         format: preview.format,
         summary: preview.summary,
         newTrades: preview.plan.newTrades.length,
         newDividends: preview.plan.newDividends.length,
-        restated: preview.plan.restatedTrades.length,
+        restated:
+          preview.plan.restatedTrades.length +
+          preview.plan.settledTrades.length +
+          preview.plan.supersededTrades.length,
         duplicates: preview.plan.duplicateTrades + preview.plan.duplicateDividends,
         snapshots: preview.snapshotCount,
         cash: preview.cashCount,
@@ -172,9 +192,9 @@ export const previewFiles = createServerFn({ method: 'POST' })
       })
     }
 
-    const stored = (await listTrades(context.userId)).map(
-      (record): OrderCandidate => ({ id: record.id, trade: record.trade, incoming: false }),
-    )
+    const stored = (await listTrades(context.userId))
+      .filter((record) => !removed.has(record.id))
+      .map((record): OrderCandidate => ({ id: record.id, trade: record.trade, incoming: false }))
     const days = daysToOrder(stored, [...incoming.values()]).map((day) => ({
       date: day.date,
       trades: day.trades.map(({ id, trade, incoming: isNew }) => ({

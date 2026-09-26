@@ -5,7 +5,8 @@ import { z } from 'zod'
 import styles from './calendar.module.scss'
 import { NoteDialog, type NotePayload } from '~/components/calendar/NoteDialog'
 import { ZeroBar } from '~/components/charts/ZeroBar'
-import { tone, yenSigned } from '~/components/format'
+import { moneySigned, tone, yenSigned } from '~/components/format'
+import { MarketBreakdown } from '~/components/pnl/MarketSplit'
 import { HeroStat, PageHeader, StatStrip, StripCell } from '~/components/screen'
 import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
@@ -17,7 +18,7 @@ import { thisMonthLocal } from '~/lib/localDate'
 import { monthGrid, shiftMonth } from '~/lib/monthGrid'
 import { reportError } from '~/lib/observability/report'
 import { removeNote, saveNote } from '~/server/notes'
-import { getCalendar, type CalendarDay } from '~/server/screens'
+import { getCalendar, type CalendarDay, type CalendarMonth } from '~/server/screens'
 
 export const Route = createFileRoute('/_authed/calendar')({
   validateSearch: z.object({
@@ -55,6 +56,44 @@ function shortDayMonth(date: string): string {
 /** Compact grid-cell figure — the full-width `yenSigned` doesn't fit an 84px cell. */
 const shortPnl = (n: number) => (n > 0 ? '+' : '−') + '¥' + (Math.abs(n) / 1000).toFixed(1) + 'k'
 
+/** The dollar twin of `shortPnl`: whole dollars, thousands abbreviated. */
+const shortUsd = (n: number) => {
+  const abs = Math.abs(n)
+  return (n > 0 ? '+' : '−') + '$' + (abs >= 1000 ? (abs / 1000).toFixed(1) + 'k' : abs.toFixed(0))
+}
+
+/**
+ * A day's figures the way Rakuten's app gives them: the JPY account in yen,
+ * the USD account in dollars. Null sides are left out.
+ */
+function dayFigures(day: CalendarDay): { key: string; text: string; value: number }[] {
+  const split = day.markets
+  if (!split) return []
+  const out: { key: string; text: string; value: number }[] = []
+  if (split.jpyRealizedJpy != null) {
+    const value = Number(split.jpyRealizedJpy)
+    out.push({ key: 'jpy', text: shortPnl(value), value })
+  }
+  if (split.usdRealizedUsd != null) {
+    const value = Number(split.usdRealizedUsd)
+    out.push({ key: 'usd', text: shortUsd(value), value })
+  }
+  return out
+}
+
+/** Screen-reader text for a day's figures, in full. */
+function dayLabel(day: CalendarDay): string {
+  const split = day.markets
+  if (!split) return ''
+  const parts = [
+    split.jpyRealizedJpy == null ? null : `JPY account ${yenSigned(split.jpyRealizedJpy)}`,
+    split.usdRealizedUsd == null
+      ? null
+      : `USD account ${moneySigned(split.usdRealizedUsd, 'USD')}, ${yenSigned(split.usdRealizedJpy)} in yen`,
+  ]
+  return `, realized ${parts.filter((part) => part != null).join(' and ')}`
+}
+
 /** Opacity encodes magnitude, hue encodes direction — same read at either cell size. */
 function tint(pnl: number | null, peak: number): string | undefined {
   if (pnl == null || pnl === 0) return undefined
@@ -75,10 +114,11 @@ function Calendar() {
 
   const calendarKey = ['calendar', month, account]
 
-  const { data: dayList, isPending } = useQuery({
+  const { data: calendar, isPending } = useQuery({
     queryKey: calendarKey,
     queryFn: () => getCalendar({ data: { month, account } }),
   })
+  const dayList = calendar?.days
   const openDay = openDate == null ? null : (dayList?.find((day) => day.date === openDate) ?? null)
   const setOpenDay = (day: CalendarDay | null) => {
     setOpenDate(day?.date ?? null)
@@ -95,9 +135,9 @@ function Calendar() {
    */
   const patchDay = (date: string, note: CalendarDay['note']) => {
     const previous =
-      queryClient.getQueryData<CalendarDay[]>(calendarKey)?.find((day) => day.date === date)
+      queryClient.getQueryData<CalendarMonth>(calendarKey)?.days.find((day) => day.date === date)
         ?.note ?? null
-    queryClient.setQueryData<CalendarDay[]>(calendarKey, (days) => withNote(days, date, note))
+    queryClient.setQueryData<CalendarMonth>(calendarKey, (cached) => withNote(cached, date, note))
     return previous
   }
 
@@ -154,10 +194,12 @@ function Calendar() {
   // One pass for the lookup map and every hero/strip figure. Typing in the
   // journal dialog re-renders this screen on every keystroke, and separate
   // walks of the month happened on each of them.
+  // The month's total comes from the server, split as the days are.
+  const monthPnl = calendar?.markets ? Number(calendar.markets.totalJpy) : 0
+
   const {
     byDate,
     tradedDays,
-    monthPnl,
     journalled,
     peak,
     bestDay,
@@ -170,14 +212,13 @@ function Calendar() {
     const days = dayList ?? []
     const map = new Map<string, CalendarDay>()
     let traded = 0
-    let pnl = 0
     let noted = 0
     // Scale tint by the largest absolute day so a quiet month still shows contrast.
     let largest = 1
     let green = 0
     let best: { date: string; pnl: number } | null = null
     let worst: { date: string; pnl: number } | null = null
-    const moved: { date: string; pnl: number; count: number; mood: number | null }[] = []
+    const moved: MovedDay[] = []
     let maxPos = 0
     let maxNeg = 0
 
@@ -186,7 +227,6 @@ function Calendar() {
       if (day.tradeCount > 0) traded += 1
       if (day.note != null) noted += 1
       const realized = day.realizedJpy ? Number(day.realizedJpy) : 0
-      pnl += realized
       largest = Math.max(largest, Math.abs(realized))
 
       // "Moved" = actually realized something that day — an opening trade with
@@ -196,7 +236,7 @@ function Calendar() {
         if (value > 0) green += 1
         if (!best || value > best.pnl) best = { date: day.date, pnl: value }
         if (!worst || value < worst.pnl) worst = { date: day.date, pnl: value }
-        moved.push({ date: day.date, pnl: value, count: day.tradeCount, mood: day.note?.mood ?? null })
+        moved.push({ day, pnl: value, mood: day.note?.mood ?? null })
         maxPos = Math.max(maxPos, value)
         maxNeg = Math.max(maxNeg, -value)
       }
@@ -205,7 +245,6 @@ function Calendar() {
     return {
       byDate: map,
       tradedDays: traded,
-      monthPnl: pnl,
       journalled: noted,
       peak: largest,
       bestDay: best,
@@ -265,7 +304,14 @@ function Calendar() {
       ) : null}
 
       <div className={styles.heroRow}>
-        <HeroStat label="Realized this month" value={yenSigned(monthPnl)} tone={tone(monthPnl)} />
+        <HeroStat
+          label="Realized this month"
+          value={yenSigned(monthPnl)}
+          tone={tone(monthPnl)}
+          context="In yen, currency moves included"
+        >
+          {calendar?.markets ? <MarketBreakdown split={calendar.markets} /> : null}
+        </HeroStat>
         <StatStrip>
           <StripCell
             label="Best day"
@@ -328,8 +374,9 @@ function Calendar() {
       </div>
 
       <p className={styles.legend}>
-        Tint shows realized P&L for the day — green for gains, red for losses, stronger for larger.
-        Click any day to journal how it felt.
+        Each day shows the JPY account in yen and the USD account in dollars, as Rakuten does. The
+        tint is the day in yen, currency moves included — green for gains, red for losses, stronger
+        for larger. Click any day to journal how it felt.
       </p>
 
       {isMobile ? <DaysMovedList days={movedDays} maxPos={moveMaxPos} maxNeg={moveMaxNeg} /> : null}
@@ -380,7 +427,7 @@ function FullDayCell({
       className={cx(styles.day, day.note && styles.hasNote)}
       style={bg ? { backgroundColor: bg } : undefined}
       onClick={() => { onOpen(day) }}
-      aria-label={`${day.date}${pnl != null ? `, realized ${yenSigned(pnl)}` : ''}${day.note ? ', has journal entry' : ''}`}
+      aria-label={`${day.date}${dayLabel(day)}${day.note ? ', has journal entry' : ''}`}
     >
       <span className={styles.dayTop}>
         <span className={cx(styles.dayNum, !hasData && styles.dayNumMuted)}>{dayNum}</span>
@@ -392,11 +439,14 @@ function FullDayCell({
       </span>
       {hasData ? (
         <span className={styles.dayBottom}>
-          {pnl != null ? (
-            <span className={cx(styles.dayPnl, pnl >= 0 ? styles.profit : styles.loss)}>
-              {shortPnl(pnl)}
+          {dayFigures(day).map((figure) => (
+            <span
+              key={figure.key}
+              className={cx(styles.dayPnl, figure.value >= 0 ? styles.profit : styles.loss)}
+            >
+              {figure.text}
             </span>
-          ) : null}
+          ))}
           {day.tradeCount > 0 ? (
             <span className={styles.dayCount}>
               {day.tradeCount} trade{day.tradeCount === 1 ? '' : 's'}
@@ -440,12 +490,20 @@ function CompactDayCell({
       className={cx(styles.dayCompactCell, day.note && styles.hasNote)}
       style={bg ? { backgroundColor: bg } : undefined}
       onClick={() => { onOpen(day) }}
-      aria-label={`${day.date}${pnl != null ? `, realized ${yenSigned(pnl)}` : ''}${day.note ? ', has journal entry' : ''}`}
+      aria-label={`${day.date}${dayLabel(day)}${day.note ? ', has journal entry' : ''}`}
     >
       <span className={pnl == null && day.tradeCount === 0 ? styles.dayNumMuted : undefined}>{dayNum}</span>
       {day.note ? <span className={styles.compactDot} aria-hidden="true" /> : null}
     </button>
   )
+}
+
+/** A day that realized something, for the SP list. */
+interface MovedDay {
+  day: CalendarDay
+  /** The day in yen, currency moves included — what the bar is drawn from. */
+  pnl: number
+  mood: number | null
 }
 
 /** SP-only: days with a realized close, as zero-origin rows — the detail the compact grid has no room for. */
@@ -454,7 +512,7 @@ function DaysMovedList({
   maxPos,
   maxNeg,
 }: {
-  days: { date: string; pnl: number; count: number; mood: number | null }[]
+  days: MovedDay[]
   maxPos: number
   maxNeg: number
 }) {
@@ -465,17 +523,21 @@ function DaysMovedList({
       <h2 className={styles.movedTitle}>Days that moved</h2>
       <div className={styles.movedList}>
         {days.map((row) => (
-          <div key={row.date} className={styles.movedRow}>
-            <span className={styles.movedLabel}>{shortDayMonth(row.date)}</span>
+          <div key={row.day.date} className={styles.movedRow}>
+            <span className={styles.movedLabel}>{shortDayMonth(row.day.date)}</span>
             <span className={styles.movedMood} aria-hidden="true">
               {row.mood ? MOOD_GLYPH[row.mood] : ''}
             </span>
             <div className={styles.movedTrack}>
               <ZeroBar value={row.pnl} maxPos={maxPos} maxNeg={maxNeg} />
             </div>
-            <span className={styles.movedCount}>{row.count}</span>
-            <span className={cx(styles.movedValue, row.pnl >= 0 ? styles.profit : styles.loss)}>
-              {yenSigned(row.pnl)}
+            <span className={styles.movedCount}>{row.day.tradeCount}</span>
+            <span className={styles.movedValue}>
+              {dayFigures(row.day).map((figure) => (
+                <span key={figure.key} className={figure.value >= 0 ? styles.profit : styles.loss}>
+                  {figure.text}
+                </span>
+              ))}
             </span>
           </div>
         ))}

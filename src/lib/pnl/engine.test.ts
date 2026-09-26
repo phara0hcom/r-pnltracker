@@ -129,6 +129,95 @@ describe('cost basis', () => {
   })
 })
 
+describe('ground truth — Rakuten 実現損益, September 2026', () => {
+  /** A settled JP fill: commission added to a buy's cost, taken off a sell's proceeds. */
+  function jp(symbol: string, side: 'BUY' | 'SELL', tradeDate: string, qty: number, price: string, fee: number) {
+    const gross = new Decimal(price).mul(qty)
+    const net = side === 'BUY' ? gross.add(fee) : gross.sub(fee)
+    return t({
+      symbol,
+      side,
+      tradeDate,
+      quantity: new Decimal(qty),
+      unitPrice: new Decimal(price),
+      fee: new Decimal(fee),
+      grossAmount: gross,
+      netAmount: net,
+      netAmountJpy: net,
+    })
+  }
+  const realizedOf = (trades: NormalizedTrade[]) =>
+    runEngine(trades).realized.map((close) => close.realizedJpy.toFixed())
+
+  // Each expected figure is what Rakuten's app showed for that sell. None of
+  // them come out without rounding the average cost per share up to the yen.
+
+  it('rounds the day’s average up to the yen: 5713 on 3 September', () => {
+    // ¥10,216.40 a share becomes ¥10,217, and both sells close against it.
+    expect(
+      realizedOf([
+        jp('5713', 'BUY', '2026-09-03', 100, '10050', 640),
+        jp('5713', 'SELL', '2026-09-03', 100, '10351', 640),
+        jp('5713', 'BUY', '2026-09-03', 100, '10370', 640),
+        jp('5713', 'SELL', '2026-09-03', 100, '10255', 640),
+      ]),
+    ).toEqual(['12760', '3160'])
+  })
+
+  it('carries the rounded figure across days: 8766', () => {
+    expect(
+      realizedOf([
+        jp('8766', 'BUY', '2026-07-31', 100, '8139.6', 535),
+        jp('8766', 'BUY', '2026-08-21', 100, '7303', 535),
+        jp('8766', 'SELL', '2026-09-04', 100, '7976.5', 535),
+        jp('8766', 'SELL', '2026-09-04', 100, '8052.6', 535),
+      ]),
+    ).toEqual(['24415', '32025'])
+  })
+
+  it('rounds a day’s buys together, not one by one: 8411 on 14 September', () => {
+    // Rounding after each buy gives ¥8,728 and a 200-share result of ¥707.
+    expect(
+      realizedOf([
+        jp('8411', 'BUY', '2026-09-11', 100, '8450', 535),
+        jp('8411', 'SELL', '2026-09-11', 100, '8630', 535),
+        jp('8411', 'BUY', '2026-09-14', 200, '8675', 1013),
+        jp('8411', 'SELL', '2026-09-14', 200, '8736.6', 1013),
+        jp('8411', 'BUY', '2026-09-14', 200, '8768', 1013),
+        jp('8411', 'SELL', '2026-09-14', 100, '8790.4', 535),
+      ]),
+    ).toEqual(['16865', '907', '5805'])
+  })
+
+  it('matters most on a cheap share: 8729, ¥161.44 sold against ¥162', () => {
+    expect(
+      realizedOf([
+        jp('8729', 'BUY', '2026-09-01', 1000, '161.6', 115),
+        jp('8729', 'BUY', '2026-09-01', 1000, '161.2', 115),
+        jp('8729', 'BUY', '2026-09-02', 1000, '160.2', 115),
+        jp('8729', 'SELL', '2026-09-04', 3000, '163.8', 275),
+      ]),
+    ).toEqual(['5125'])
+  })
+
+  it('leaves funds and US stocks exact', () => {
+    const fund = runEngine([
+      t({ assetClass: 'FUND', quantity: new Decimal(3), netAmountJpy: new Decimal(1000) }),
+    ])
+    expect(fund.positions[0]!.costBasisJpy.toFixed()).toBe('1000')
+    const us = runEngine([
+      t({ assetClass: 'US_EQUITY', currency: 'USD', quantity: new Decimal(3), netAmountJpy: new Decimal(1000) }),
+    ])
+    expect(us.positions[0]!.costBasisJpy.toFixed()).toBe('1000')
+  })
+
+  it('shows a held Japanese stock at the rounded figure', () => {
+    const held = runEngine([t({ quantity: new Decimal(3), netAmountJpy: new Decimal(1000), netAmount: new Decimal(1000) })])
+    // ¥333.33… a share becomes ¥334.
+    expect(held.positions[0]!.costBasisJpy.toFixed()).toBe('1002')
+  })
+})
+
 describe('real portfolio', () => {
   it('processes all 315 trades', () => {
     expect(trades).toHaveLength(315)

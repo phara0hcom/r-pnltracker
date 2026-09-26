@@ -305,7 +305,9 @@
 }
 
 .movedValue {
+  display: flex;
   flex: none;
+  flex-direction: column;
   width: 58px;
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);

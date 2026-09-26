@@ -86,6 +86,7 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/lib/import/tradeHistory.ts` | `detectFormat` + the three trade parsers |
 | `src/lib/import/torizan.ts` | month-end statements: dividends, snapshots, cash |
 | `src/lib/pnl/engine.ts` | `runEngine` — cost basis and realized events |
+| `src/lib/pnl/markets.ts` | the JPY-account / USD-account split the dashboard and calendar total through |
 | `src/db/import.service.ts` | two-phase `previewImport` / `commitImport` |
 | `src/server/screens.ts` | one server fn per screen; calls `runEngine` via `engineFor()` |
 | `src/server/engine.ts` | `engineFor` — trades + engine, kept out of client-reachable modules |
@@ -124,6 +125,10 @@ derivation and sources.
 - **Cost basis is 移動平均法** (moving weighted average), which Japanese tax rules require.
   FIFO produces different, and for filing purposes wrong, numbers. There is consequently
   **no link between an individual buy and an individual sell** — units are fungible within a pool.
+- **A Japanese stock's average cost per share is rounded *up* to the whole yen** (1円未満切り上げ)
+  once each day's buys are in, and the pool carries the rounded figure. Every September 2026
+  JP sell matches Rakuten's 実現損益 to the yen with it; at ¥160 a share it was ¥2,930 on one
+  sell without. Funds and US stocks stay exact — unverified against the broker.
 - **Pools are keyed `(symbol × accountType)`.** The same ticker in 特定 and NISA is two
   independent tax lots; commingling corrupts both P&L and the NISA quota.
 - **Money is `Decimal` (decimal.js) everywhere, never a float.** `Decimal.set({ precision: 40 })`
@@ -142,10 +147,18 @@ derivation and sources.
   when *every* trade of that pool on that date has one — per pool, so the
   account filter cannot change the result — and a re-dated, date-edited or
   restored trade loses its place. An order that leaves a day's closes shorter
-  of units than before is refused before writing.
-- **A US close is shown in dollars on price**: (sell − average buy) × shares,
-  before commission (`lib/pnl/usdResult.ts`). The JPY figure beside it in tax
-  and stats is each trade at its own day's rate, and can have the opposite sign.
+  of units than before is refused before writing. Rakuten itself counts a day's
+  buys first (SOXL and 5713 in September 2026 both show it), so a hand-set order
+  moves a day's figures away from the broker's.
+- **A US close is shown in dollars as Rakuten shows it**: the sale (約定代金) less
+  the cost of those shares *including* buy commission, sell commission not taken
+  off (`lib/pnl/usdResult.ts`) — all nine September 2026 US closes match to the
+  cent. Its yen, in brackets, is the engine's: each trade at its own day's rate,
+  currency move and both commissions included. **Totals are in that yen**: the
+  dashboard and calendar split through `lib/pnl/markets.ts` into the JPY account
+  (JP stocks and funds, yen) and the USD account (dollars, with its yen), and add
+  the two yen figures. An open US position is still valued at today's rate
+  (`lib/pnl/positionValue.ts`) — it has no sale rate yet.
 - **旧NISA is a separate system** and is excluded from the ¥18M lifetime cap.
 - **Exit-rule entry facts are locked**: `initialStop`, R and Target 1 are fixed from the
   entry-date ATR *and the stop/target multiples stored on the plan*, never re-read from
@@ -187,6 +200,15 @@ and **受渡日**, differing by exactly one day in 約定日, is the same execut
 row rather than being inserted. 受渡日 is the anchor because settlement is T+n business days
 from the trade date, so two genuinely distinct fills cannot share one. The later date wins; an
 older export arriving afterwards is skipped rather than allowed to revert the row.
+
+**A matched hash is not always a duplicate.** A row exported before it settles is provisional:
+a JP row has no commission and `受渡金額 = "-"`, a US row the rate of the moment rather than
+the day's settled one. When a later file is final for a stored row — settled in the file and
+not in storage, or exported after its 受渡日 with different figures — `planImport` returns it in
+`settledTrades` and the commit updates its money in place. Settlement can also regroup a day's
+fills (8729 on 2026-09-15: 1,000 + 800 + 2,600 intraday, 1,800 + 2,600 settled); where a file
+lists a day's fills as settled, stored fills of that day still unsettled that it no longer
+lists are `supersededTrades`, soft-deleted. Until this, 34 JP rows sat at ¥0 commission.
 
 Deletes are soft (`deletedAt`), because a hard delete would let the next import resurrect the
 row via a hash that no longer exists. Manual trades are salted `MANUAL` so an import can never
