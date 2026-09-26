@@ -28,6 +28,19 @@
   }
 }
 
+/* Before `.armed`, which must still win once the button is armed. */
+.text {
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-loss);
+  border-color: transparent;
+  border-radius: var(--radius-md);
+
+  &:hover {
+    border-color: transparent;
+  }
+}
+
 /**
  * Armed state is filled, not merely outlined — the change has to be
  * unmistakable at a glance, since the next click destroys something.

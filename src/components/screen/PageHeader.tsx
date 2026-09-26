@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import styles from './PageHeader.module.scss'
 import { setPageTitle, setTitleScrolledPast } from './pageTitle'
+import { cx } from '~/lib/cx'
 
 /** Fallback if the token is unreadable — matches `--topbar-height`. */
 const TOPBAR_FALLBACK_PX = 60
@@ -16,14 +17,30 @@ function topBarHeight(): number {
   return Number.parseFloat(raw) || TOPBAR_FALLBACK_PX
 }
 
-/** Screen title, a line of context under it, and a slot for screen-level controls. */
+/**
+ * Screen title, a line of context under it, and slots for screen-level controls.
+ *
+ * `filter` is the control that decides which figures the screen shows — the
+ * account switch. It sits with the actions on desktop and takes a row of its
+ * own under the title on a phone, where hiding it behind a button left no way
+ * to tell which accounts the figures on screen covered.
+ */
 export function PageHeader({
   title,
   meta,
+  filter,
+  actionsBeside = false,
   children,
 }: {
   title: string
   meta?: React.ReactNode
+  filter?: React.ReactNode
+  /**
+   * Keep the actions beside the title on a phone rather than on a row of
+   * their own — for a single small button, which would otherwise sit alone
+   * between the title and the filter.
+   */
+  actionsBeside?: boolean
   children?: React.ReactNode
 }) {
   const heading = useRef<HTMLHeadingElement>(null)
@@ -58,13 +75,14 @@ export function PageHeader({
   }, [title])
 
   return (
-    <header className={styles.header}>
-      <div>
+    <header className={cx(styles.header, actionsBeside && styles.actionsBeside)}>
+      <div className={styles.heading}>
         <h1 ref={heading} className={styles.title}>
           {title}
         </h1>
         {meta ? <p className={styles.meta}>{meta}</p> : null}
       </div>
+      {filter ? <div className={styles.filter}>{filter}</div> : null}
       {children ? <div className={styles.actions}>{children}</div> : null}
     </header>
   )

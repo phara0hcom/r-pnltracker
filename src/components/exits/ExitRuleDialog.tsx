@@ -25,6 +25,7 @@ import styles from './ExitRuleDialog.module.scss'
 import { toFieldErrors } from './fieldErrors'
 import { ACCOUNT_LABEL } from '~/components/format'
 import { FormField } from '~/components/trades/FormField'
+import { useDialogHistory } from '~/components/ui/useDialogHistory'
 import { cx } from '~/lib/cx'
 import { TRAILING_METHODS, type TrailingMethod } from '~/lib/exit/types'
 import { reportError } from '~/lib/observability/report'
@@ -101,6 +102,9 @@ export function ExitRuleDialog({
   defaultMethod: TrailingMethod
   onSaved: () => void
 }) {
+  useDialogHistory(open, () => {
+    onOpenChange(false)
+  })
   const [form, setForm] = useState<Form>(blank)
   const [errors, setErrors] = useState<Record<string, string>>({})
 

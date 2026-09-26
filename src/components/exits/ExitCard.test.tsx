@@ -29,7 +29,7 @@ describe('the urgency split', () => {
     render(<ExitCard row={ROW} onOpen={onOpen} />)
 
     expect(screen.getByText(ROW.actionMessage)).toBeTruthy()
-    expect(screen.getByText('¥-84,000')).toBeTruthy()
+    expect(screen.getByText('−¥84,000')).toBeTruthy()
     expect(screen.getByText('300 / 300')).toBeTruthy()
     // The six-level grid and the entry facts belong to the dialog now.
     expect(screen.queryByText('Trailing stop')).toBeNull()

@@ -1,92 +1,156 @@
 @use '../../styles/mixins' as m;
 
-/* ── Hero row ─────────────────────────────────────────────────────────────── */
+/* ── Results: the all-time hero beside this week and this month ──────────── */
 
-.heroBlock {
+.results {
   display: grid;
-  grid-template-columns: 1.55fr 1fr;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
   gap: var(--space-3);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-6);
 
   @include m.mobile {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    margin-bottom: var(--space-5);
   }
 }
 
-.recentGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  overflow: hidden;
-  background-color: var(--color-border);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+/* Gains against losses, under the hero figure. */
+.split {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 18rem;
+  margin-top: var(--space-4);
+
+  @include m.mobile {
+    min-width: 0;
+  }
 }
 
-.recentCard {
-  padding: var(--space-4);
-  background-color: var(--color-surface);
+.splitTrack {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+}
+
+.splitGain {
+  background-color: var(--chart-profit);
+  border-radius: 3px 0 0 3px;
+}
+
+.splitLoss {
+  flex: 1;
+  background-color: var(--chart-loss);
+  border-radius: 0 3px 3px 0;
+}
+
+.splitLegend {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  font-size: var(--text-sm);
+
+  @include m.tabular-nums;
+}
+
+.splitLabel {
+  color: var(--color-text-muted);
+}
+
+/* This week and this month, stacked in one card. */
+.recent {
+  display: flex;
+  flex-direction: column;
+
+  @include m.card;
+}
+
+.recentRow {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: center;
+  padding: var(--space-3) var(--space-5);
+
+  & + & {
+    border-top: 1px solid var(--color-border);
+  }
+
+  @include m.mobile {
+    padding: var(--space-3) var(--space-4);
+  }
 }
 
 .recentHead {
   display: flex;
+  gap: var(--space-3);
   align-items: baseline;
   justify-content: space-between;
 }
 
 .recentLabel {
   font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.recentCount {
-  font-size: 0.625rem;
-  color: var(--color-text-subtle);
-
-  @include m.tabular-nums;
+.recentRange {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 
 .recentEmpty {
-  margin-top: var(--space-2);
-  font-size: var(--text-xs);
-  color: var(--color-text-subtle);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
 }
 
 .recentNetRow {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.recentFigure {
+  display: flex;
   gap: var(--space-2);
   align-items: baseline;
-  margin-top: 2px;
 }
 
 .recentNet {
   font-size: var(--text-xl);
   font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
 
   @include m.tabular-nums;
 }
 
 .recentPct {
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.recentCount {
+  font-size: var(--text-sm);
 
   @include m.tabular-nums;
 }
 
 .recentDetail {
-  margin-top: var(--space-2);
   font-size: var(--text-xs);
+  color: var(--color-text-muted);
 
   @include m.tabular-nums;
 }
 
-.recentDim {
-  color: var(--color-text-subtle);
-}
-
 .recentSplit {
-  margin-top: var(--space-1);
+  margin-top: 2px;
 }
 
 .profit {
@@ -101,20 +165,87 @@
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
-  margin-bottom: var(--space-3);
 
   @include m.mobile {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-/* `StatStrip` carries no margin of its own — inside a `heroRow` it would
-   misalign the `flex-end` bottom edge against `HeroStat`. Standalone here
-   (below the tiles, not beside a hero), it needs its own spacer. */
-.stripSpacing {
-  margin-bottom: var(--space-5);
+/* ── Capital, and the NISA quota or this year's tax beside it ─────────────── */
+
+.capitalRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+
+  @include m.tablet {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.capital {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+
+  @include m.card;
+
+  @include m.mobile {
+    padding: var(--space-4);
+  }
+}
+
+.capitalTitle {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.capitalFigures {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  @include m.mobile {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.capitalFigure {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+
+  dt {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  dd {
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: var(--weight-semibold);
+
+    @include m.tabular-nums;
+  }
+
+  @include m.mobile {
+    flex-direction: column;
+    gap: 0;
+  }
+}
+
+.capitalLink {
+  margin-top: auto;
+  font-size: var(--text-sm);
 }
 
 /* ── Pending state ────────────────────────────────────────────────────────── */
@@ -163,9 +294,21 @@
   }
 }
 
-.pendingRecentCard {
-  padding: var(--space-4);
-  background-color: var(--color-surface);
+.pendingRecent {
+  flex: 1;
+  padding: var(--space-4) var(--space-5);
+
+  & + & {
+    border-top: 1px solid var(--color-border);
+  }
+}
+
+/* The capital and quota row: approximate height, so the chart does not jump. */
+.pendingQuota {
+  height: 180px;
+  margin-bottom: var(--space-6);
+
+  @include m.card;
 }
 
 /*
@@ -174,23 +317,7 @@
  * whereas a collapsed box would shift everything below it.
  */
 .pendingChart {
-  height: 380px;
+  height: 400px;
 
   @include m.card;
-}
-
-.callout {
-  padding: var(--space-3) var(--space-4);
-  margin-top: var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--color-warn);
-  background-color: var(--color-warn-dim);
-  border: 1px solid var(--color-warn);
-  border-radius: var(--radius-md);
-}
-
-.note {
-  margin-top: var(--space-3);
-  font-size: var(--text-xs);
-  color: var(--color-text-subtle);
 }

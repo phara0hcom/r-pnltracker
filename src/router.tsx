@@ -1,8 +1,9 @@
 import { MutationCache, QueryClient } from '@tanstack/react-query'
-import { createRouter as createTanStackRouter } from '@tanstack/react-router'
+import { createBrowserHistory, createRouter as createTanStackRouter } from '@tanstack/react-router'
 import { routerWithQueryClient } from '@tanstack/react-router-with-query'
 import { routeTree } from './routeTree.gen'
 import { noteActionFailed } from '~/components/offline/offlineStore'
+import { historyWithDialogs } from '~/components/ui/dialogHistory'
 import { isNetworkFailure } from '~/lib/offline/messages'
 
 /** A request that failed because this device has no network at all. */
@@ -59,6 +60,10 @@ export function getRouter() {
       context: { queryClient },
       defaultPreload: 'intent',
       scrollRestoration: true,
+      // The browser's history, made so an open dialog can take Back for itself
+      // without the router reloading the screen — see `historyWithDialogs`.
+      // The server keeps the router's own memory history.
+      history: typeof window === 'undefined' ? undefined : historyWithDialogs(() => createBrowserHistory()),
     }),
     queryClient,
   )

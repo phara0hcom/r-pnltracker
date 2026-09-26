@@ -22,6 +22,7 @@ export function ConfirmButton({
   className,
   title,
   size = 'normal',
+  variant = 'outline',
 }: {
   onConfirm: () => void
   children: React.ReactNode
@@ -31,6 +32,8 @@ export function ConfirmButton({
   className?: string
   title?: string
   size?: 'normal' | 'small'
+  /** `text`: a red word with no border, for a form's footer beside Save. */
+  variant?: 'outline' | 'text'
 }) {
   const [armed, setArmed] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -52,6 +55,7 @@ export function ConfirmButton({
       className={cx(
         styles.button,
         size === 'small' && styles.small,
+        variant === 'text' && styles.text,
         armed && styles.armed,
         className,
       )}

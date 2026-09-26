@@ -6,6 +6,7 @@
  * formatted for display, never recomputed.
  */
 import { createServerFn } from '@tanstack/react-start'
+import Decimal from 'decimal.js'
 import { eq } from 'drizzle-orm'
 import { engineFor } from './engine'
 import { authed } from './middleware'
@@ -20,7 +21,9 @@ import {
   priceOverrides,
 } from '~/db/schema'
 import { accountFilterInput } from '~/lib/accountScope'
+import { summarizeMonth, type MonthSummary } from '~/lib/calendar/monthSummary'
 import {
+  FUND_UNIT_DIVISOR,
   matchesAccountFilter,
   OPENING_SIDES,
   ZERO,
@@ -30,6 +33,7 @@ import {
   type TradeSide,
 } from '~/lib/domain/types'
 import { todayLocal } from '~/lib/localDate'
+import { monthWeeks } from '~/lib/monthGrid'
 import { daysUntilYearEnd } from '~/lib/nisa/daysLeft'
 import {
   ANNUAL_GROWTH_LIMIT,
@@ -41,6 +45,13 @@ import { orderedPoolDays, poolKey } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
 import { splitByDay, splitByMarket, toSplitView, type MarketSplitView } from '~/lib/pnl/markets'
+import {
+  summarizePositions,
+  type AccountTotal,
+  type ClassTotal,
+  type PositionSummary,
+  type PositionTotal,
+} from '~/lib/pnl/positionSummary'
 import { valuePosition, type PositionValue } from '~/lib/pnl/positionValue'
 import { usdResult, type UsdResult } from '~/lib/pnl/usdResult'
 import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
@@ -71,8 +82,8 @@ async function dividendsFor(userId: string) {
 export interface PositionRow extends PositionValue {
   symbol: string
   name: string
-  assetClass: 'JP_EQUITY' | 'US_EQUITY' | 'FUND'
-  accountType: string
+  assetClass: AssetClass
+  accountType: AccountType
   quantity: string
   costBasisJpy: string
   avgCostPerUnit: string
@@ -83,12 +94,39 @@ export interface PositionRow extends PositionValue {
   currentPrice: string | null
   priceAsOf: string | null
   priceSource: string | null
+  /**
+   * Average cost and price as the instrument is quoted: dollars a share, yen a
+   * share, or for a fund yen per 10,000 口 (基準価額) — the figure Rakuten
+   * shows, where `avgCostPerUnit` holds it per single 口.
+   */
+  avgPriceQuoted: string
+  priceQuoted: string | null
+  /** Share of the book's value. Null without a price. */
+  weight: number | null
 }
+
+export interface PositionsData {
+  /** Largest value first; holdings with no price last, by cost. */
+  rows: PositionRow[]
+  total: PositionTotal
+  /** One per account holding anything, largest value first. */
+  accounts: AccountTotal[]
+  classes: ClassTotal[]
+  highlights: PositionSummary['highlights']
+  /** The rate a US holding's yen figures use, when one is held. */
+  usdJpy: string | null
+}
+
+/** A fund's price per 10,000 口, the unit it is quoted in; anything else as is. */
+const quoted = (price: Decimal, assetClass: AssetClass): string =>
+  assetClass === 'FUND'
+    ? price.mul(FUND_UNIT_DIVISOR).toFixed(0)
+    : price.toFixed(assetClass === 'US_EQUITY' ? 2 : 1)
 
 export const getPositions = createServerFn({ method: 'GET' })
   .middleware([authed])
   .validator(accountFilterInput)
-  .handler(async ({ data, context }): Promise<PositionRow[]> => {
+  .handler(async ({ data, context }): Promise<PositionsData> => {
     const { engine } = await engineFor(context.userId, data.account)
 
     const [priced, overrides, liveFx] = await Promise.all([
@@ -101,13 +139,14 @@ export const getPositions = createServerFn({ method: 'GET' })
     ])
     const priceBySymbol = new Map(priced.map((row) => [row.instrument.symbol, row.price]))
 
-    return engine.positions
+    const rows = engine.positions
       .map((position) => {
         const avgCost = position.costBasisJpy.div(position.quantity)
         const cached = priceBySymbol.get(position.symbol)
         const override = overrides.get(instrumentId(position.symbol)) ?? null
         // A manual override always wins over a fetched quote.
         const currentPrice = override ?? cached?.price ?? null
+        const isUsd = position.assetClass === 'US_EQUITY'
 
         return {
           symbol: position.symbol,
@@ -119,15 +158,33 @@ export const getPositions = createServerFn({ method: 'GET' })
           avgCostPerUnit: avgCost.toFixed(4),
           avgPriceNative: position.avgPriceNative.toFixed(4),
           avgFxRate: position.avgFxRate.toFixed(2),
-          currency: position.assetClass === 'US_EQUITY' ? ('USD' as const) : ('JPY' as const),
+          currency: isUsd ? ('USD' as const) : ('JPY' as const),
           currentPrice,
           priceAsOf: cached?.asOf.toISOString() ?? null,
           priceSource: override ? 'MANUAL' : (cached?.source ?? null),
+          avgPriceQuoted: quoted(isUsd ? position.avgPriceNative : avgCost, position.assetClass),
+          priceQuoted: currentPrice == null ? null : quoted(new Decimal(currentPrice), position.assetClass),
           ...valuePosition(position, currentPrice, liveFx),
         }
       })
-      // By the cost the screen shows, which is what its default column sorts on.
-      .sort((left, right) => Number(right.costShownJpy) - Number(left.costShownJpy))
+      // Value first, the screen's default order; a holding with no price has
+      // none to rank by, so it follows the priced ones, largest cost first.
+      .sort((left, right) =>
+        left.marketValueJpy == null || right.marketValueJpy == null
+          ? Number(left.marketValueJpy == null) - Number(right.marketValueJpy == null) ||
+            new Decimal(right.costShownJpy).cmp(left.costShownJpy)
+          : new Decimal(right.marketValueJpy).cmp(left.marketValueJpy),
+      )
+
+    const summary = summarizePositions(rows)
+    return {
+      rows: rows.map((row, index) => ({ ...row, weight: summary.weights[index] ?? null })),
+      total: summary.total,
+      accounts: summary.accounts,
+      classes: summary.classes,
+      highlights: summary.highlights,
+      usdJpy: rows.find((row) => row.usdJpy != null)?.usdJpy ?? null,
+    }
   })
 
 // ── NISA ────────────────────────────────────────────────────────────────────
@@ -749,6 +806,10 @@ export interface CalendarDay {
    */
   markets: MarketSplitView | null
   tradeCount: number
+  /** Cash paid for the day's buys, in yen. */
+  paidJpy: string
+  /** Cash received for the day's sells. */
+  receivedJpy: string
   /** True when every trade shown is in an order set by hand, and listed in it. */
   ordered: boolean
   trades: CalendarTrade[]
@@ -761,11 +822,22 @@ export interface CalendarDay {
   } | null
 }
 
-/** One month of the calendar: its days, and the month's total split by account. */
+/** One Monday-first week of the month, clipped to it. */
+export interface CalendarWeek {
+  from: string
+  to: string
+  /** The week's closes, split as the days are. Null when nothing closed. */
+  markets: MarketSplitView | null
+  tradeCount: number
+}
+
+/** One month of the calendar: its days, weeks, and the month's totals. */
 export interface CalendarMonth {
   days: CalendarDay[]
+  weeks: CalendarWeek[]
   /** Every close in the month, split as the days are. Null when nothing closed. */
   markets: MarketSplitView | null
+  summary: MonthSummary
 }
 
 export const getCalendar = createServerFn({ method: 'GET' })
@@ -889,6 +961,13 @@ export const getCalendar = createServerFn({ method: 'GET' })
     )
 
     const inMonth = engine.realized.filter((close) => close.tradeDate >= first && close.tradeDate <= last)
+    // Summed from the rows' own whole-yen amounts, so the day's total is the
+    // sum of the figures the dialog lists above it.
+    const cashOf = (list: readonly CalendarTrade[], opening: boolean) =>
+      list
+        .filter((trade) => OPENING_SIDES.includes(trade.side) === opening)
+        .reduce((sum, trade) => sum.add(trade.amountJpy), ZERO)
+        .toFixed(0)
     const days: CalendarDay[] = []
     for (let dayOfMonth = 1; dayOfMonth <= lastDay; dayOfMonth++) {
       const date = `${String(year)}-${String(month).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`
@@ -900,6 +979,8 @@ export const getCalendar = createServerFn({ method: 'GET' })
         realizedJpy: split ? split.totalJpy.toFixed(0) : null,
         markets: split ? toSplitView(split) : null,
         tradeCount: dayTrades.length,
+        paidJpy: cashOf(dayTrades, true),
+        receivedJpy: cashOf(dayTrades, false),
         ordered: dayTrades.length > 0 && dayTrades.every((trade) => placed(trade, date)),
         trades: dayTrades,
         note: note
@@ -913,5 +994,26 @@ export const getCalendar = createServerFn({ method: 'GET' })
           : null,
       })
     }
-    return { days, markets: inMonth.length ? toSplitView(splitByMarket(inMonth)) : null }
+    // Each week's closes through the same split as its days, so a week and
+    // the days in it cannot disagree.
+    const weeks = monthWeeks(first.slice(0, 7)).map((dates): CalendarWeek => {
+      const from = dates[0] ?? first
+      const to = dates.at(-1) ?? last
+      const closes = inMonth.filter((close) => close.tradeDate >= from && close.tradeDate <= to)
+      return {
+        from,
+        to,
+        markets: closes.length ? toSplitView(splitByMarket(closes)) : null,
+        tradeCount: days
+          .filter((day) => day.date >= from && day.date <= to)
+          .reduce((count, day) => count + day.tradeCount, 0),
+      }
+    })
+
+    return {
+      days,
+      weeks,
+      markets: inMonth.length ? toSplitView(splitByMarket(inMonth)) : null,
+      summary: summarizeMonth(days),
+    }
   })

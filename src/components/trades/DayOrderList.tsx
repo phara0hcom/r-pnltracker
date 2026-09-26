@@ -29,11 +29,14 @@ export function DayOrderList<T extends DayOrderItem>({
   items,
   onChange,
   label,
+  showAccount = true,
 }: {
   items: T[]
   onChange: (next: T[]) => void
   /** Names the list for screen readers, e.g. the date. */
   label: string
+  /** Off when every row is in one account, where the column repeats itself. */
+  showAccount?: boolean
 }) {
   const move = (from: number, to: number) => {
     const next = [...items]
@@ -43,24 +46,29 @@ export function DayOrderList<T extends DayOrderItem>({
   }
 
   return (
-    <ol className={styles.list} aria-label={label}>
+    <ol className={cx(styles.list, !showAccount && styles.oneAccount)} aria-label={label}>
       {items.map((item, index) => {
         const isOpen = item.side === 'BUY' || item.side === 'REINVEST'
         const name = `${item.side} ${qty(item.quantity)} ${item.symbol}`
         return (
           <li key={item.id} className={styles.row}>
             <span className={styles.position}>{index + 1}</span>
-            <span className={styles.symbol}>{item.symbol}</span>
-            <span className={styles.account}>
-              {ACCOUNT_LABEL[item.accountType] ?? item.accountType}
+            {/* One cell per field on a desktop; two lines on a phone. */}
+            <span className={styles.what}>
+              <span className={cx(styles.side, isOpen ? styles.sideBuy : styles.sideSell)}>
+                {item.side}
+              </span>
+              <span className={styles.symbol}>{item.symbol}</span>
+              {showAccount ? (
+                <span className={styles.account}>
+                  {ACCOUNT_LABEL[item.accountType] ?? item.accountType}
+                </span>
+              ) : null}
+              <span className={styles.size}>
+                {qty(item.quantity)} @ {item.price}
+              </span>
+              {item.isNew ? <span className={styles.tag}>new</span> : <span />}
             </span>
-            <span className={cx(styles.side, isOpen ? styles.sideBuy : styles.sideSell)}>
-              {item.side}
-            </span>
-            <span className={styles.size}>
-              {qty(item.quantity)} @ {item.price}
-            </span>
-            {item.isNew ? <span className={styles.tag}>new</span> : <span />}
             <span className={styles.moves}>
               <button
                 type="button"

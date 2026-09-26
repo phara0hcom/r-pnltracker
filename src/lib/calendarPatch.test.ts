@@ -43,9 +43,19 @@ const note = (title: string): CalendarDay['note'] => ({
 
 const month = (): CalendarMonth => ({
   markets: null,
+  weeks: [],
+  summary: {
+    tradingDays: 1,
+    closeDays: 1,
+    greenDays: 1,
+    redDays: 0,
+    best: { date: '2026-08-03', realizedJpy: '12000' },
+    worst: null,
+    avgPerTradingDayJpy: '12000',
+  },
   days: [
-    { date: '2026-08-03', realizedJpy: '12000', markets: { jpyRealizedJpy: '12000', usdRealizedUsd: null, usdRealizedJpy: null, totalJpy: '12000' }, tradeCount: 2, ordered: false, trades: [trade('a'), trade('b')], note: null },
-    { date: '2026-08-04', realizedJpy: null, markets: null, tradeCount: 0, ordered: false, trades: [], note: note('kept') },
+    { date: '2026-08-03', realizedJpy: '12000', markets: { jpyRealizedJpy: '12000', usdRealizedUsd: null, usdRealizedJpy: null, totalJpy: '12000' }, tradeCount: 2, paidJpy: '0', receivedJpy: '0', ordered: false, trades: [trade('a'), trade('b')], note: null },
+    { date: '2026-08-04', realizedJpy: null, markets: null, tradeCount: 0, paidJpy: '0', receivedJpy: '0', ordered: false, trades: [], note: note('kept') },
   ],
 })
 

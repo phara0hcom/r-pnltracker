@@ -14,6 +14,14 @@
   flex-direction: row;
   gap: var(--space-6);
   align-items: center;
+
+  /* Stacked on a phone: side by side, the chart was squeezed into the space
+     the figure left and its date labels ran into each other. */
+  @include m.mobile {
+    flex-direction: column;
+    gap: var(--space-4);
+    align-items: stretch;
+  }
 }
 
 .main {
@@ -22,12 +30,29 @@
 }
 
 .withAside .main {
-  flex: none;
+  /* Shares the row rather than taking its text's full width: a long line in
+     the figures — the currency note — otherwise left the chart a sliver. */
+  flex: 1 1 0;
+  min-width: 0;
+
+  @include m.mobile {
+    flex: none;
+  }
 }
 
 .aside {
   flex: 1;
   min-width: 0;
+
+  .withAside & {
+    flex: 0 1 38%;
+    min-width: 11rem;
+
+    @include m.mobile {
+      flex: none;
+      min-width: 0;
+    }
+  }
 }
 
 .label {

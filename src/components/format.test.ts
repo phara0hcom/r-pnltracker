@@ -6,7 +6,7 @@
  * shows the wrong figure, correctly formatted, and is believed.
  */
 import { describe, expect, it } from 'vitest'
-import { money, moneySigned, tone, yen, yenSigned } from './format'
+import { dollarsCompact, money, moneySigned, pctSigned, tone, yen, yenCompact, yenSigned } from './format'
 
 describe('money', () => {
   it('groups dollars, exactly as lib/exit/rules.ts does', () => {
@@ -15,7 +15,7 @@ describe('money', () => {
     // same number written both ways an inch apart. Both must produce
     // `$1,500.00`; if `money` in rules.ts changes, this has to change with it.
     expect(money(1500, 'USD')).toBe('$1,500.00')
-    expect(money(-15000, 'USD')).toBe('$-15,000.00')
+    expect(money(-15000, 'USD')).toBe('−$15,000.00')
   })
 
   it('keeps two decimals on dollars, whatever the input has', () => {
@@ -46,12 +46,21 @@ describe('moneySigned', () => {
     expect(moneySigned(1500, 'USD')).toBe('+$1,500.00')
   })
 
-  it('leaves the minus where the currency symbol puts it', () => {
-    // Inside the symbol, matching `yenSigned` — the app has printed losses this
-    // way on every screen since before this function existed, and one card
-    // reading `−¥84,000` while the rest read `¥-84,000` is worse than either.
-    expect(moneySigned(-84000, 'JPY')).toBe('¥-84,000')
-    expect(moneySigned(-15000, 'USD')).toBe('$-15,000.00')
+  it('puts the minus sign before the currency symbol', () => {
+    // The same on every screen, through these functions — one card reading
+    // `−¥84,000` while the rest read `¥-84,000` is worse than either. U+2212,
+    // not a hyphen, so it lines up with the plus in tabular figures.
+    expect(moneySigned(-84000, 'JPY')).toBe('−¥84,000')
+    expect(moneySigned(-15000, 'USD')).toBe('−$15,000.00')
+    expect(yenSigned(-84000)).toBe('−¥84,000')
+    expect(yen(-84000)).toBe('−¥84,000')
+  })
+
+  it('drops a sign the rounding took away', () => {
+    expect(yenSigned(-0.4)).toBe('¥0')
+    expect(yenSigned(0.4)).toBe('¥0')
+    expect(moneySigned(-0.004, 'USD')).toBe('$0.00')
+    expect(yenSigned(-0.5)).toBe('−¥1')
   })
 
   it('does not sign zero, which has no direction', () => {
@@ -67,6 +76,31 @@ describe('yen', () => {
   it('groups thousands', () => {
     expect(yen(1234567)).toBe('¥1,234,567')
     expect(yenSigned(500)).toBe('+¥500')
+  })
+})
+
+describe('pctSigned', () => {
+  it('signs a return both ways', () => {
+    expect(pctSigned(0.051)).toBe('+5.1%')
+    expect(pctSigned(-0.0331)).toBe('−3.3%')
+    expect(pctSigned(0)).toBe('0.0%')
+    expect(pctSigned(null)).toBe('—')
+  })
+})
+
+describe('yenCompact', () => {
+  it('shortens for a label, keeping a decimal below ten thousand', () => {
+    expect(yenCompact(93807)).toBe('+¥94k')
+    expect(yenCompact(-56316)).toBe('−¥56k')
+    expect(yenCompact(7400)).toBe('+¥7.4k')
+    expect(yenCompact(1558843)).toBe('+¥1.56M')
+    expect(yenCompact(640)).toBe('+¥640')
+    expect(yenCompact(100000, false)).toBe('¥100k')
+  })
+
+  it('has a dollar twin', () => {
+    expect(dollarsCompact(-346)).toBe('−$346')
+    expect(dollarsCompact(1250)).toBe('+$1.3k')
   })
 })
 

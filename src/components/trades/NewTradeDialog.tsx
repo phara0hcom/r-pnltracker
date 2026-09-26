@@ -10,6 +10,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { FormField } from './FormField'
 import styles from './NewTradeDialog.module.scss'
+import { useDialogHistory } from '~/components/ui/useDialogHistory'
 import { cx } from '~/lib/cx'
 import { todayLocal } from '~/lib/localDate'
 import { addTrade } from '~/server/trades'
@@ -60,6 +61,9 @@ export function NewTradeDialog({
   onOpenChange: (open: boolean) => void
   onCreated: () => void
 }) {
+  useDialogHistory(open, () => {
+    onOpenChange(false)
+  })
   const [form, setForm] = useState<Form>(blank)
   const [errors, setErrors] = useState<Record<string, string>>({})
 

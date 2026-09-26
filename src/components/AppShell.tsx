@@ -19,6 +19,7 @@ import {
   subscribePageTitle,
 } from '~/components/screen/pageTitle'
 import { RouteProgress, useRouteLoading } from '~/components/ui/RouteProgress'
+import { useDialogHistory } from '~/components/ui/useDialogHistory'
 import { useSidebarCollapsed } from '~/components/ui/useSidebarCollapsed'
 import { cx } from '~/lib/cx'
 import type { SessionUser } from '~/lib/session'
@@ -44,6 +45,10 @@ export function AppShell({
 }) {
   const loading = useRouteLoading()
   const [menuOpen, setMenuOpen] = useState(false)
+  // Back closes the drawer on a phone, where it covers the whole screen.
+  useDialogHistory(menuOpen, () => {
+    setMenuOpen(false)
+  })
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
   const router = useRouter()
 

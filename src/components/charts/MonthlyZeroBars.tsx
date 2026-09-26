@@ -1,19 +1,14 @@
 import type { WindowNav } from './MonthlyPnlChart'
 import styles from './MonthlyZeroBars.module.scss'
 import { ZeroBar } from './ZeroBar'
+import { pctSigned, yenCompact } from '~/components/format'
 import { cx } from '~/lib/cx'
 import type { MonthlyPoint } from '~/server/portfolio'
 
-const short = (month: string) => `${month.slice(5)}/${month.slice(2, 4)}`
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-/** Compact axis-style labels: +¥1.23M / −¥340k — matches `MonthlyPnlChart`'s own rounding. */
-const compact = (amount: number) => {
-  const magnitude = Math.abs(amount)
-  const sign = amount < 0 ? '−' : '+'
-  if (magnitude >= 1_000_000) return `${sign}¥${(magnitude / 1_000_000).toFixed(2)}M`
-  if (magnitude >= 1_000) return `${sign}¥${String(Math.round(magnitude / 1_000))}k`
-  return `${sign}¥${String(Math.round(magnitude))}`
-}
+/** `2026-09` → `Sep 2026` — `09/26` read as a day of the month. */
+const label = (month: string) => `${MONTHS[Number(month.slice(5, 7)) - 1] ?? ''} ${month.slice(0, 4)}`
 
 /**
  * Monthly realized P&L as zero-origin rows — the SP replacement for
@@ -67,8 +62,9 @@ export function MonthlyZeroBars({ data, nav }: { data: MonthlyPoint[]; nav?: Win
 
       <div className={styles.header} aria-hidden="true">
         <span className={styles.month}>Month</span>
-        <span className={styles.headerMid}>loss ← ¥0 → profit</span>
+        <span className={styles.headerMid}>loss · ¥0 · profit</span>
         <span className={styles.net}>Net</span>
+        <span className={styles.pct}>%</span>
       </div>
 
       {data.map((point) => {
@@ -76,7 +72,7 @@ export function MonthlyZeroBars({ data, nav }: { data: MonthlyPoint[]; nav?: Win
         const zero = point.tradeCount === 0
         return (
           <div key={point.month} className={styles.row}>
-            <span className={styles.month}>{short(point.month)}</span>
+            <span className={styles.month}>{label(point.month)}</span>
             <div className={styles.track}>
               <ZeroBar value={value} maxPos={maxPos} maxNeg={maxNeg} />
             </div>
@@ -86,8 +82,9 @@ export function MonthlyZeroBars({ data, nav }: { data: MonthlyPoint[]; nav?: Win
                 zero ? styles.muted : value >= 0 ? styles.profit : styles.loss,
               )}
             >
-              {zero ? '·' : compact(value)}
+              {zero ? '·' : yenCompact(value)}
             </span>
+            <span className={styles.pct}>{zero || point.returnPct == null ? '' : pctSigned(point.returnPct)}</span>
           </div>
         )
       })}

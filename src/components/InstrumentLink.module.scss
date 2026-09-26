@@ -45,6 +45,18 @@
   }
 }
 
+/* Its own colour, so the link's hover colour does not reach it. */
+.badge {
+  flex: none;
+  padding: 0 5px;
+  margin-left: 6px;
+  font-size: 0.6875rem;
+  font-weight: var(--weight-normal);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  background-color: var(--color-surface-hover);
+  border-radius: var(--radius-sm);
+}
 
 .compact .symbol {
   font-size: var(--text-sm);
@@ -61,6 +73,10 @@
 
   &:hover .symbol {
     color: var(--color-accent);
+  }
+
+  /* On the text alone, so the underline does not run on under the badge. */
+  &:hover .symbolText {
     text-decoration: underline;
   }
 

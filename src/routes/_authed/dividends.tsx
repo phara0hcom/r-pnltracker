@@ -349,9 +349,8 @@ function Dividends() {
             ? `${String(totals.count)} payment${totals.count === 1 ? '' : 's'} · ${yen(totals.gross)} gross`
             : `${String(totals.count)} payment${totals.count === 1 ? '' : 's'} · ${yen(totals.gross)} gross · from 取引残高報告書 statements`
         }
-      >
-        <AccountFilterControl value={account} onChange={setAccount} />
-      </PageHeader>
+        filter={<AccountFilterControl value={account} onChange={setAccount} />}
+      />
 
       <div className={styles.heroRow}>
         <HeroStat

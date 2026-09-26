@@ -34,3 +34,17 @@
     background-color: var(--color-accent);
   }
 }
+
+/* A phone: the three buckets share the row, each a comfortable target. */
+.fill {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  border-radius: 10px;
+
+  .item {
+    min-height: 40px;
+    font-size: var(--text-base);
+    border-radius: var(--radius-md);
+  }
+}

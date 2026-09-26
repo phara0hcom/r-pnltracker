@@ -26,6 +26,12 @@
   &:hover {
     color: var(--color-text);
   }
+
+  /* Thumb-sized on a phone, where it is tapped rather than clicked. */
+  @include m.mobile {
+    min-height: 40px;
+    font-size: var(--text-sm);
+  }
 }
 
 .active,

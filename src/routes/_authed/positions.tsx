@@ -1,19 +1,39 @@
 /**
- * Open positions.
+ * Open positions, grouped by account.
  *
  * Sorting is client-side over rows already in memory: the account filter is a
  * loader dependency and sorting deliberately is not, so clicking a header
  * reorders instantly rather than making a round trip for the same rows back in
- * a different order.
+ * a different order. It orders rows within each account; the accounts keep
+ * their own order, largest first, so a sort never scatters one account's
+ * holdings among another's.
+ *
+ * Every total — the book, each account, each row's weight — is summed on the
+ * server. This screen used to add them up in the browser from the strings the
+ * server had kept exact on purpose.
  */
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useCallback, useMemo } from 'react'
 import styles from './positions.module.scss'
 import { AccountDot } from '~/components/AccountDot'
-import { ACCOUNT_LABEL, ASSET_LABEL, money, moneySigned, pct, qty, tone, yen, yenSigned } from '~/components/format'
+import {
+  ACCOUNT_LABEL,
+  ACCOUNT_TITLE,
+  ASSET_LABEL,
+  ASSET_TAG,
+  money,
+  moneySigned,
+  pct,
+  pctSigned,
+  qty,
+  tone,
+  yen,
+  yenSigned,
+} from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
-import { Empty, HeroStat, PageHeader, SegmentedTabs, SortHeader, StatStrip, StripCell, Table } from '~/components/screen'
+import { PositionsSummary, UnpricedNotice } from '~/components/positions/PositionsSummary'
+import { Empty, PageHeader, SegmentedTabs, SortHeader, Table } from '~/components/screen'
 import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
 import { ColumnMenu } from '~/components/ui/ColumnMenu'
@@ -21,11 +41,13 @@ import { ExportButton } from '~/components/ui/ExportButton'
 import { useColumnVisibility } from '~/components/ui/useColumnVisibility'
 import { useIsMobile } from '~/components/ui/useIsMobile'
 import { cx } from '~/lib/cx'
+import type { AccountFilter } from '~/lib/domain/types'
 import { positionsCsv, positionsCsvFilename } from '~/lib/export/positionsCsv'
+import type { AccountTotal, PositionTotal } from '~/lib/pnl/positionSummary'
 import { POSITION_SORTABLE, positionSearchSchema, type PositionSortKey } from '~/lib/positionSearch'
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
 import type { TableColumn } from '~/lib/table/columns'
-import { getPositions, type PositionRow } from '~/server/screens'
+import { getPositions, type PositionRow, type PositionsData } from '~/server/screens'
 
 interface PositionColumn extends SortColumn<PositionRow> {
   label: string
@@ -38,15 +60,12 @@ interface PositionColumn extends SortColumn<PositionRow> {
   locked?: boolean
   /** The cell's content. */
   cell: (row: PositionRow) => React.ReactNode
-  /** Profit/loss tint, for the columns that carry one. */
-  tone?: (row: PositionRow) => string | undefined
-}
-
-const ACCOUNT_COLOR: Record<string, string> = {
-  SPECIFIC: 'var(--color-specific)',
-  NISA_GROWTH: 'var(--color-nisa-growth)',
-  NISA_TSUMITATE: 'var(--color-nisa-tsumitate)',
-  NISA_OLD: 'var(--color-nisa-old)',
+  /** Profit/loss tint, or the muted tone of a supporting figure. */
+  tint?: (row: PositionRow) => string | undefined
+  /** The account's or the book's figure, for the columns that total. */
+  total?: (total: PositionTotal) => React.ReactNode
+  /** The total's tint. */
+  totalTint?: (total: PositionTotal) => string | undefined
 }
 
 /**
@@ -75,28 +94,52 @@ function Dual({
   )
 }
 
-const signedPct = (value: number) => `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}%`
+/**
+ * A price as the instrument is quoted: dollars or yen a share, or for a fund
+ * yen per 10,000 口, marked so — ¥37,410 for one 口 would be absurd.
+ */
+function Quoted({ row, value }: { row: PositionRow; value: string }) {
+  return (
+    <>
+      {money(value, row.currency)}
+      {row.assetClass === 'FUND' ? <span className={styles.unit}>/万口</span> : null}
+    </>
+  )
+}
+
+const quantityOf = (row: PositionRow) =>
+  row.assetClass === 'FUND' ? `${qty(row.quantity)} 口` : qty(row.quantity)
 
 /**
  * The tint class for a signed figure, or nothing where it has no direction.
  *
  * `tone` answers 'flat' for a zero and for a missing figure alike, and there is
  * no `.flat` rule for it to match — handing it to a cell's `className` puts a
- * class in the DOM that styles nothing. A column's `tone` is typed to return
- * `undefined` for exactly that case, so the flat name stops here.
+ * class in the DOM that styles nothing.
  */
 const toneClass = (value: string | number | null | undefined): string | undefined => {
   const name = tone(value)
-  return name === 'flat' ? undefined : name
+  return name === 'flat' ? undefined : styles[name]
 }
 
+const unrealizedTitle = (row: PositionRow) =>
+  [
+    `On price: (price − average buy) × shares, before commission`,
+    row.usdJpy == null ? null : `Yen at ¥${row.usdJpy}/$`,
+    row.unrealizedTaxJpy == null
+      ? null
+      : `For tax: ${yenSigned(row.unrealizedTaxJpy)}, against the yen paid at each buy's rate`,
+  ]
+    .filter((line) => line != null)
+    .join('\n')
+
 /**
- * Label, alignment, sort value and cell for each column, keyed by its sort key.
+ * Label, alignment, sort value, cell and total for each column, keyed by its
+ * sort key.
  *
- * One definition drives the header row, the body, the ordering and the caption,
- * all rendered in `POSITION_SORTABLE` order — so a column cannot end up
- * labelled one thing and sorted by another, and reordering the list moves the
- * header and its figures together rather than sliding them out of step.
+ * One definition drives the header row, the body, the account rows, the total
+ * and the caption, all rendered in `POSITION_SORTABLE` order — so a column
+ * cannot end up labelled one thing and sorted by another.
  *
  * Every money field arrives as an exact decimal string, hence `numeric` on all
  * of them: compared as text, "9" would sort above "10".
@@ -106,47 +149,46 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
     label: 'Instrument',
     locked: true,
     value: (row) => row.symbol,
-    cell: (row) => <InstrumentLink symbol={row.symbol} name={row.name} assetClass={row.assetClass} />,
-  },
-  accountType: {
-    label: 'Account',
-    // Sort by the label shown, not the raw enum, so the order matches the
-    // column as read — 特定 and NISA 成長 do not collate like SPECIFIC and
-    // NISA_GROWTH.
-    value: (row) => ACCOUNT_LABEL[row.accountType] ?? row.accountType,
     cell: (row) => (
-      <span className={styles.accountCell}>
-        <AccountDot accountType={row.accountType} />
-        {ACCOUNT_LABEL[row.accountType] ?? row.accountType}
-      </span>
+      <InstrumentLink
+        symbol={row.symbol}
+        name={row.name}
+        assetClass={row.assetClass}
+        badge={ASSET_TAG[row.assetClass]}
+      />
     ),
-  },
-  assetClass: {
-    label: 'Class',
-    value: (row) => ASSET_LABEL[row.assetClass] ?? row.assetClass,
-    cell: (row) => ASSET_LABEL[row.assetClass] ?? row.assetClass,
   },
   quantity: {
     label: 'Qty',
     numeric: true,
     locked: true,
     value: (row) => row.quantity,
-    cell: (row) => qty(row.quantity),
+    cell: quantityOf,
   },
   /*
-   * Avg cost and Price render the native figure — $150 sits in the same column
+   * Avg cost and Price render the quoted figure — $150 sits in the same column
    * as ¥3,000 — and sort on exactly that. The alternative, sorting a USD row by
    * a hidden JPY equivalent, would order the table by numbers it does not show.
-   * So USD and JPY rows interleave by raw magnitude; the JPY columns beside
-   * them (Cost basis, Value, Unrealized) are the ones that compare across the
-   * whole book.
+   * The yen columns beside them are the ones that compare across the book.
    */
   avgCost: {
     label: 'Avg cost',
     numeric: true,
-    value: (row) => (row.currency === 'USD' ? row.avgPriceNative : row.avgCostPerUnit),
+    value: (row) => row.avgPriceQuoted,
+    cell: (row) => <Quoted row={row} value={row.avgPriceQuoted} />,
+    tint: () => styles.muted,
+  },
+  price: {
+    label: 'Price',
+    numeric: true,
+    locked: true,
+    value: (row) => row.priceQuoted,
     cell: (row) =>
-      row.currency === 'USD' ? `$${Number(row.avgPriceNative).toFixed(2)}` : yen(row.avgCostPerUnit),
+      row.priceQuoted == null ? (
+        <span className={styles.noPrice}>No price</span>
+      ) : (
+        <Quoted row={row} value={row.priceQuoted} />
+      ),
   },
   costBasisJpy: {
     label: 'Cost basis',
@@ -164,18 +206,7 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
           title={`Paid ${yen(row.costBasisJpy)}, each buy in yen at its own day's rate — the tax cost basis`}
         />
       ),
-  },
-  price: {
-    label: 'Price',
-    numeric: true,
-    locked: true,
-    value: (row) => row.currentPrice,
-    cell: (row) =>
-      row.currentPrice == null
-        ? '—'
-        : row.currency === 'USD'
-          ? `$${Number(row.currentPrice).toFixed(2)}`
-          : yen(row.currentPrice),
+    total: (total) => yen(total.costShownJpy),
   },
   marketValueJpy: {
     label: 'Value',
@@ -187,6 +218,17 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
       ) : (
         <Dual usd={row.marketValueUsd} jpy={row.marketValueJpy} />
       ),
+    tint: () => styles.strong,
+    total: (total) => yen(total.marketValueJpy),
+  },
+  weight: {
+    label: 'Weight',
+    numeric: true,
+    value: (row) => row.weight,
+    cell: (row) => pct(row.weight),
+    tint: () => styles.muted,
+    total: (total) => pct(total.weight),
+    totalTint: () => styles.muted,
   },
   unrealizedJpy: {
     label: 'Unrealized',
@@ -196,31 +238,22 @@ const COLUMNS: Record<PositionSortKey, PositionColumn> = {
       row.unrealizedUsd == null ? (
         yenSigned(row.unrealizedJpy)
       ) : (
-        <Dual
-          usd={row.unrealizedUsd}
-          jpy={row.unrealizedJpy}
-          signed
-          title={[
-            `On price: (price − average buy) × shares, before commission`,
-            row.usdJpy == null ? null : `Yen at ¥${row.usdJpy}/$`,
-            row.unrealizedTaxJpy == null
-              ? null
-              : `For tax: ${yenSigned(row.unrealizedTaxJpy)}, against the yen paid at each buy's rate`,
-          ]
-            .filter((line) => line != null)
-            .join('\n')}
-        />
+        <Dual usd={row.unrealizedUsd} jpy={row.unrealizedJpy} signed title={unrealizedTitle(row)} />
       ),
-    tone: (row) => toneClass(row.unrealizedJpy),
+    tint: (row) => toneClass(row.unrealizedJpy),
+    total: (total) => yenSigned(total.unrealizedJpy),
+    totalTint: (total) => toneClass(total.unrealizedJpy),
   },
   unrealizedPct: {
     label: '%',
     numeric: true,
     value: (row) => row.unrealizedPct,
-    cell: (row) => pct(row.unrealizedPct),
+    cell: (row) => pctSigned(row.unrealizedPct),
     // Tinted off the yen figure, not the percentage, so the two cells always
-    // agree — `pct` shows a dash where `unrealizedPct` is null.
-    tone: (row) => toneClass(row.unrealizedJpy),
+    // agree — `pctSigned` shows a dash where `unrealizedPct` is null.
+    tint: (row) => toneClass(row.unrealizedJpy),
+    total: (total) => pctSigned(total.unrealizedPct),
+    totalTint: (total) => toneClass(total.unrealizedJpy),
   },
 }
 
@@ -267,80 +300,106 @@ export const Route = createFileRoute('/_authed/positions')({
   component: Positions,
 })
 
-/** Segmented allocation-by-account bar, with a legend on PC. */
-function AllocationBar({
-  segments,
-}: {
-  segments: { label: string; value: string; pct: number; color: string }[]
-}) {
-  if (segments.length === 0) return null
+interface Group {
+  /** Null when the screen shows one account and needs no headings. */
+  total: AccountTotal | null
+  rows: PositionRow[]
+}
 
+/**
+ * The sorted rows cut into accounts, in the server's account order.
+ *
+ * Under 特定 there is one account and a heading repeating the filter would
+ * say nothing, so the rows stay one list.
+ */
+function groupRows(data: PositionsData, sorted: PositionRow[], account: AccountFilter): Group[] {
+  if (account === 'SPECIFIC') return [{ total: null, rows: sorted }]
+  return data.accounts.map((entry) => ({
+    total: entry,
+    rows: sorted.filter((row) => row.accountType === entry.accountType),
+  }))
+}
+
+const positionsLabel = (count: number) => `${String(count)} position${count === 1 ? '' : 's'}`
+
+/**
+ * An account's heading row, or the book's total at the foot: the label across
+ * the columns with no total, then each shown column's own total beneath it.
+ */
+function TotalRow({
+  total,
+  label,
+  scope,
+  leading,
+  totalled,
+  className,
+}: {
+  total: PositionTotal
+  label: React.ReactNode
+  /** `rowgroup` for an account's heading, which labels the rows under it. */
+  scope: 'row' | 'rowgroup'
+  leading: number
+  totalled: readonly PositionSortKey[]
+  className: string | undefined
+}) {
   return (
-    <div className={styles.allocation}>
-      <div className={styles.allocationTrack}>
-        {segments.map((segment) => (
-          <span
-            key={segment.label}
-            className={styles.allocationSegment}
-            style={{ width: `${String(segment.pct * 100)}%`, backgroundColor: segment.color }}
-          />
-        ))}
-      </div>
-      <div className={styles.allocationLegend}>
-        {segments.map((segment) => (
-          <span key={segment.label} className={styles.allocationItem}>
-            <span className={styles.allocationSwatch} style={{ backgroundColor: segment.color }} />
-            {segment.label}
-            <span className={styles.allocationValue}>{segment.value}</span>
-          </span>
-        ))}
-      </div>
-    </div>
+    <tr className={className}>
+      <th scope={scope} colSpan={leading}>
+        {label}
+      </th>
+      {totalled.map((key) => (
+        <td key={key} data-numeric="" className={COLUMNS[key].totalTint?.(total)}>
+          {COLUMNS[key].total?.(total)}
+        </td>
+      ))}
+    </tr>
   )
 }
 
-/** SP replacement for a table row — a card with the same figures, no sideways scroll. */
-function PositionCard({
-  row,
-}: {
-  row: PositionRow
-}) {
-  const priceLabel =
-    row.currentPrice == null
-      ? '—'
-      : row.currency === 'USD'
-        ? `$${Number(row.currentPrice).toFixed(2)}`
-        : yen(row.currentPrice)
-  const unrealValue = row.unrealizedJpy == null ? null : Number(row.unrealizedJpy)
-  const unrealLabel =
-    row.unrealizedUsd != null
-      ? moneySigned(row.unrealizedUsd, 'USD')
-      : unrealValue == null
-        ? '—'
-        : yenSigned(unrealValue)
-  const unrealTone = unrealValue == null ? 'flat' : tone(unrealValue)
+/** The account's dot, full name and holding count. */
+function GroupName({ total }: { total: AccountTotal }) {
+  return (
+    <span className={styles.groupName}>
+      <AccountDot accountType={total.accountType} />
+      {ACCOUNT_TITLE[total.accountType] ?? total.accountType}
+      <span className={styles.groupCount}>{positionsLabel(total.count)}</span>
+    </span>
+  )
+}
+
+/** SP: one holding as two lines — what it is and is worth, then how many at what. */
+function PositionCard({ row }: { row: PositionRow }) {
+  const isFund = row.assetClass === 'FUND'
+  const avg = `avg ${money(row.avgPriceQuoted, row.currency)}`
+  const detail = isFund
+    ? row.priceQuoted == null
+      ? `${quantityOf(row)} · ${avg}`
+      : `${money(row.priceQuoted, row.currency)}/万口 · ${avg}`
+    : row.priceQuoted == null
+      ? `${qty(row.quantity)} · ${avg}`
+      : `${qty(row.quantity)} × ${money(row.priceQuoted, row.currency)} · ${avg}`
+  const tint = toneClass(row.unrealizedJpy)
 
   return (
-    <div className={styles.card}>
-      <div className={styles.cardRow}>
+    <li className={styles.card}>
+      <span className={styles.cardWho}>
         <span className={styles.cardSymbol}>{row.symbol}</span>
-        <span className={styles.cardValue}>{row.marketValueJpy == null ? '—' : yen(row.marketValueJpy)}</span>
-      </div>
-      <div className={styles.cardRow}>
-        <span className={styles.cardMeta}>
-          <AccountDot accountType={row.accountType} />
-          <span className={styles.cardMetaText}>
-            {ACCOUNT_LABEL[row.accountType] ?? row.accountType} · {qty(row.quantity)} @ {priceLabel}
-          </span>
+        {isFund ? null : <span className={styles.cardName}>{row.name}</span>}
+      </span>
+      <span className={styles.cardValue}>{row.marketValueJpy == null ? '—' : yen(row.marketValueJpy)}</span>
+      <span className={styles.cardDetail}>{detail}</span>
+      {row.marketValueJpy == null ? (
+        <span className={styles.cardResult}>
+          <span className={styles.noPrice}>No price</span>
         </span>
-        <span
-          className={cx(styles.cardUnreal, unrealTone === 'profit' && styles.profit, unrealTone === 'loss' && styles.loss)}
-        >
-          {unrealLabel}{' '}
-          <span className={styles.cardDim}>{pct(row.unrealizedPct)}</span>
+      ) : (
+        <span className={cx(styles.cardResult, tint)}>
+          {/* A US holding in dollars, as it is judged; its yen is in the table. */}
+          {row.unrealizedUsd == null ? yenSigned(row.unrealizedJpy) : moneySigned(row.unrealizedUsd, 'USD')}{' '}
+          <span className={styles.cardPct}>{pctSigned(row.unrealizedPct)}</span>
         </span>
-      </div>
-    </div>
+      )}
+    </li>
   )
 }
 
@@ -350,11 +409,12 @@ function Positions() {
   const navigate = Route.useNavigate()
   const [account, setAccount] = useAccountFilter()
   const isMobile = useIsMobile()
-  const { data: rows } = useQuery({
+  const { data } = useQuery({
     queryKey: ['positions', account],
     queryFn: () => getPositions({ data: { account } }),
     initialData: initial,
   })
+  const { rows, total } = data
 
   // `replace: true` — re-sorting is refining one view, not a new destination, so
   // Back should leave the screen rather than walk back through every column you
@@ -369,114 +429,50 @@ function Positions() {
     [navigate, sortBy, sortDir],
   )
 
-  /*
-   * `scope=SPECIFIC` narrows to the one taxable account, so the Account column
-   * reads 特定 on every row and says nothing.
-   *
-   * `scope=NISA` deliberately does not: it keeps three frames — 旧NISA, 成長投資枠
-   * and つみたて投資枠 — and which one a row sits in is exactly the distinction
-   * that matters there.
-   */
-  const redundant = useMemo(() => (account === 'SPECIFIC' ? ['accountType'] : []), [account])
-
-  const columns = useColumnVisibility('positions', PICKER, redundant)
+  const columns = useColumnVisibility('positions', PICKER)
   // The rendered order stays `POSITION_SORTABLE`'s, filtered — so re-showing a
   // column puts it back where it was rather than appending it.
   const shown = useMemo(
     () => POSITION_SORTABLE.filter((key) => columns.visible.has(key)),
     [columns.visible],
   )
+  // The account and total rows put their label across the columns that have
+  // no total, which all come before the first that has one.
+  const leading = shown.filter((key) => COLUMNS[key].total == null).length
+  const totalled = shown.filter((key) => COLUMNS[key].total != null)
 
   const sorted = useMemo(() => sortRows(rows, COLUMNS, sortBy, sortDir), [rows, sortBy, sortDir])
+  const groups = useMemo(() => groupRows(data, sorted, account), [data, sorted, account])
 
-  // Exports `sorted`, not `rows` — the file is the table as it stands, account
-  // filter and sort column included, so a spreadsheet opened beside the screen
-  // is not in a different order.
+  // The file is the table as it reads — account by account, each in the
+  // chosen order — so a spreadsheet opened beside the screen matches it.
   const exportFile = useCallback(
     () => ({
       filename: positionsCsvFilename(account),
-      body: positionsCsv(sorted, { account: ACCOUNT_LABEL, assetClass: ASSET_LABEL }),
+      body: positionsCsv(
+        groups.flatMap((group) => group.rows),
+        { account: ACCOUNT_LABEL, assetClass: ASSET_LABEL },
+      ),
     }),
-    [sorted, account],
+    [groups, account],
   )
 
-  // TODO(nit): these totals reconstruct floats from the exact decimal strings
-  // the server deliberately sent as strings, which is the one place the UI does
-  // financial arithmetic — the thing `components/format.ts` and the server-side
-  // formatting exist to prevent. Safe in practice: these are whole yen, and the
-  // portfolio would need to reach ~9×10¹⁵ before a float lost integer precision.
-  // Fix: return the three totals from `getPositions` already summed and
-  // formatted, so the client only renders them.
-  /*
-   * Everything the chrome above the table reads, derived in one pass.
-   *
-   * One memo rather than several: the intermediate `priced` list feeds the
-   * totals, the allocation and the highlights alike, so splitting them would
-   * either recompute it three times or leave it out of the dependency arrays
-   * of the memos that use it — which is how a memo goes quietly stale.
-   */
-  const summary = useMemo(() => {
-    const priced = rows.filter((row) => row.marketValueJpy != null)
-    // The shown cost, not the tax one: a US position's is its dollar cost at
-    // today's rate, so value − cost = unrealized in the totals as on each row.
-    const totalCost = rows.reduce((running, row) => running + Number(row.costShownJpy), 0)
-    const totalValue = priced.reduce((running, row) => running + Number(row.marketValueJpy), 0)
-    const totalUnrealized = priced.reduce((running, row) => running + Number(row.unrealizedJpy), 0)
-
-    const byAccount = new Map<string, number>()
-    for (const row of priced) {
-      byAccount.set(row.accountType, (byAccount.get(row.accountType) ?? 0) + Number(row.marketValueJpy))
-    }
-
-    return {
-      priced,
-      totalCost,
-      usdJpy: rows.find((row) => row.usdJpy != null)?.usdJpy ?? null,
-      totalValue,
-      totalUnrealized,
-      unpriced: rows.length - priced.length,
-      unrealizedPctOfCost: totalCost > 0 ? totalUnrealized / totalCost : null,
-      allocation: [...byAccount.entries()]
-        .sort(([, left], [, right]) => right - left)
-        .map(([accountType, value]) => ({
-          label: ACCOUNT_LABEL[accountType] ?? accountType,
-          value: yen(value),
-          pct: totalValue > 0 ? value / totalValue : 0,
-          color: ACCOUNT_COLOR[accountType] ?? 'var(--color-text-subtle)',
-        })),
-      highlights:
-        priced.length === 0
-          ? null
-          : {
-              largest: priced.reduce((max, row) =>
-                Number(row.marketValueJpy) > Number(max.marketValueJpy) ? row : max,
-              ),
-              best: priced.reduce((max, row) =>
-                (row.unrealizedPct ?? -Infinity) > (max.unrealizedPct ?? -Infinity) ? row : max,
-              ),
-              worst: priced.reduce((min, row) =>
-                (row.unrealizedPct ?? Infinity) < (min.unrealizedPct ?? Infinity) ? row : min,
-              ),
-            },
-    }
-  }, [rows])
-
-  const {
-    priced,
-    totalCost,
-    usdJpy,
-    totalValue,
-    totalUnrealized,
-    unpriced,
-    unrealizedPctOfCost,
-    allocation,
-    highlights,
-  } = summary
+  const meta = [
+    `${String(total.count)} open`,
+    total.unpriced > 0 ? `${String(total.unpriced)} without a price` : null,
+    data.usdJpy == null ? null : `US at ¥${data.usdJpy}/$`,
+  ]
+    .filter((part) => part != null)
+    .join(' · ')
 
   return (
     <>
-      <PageHeader title="Positions" meta={`${String(rows.length)} open · ${yen(totalCost)} cost basis`}>
-        <AccountFilterControl value={account} onChange={setAccount} />
+      <PageHeader
+        title="Positions"
+        meta={meta}
+        filter={<AccountFilterControl value={account} onChange={setAccount} />}
+        actionsBeside
+      >
         <ExportButton file={exportFile} disabled={rows.length === 0}>
           Export CSV
         </ExportButton>
@@ -484,7 +480,6 @@ function Positions() {
           <ColumnMenu
             columns={PICKER}
             hidden={columns.hidden}
-            redundant={redundant}
             hiddenCount={columns.hiddenCount}
             onToggle={columns.toggle}
             onReset={columns.reset}
@@ -492,110 +487,120 @@ function Positions() {
         )}
       </PageHeader>
 
-      <div className={styles.heroRow}>
-        <HeroStat label="Market value" value={priced.length ? yen(totalValue) : '—'}>
-          {priced.length ? (
-            <span className={cx(styles.heroContext, tone(totalUnrealized) === 'profit' && styles.profit, tone(totalUnrealized) === 'loss' && styles.loss)}>
-              {yenSigned(totalUnrealized)} unrealized
-              {unrealizedPctOfCost != null ? ` · ${signedPct(unrealizedPctOfCost)}` : ''}
-              {usdJpy == null ? '' : ` · US in dollars at ¥${usdJpy}/$`}
-            </span>
-          ) : null}
-          {isMobile ? <AllocationBar segments={allocation} /> : null}
-        </HeroStat>
-        <StatStrip>
-          <StripCell label="Open positions" value={rows.length} />
-          <StripCell label="Cost basis" value={yen(totalCost)} />
-          <StripCell
-            label="Largest holding"
-            value={
-              highlights
-                ? `${highlights.largest.symbol} · ${pct(totalValue > 0 ? Number(highlights.largest.marketValueJpy) / totalValue : 0)}`
-                : '—'
-            }
-          />
-          <StripCell
-            label="Best"
-            value={highlights?.best.unrealizedPct != null ? `${highlights.best.symbol} ${signedPct(highlights.best.unrealizedPct)}` : '—'}
-            tone="profit"
-          />
-          <StripCell
-            label="Worst"
-            value={highlights?.worst.unrealizedPct != null ? `${highlights.worst.symbol} ${signedPct(highlights.worst.unrealizedPct)}` : '—'}
-            tone="loss"
-          />
-        </StatStrip>
-      </div>
-
-      {isMobile ? null : <AllocationBar segments={allocation} />}
-
-      {unpriced > 0 ? (
-        <p className={styles.note}>
-          {unpriced} position{unpriced === 1 ? '' : 's'} have no cached price, so no valuation is
-          shown for them. Prices are fetched on visit for US tickers; JP equities and funds need a
-          manual entry in Settings. Sorting by a priced column leaves them at the bottom either way.
-        </p>
-      ) : null}
-
       {rows.length === 0 ? (
         <Empty>No open positions.</Empty>
-      ) : isMobile ? (
-        <>
-          {/* The card list has no headers to click, so sorting needs its own
-              control — without it SP would be the one view you cannot reorder. */}
-          <div className={styles.sortControl}>
-            <SegmentedTabs
-              tabs={SP_SORTS}
-              active={isSpSortKey(sortBy) ? sortBy : 'marketValueJpy'}
-              onChange={onSort}
-              label="Sort by"
-            />
-          </div>
-          <div className={styles.cardList}>
-            {sorted.map((row) => (
-              <PositionCard
-                key={`${row.symbol}-${row.accountType}`}
-                row={row}
-              />
-            ))}
-          </div>
-        </>
       ) : (
-        <Table
-          caption={`Positions, sorted by ${COLUMNS[sortBy].label} ${
-            sortDir === 'asc' ? 'ascending' : 'descending'
-          }`}
-        >
-          <thead>
-            <tr>
-              {shown.map((key) => (
-                <SortHeader
-                  key={key}
-                  col={key}
-                  label={COLUMNS[key].label}
-                  numeric={COLUMNS[key].numeric}
-                  sortBy={sortBy}
-                  sortDir={sortDir}
-                  onSort={onSort}
+        <>
+          <PositionsSummary data={data} account={account} compact={isMobile} />
+          <UnpricedNotice rows={rows} cost={total.unpricedCostJpy} />
+
+          {isMobile ? (
+            <>
+              {/* The card list has no headers to click, so sorting needs its own
+                  control — without it SP would be the one view you cannot reorder. */}
+              <div className={styles.sortControl}>
+                <SegmentedTabs
+                  tabs={SP_SORTS}
+                  active={isSpSortKey(sortBy) ? sortBy : 'marketValueJpy'}
+                  onChange={onSort}
+                  label="Sort by"
                 />
+              </div>
+              {groups.map((group) => (
+                <section
+                  key={group.total?.accountType ?? 'all'}
+                  className={styles.cardGroup}
+                  aria-label={group.total ? ACCOUNT_TITLE[group.total.accountType] : 'Positions'}
+                >
+                  {group.total ? (
+                    <div className={styles.cardGroupHead}>
+                      <GroupName total={group.total} />
+                      <span className={styles.cardGroupFigures}>
+                        {yen(group.total.marketValueJpy)}
+                        <span className={cx(styles.cardPct, toneClass(group.total.unrealizedJpy))}>
+                          {pctSigned(group.total.unrealizedPct)}
+                        </span>
+                      </span>
+                    </div>
+                  ) : null}
+                  <ul className={styles.cardList}>
+                    {group.rows.map((row) => (
+                      <PositionCard key={`${row.symbol}-${row.accountType}`} row={row} />
+                    ))}
+                  </ul>
+                </section>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((row) => (
-              <tr key={`${row.symbol}-${row.accountType}`}>
-                {shown.map((key) => {
-                  const column = COLUMNS[key]
-                  return (
-                    <td key={key} data-numeric={column.numeric ? '' : undefined} className={column.tone?.(row)}>
-                      {column.cell(row)}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+            </>
+          ) : (
+            <Table
+              caption={`Positions${account === 'SPECIFIC' ? '' : ' by account'}, sorted by ${
+                COLUMNS[sortBy].label
+              } ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
+            >
+              <thead>
+                <tr>
+                  {shown.map((key) => (
+                    <SortHeader
+                      key={key}
+                      col={key}
+                      label={COLUMNS[key].label}
+                      numeric={COLUMNS[key].numeric}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={onSort}
+                    />
+                  ))}
+                </tr>
+              </thead>
+              {groups.map((group) => (
+                <tbody key={group.total?.accountType ?? 'all'} className={styles.group}>
+                  {group.total ? (
+                    <TotalRow
+                      total={group.total}
+                      label={<GroupName total={group.total} />}
+                      scope="rowgroup"
+                      leading={leading}
+                      totalled={totalled}
+                      className={styles.groupRow}
+                    />
+                  ) : null}
+                  {group.rows.map((row) => (
+                    <tr key={`${row.symbol}-${row.accountType}`}>
+                      {shown.map((key) => {
+                        const column = COLUMNS[key]
+                        return (
+                          <td
+                            key={key}
+                            data-numeric={column.numeric ? '' : undefined}
+                            className={column.tint?.(row)}
+                          >
+                            {column.cell(row)}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
+              <tfoot>
+                <TotalRow
+                  total={total}
+                  label={`Total · ${positionsLabel(total.count)}`}
+                  scope="row"
+                  leading={leading}
+                  totalled={totalled}
+                  className={styles.totalRow}
+                />
+              </tfoot>
+            </Table>
+          )}
+
+          <p className={styles.footnote}>
+            Avg cost and price are in the instrument&apos;s own currency, funds per 10,000 口 (基準価額).
+            Cost basis, value and unrealized are in yen{data.usdJpy == null ? '' : ', US holdings at today’s rate'}.
+            Percentages leave out holdings with no price.
+          </p>
+        </>
       )}
     </>
   )

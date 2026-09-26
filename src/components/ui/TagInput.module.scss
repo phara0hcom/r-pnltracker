@@ -1,0 +1,94 @@
+@use '../../styles/mixins' as m;
+
+.field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 36px;
+  padding: 4px 6px;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  &:focus-within {
+    box-shadow: var(--focus-ring);
+  }
+
+  @include m.mobile {
+    min-height: 44px;
+    padding: 6px var(--space-2);
+  }
+}
+
+/* `display: contents` so the chips wrap in the field's own flow, beside the input. */
+.chips {
+  display: contents;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  height: 26px;
+  padding: 0 2px 0 10px;
+  font-size: var(--text-xs);
+  background-color: var(--color-surface-hover);
+  border-radius: var(--radius-full);
+
+  @include m.mobile {
+    height: 30px;
+    padding-left: 12px;
+    font-size: var(--text-sm);
+  }
+}
+
+.chipText {
+  max-width: 16rem;
+
+  @include m.truncate;
+}
+
+.remove {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  font-size: var(--text-base);
+  line-height: 1;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-full);
+  place-items: center;
+
+  @include m.interactive-surface;
+
+  &:hover {
+    color: var(--color-text);
+  }
+
+  @include m.mobile {
+    width: 28px;
+    height: 28px;
+    font-size: var(--text-md);
+  }
+}
+
+.input {
+  flex: 1;
+  min-width: 100px;
+  height: 26px;
+  padding: 0 4px;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  outline: none;
+
+  /* 16px, or iOS zooms the page when the field takes focus. */
+  @include m.mobile {
+    height: 30px;
+    font-size: var(--text-md);
+  }
+}

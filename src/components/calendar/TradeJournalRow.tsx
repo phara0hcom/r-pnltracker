@@ -5,28 +5,118 @@
  * impulsive trade, and folding that into a single daily score averages away
  * exactly the signal worth keeping.
  *
+ * Two layouts over one journal: a table row on a desktop, where the figures
+ * line up in columns, and a two-line card on a phone, where they cannot. Both
+ * open the same editor under the trade.
+ *
  * Saving here never touches the trade's figures — it goes through a journal-only
  * server function, so a note can't accidentally mark a row as hand-corrected.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { MOTIVATION_LABELS } from './MoodFace'
+import { ScoreGroup } from './ScoreGroup'
 import styles from './TradeJournalRow.module.scss'
-import { ACCOUNT_LABEL, moneySigned, qty, tone, yen, yenSigned } from '~/components/format'
+import { AccountDot } from '~/components/AccountDot'
+import { ACCOUNT_LABEL, moneySigned, pctSigned, qty, tone, yen, yenSigned } from '~/components/format'
 import { CloseIcon } from '~/components/icons/CloseIcon'
 import { PenIcon } from '~/components/icons/PenIcon'
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { withTradeJournal } from '~/lib/calendarPatch'
 import { cx } from '~/lib/cx'
+import { OPENING_SIDES } from '~/lib/domain/types'
 import { reportError } from '~/lib/observability/report'
 import { saveTradeJournal } from '~/server/notes'
 import type { CalendarMonth, CalendarTrade } from '~/server/screens'
 
-/** Native-currency price. Fund figures already arrive per 10,000 口. */
-const price = (amount: string, currency: string) =>
-  `${currency === 'USD' ? '$' : '¥'}${Number(amount).toLocaleString('en-US', { maximumFractionDigits: 4 })}`
+// ── What a trade reads as ───────────────────────────────────────────────────
 
-export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
+export const isOpening = (trade: Pick<CalendarTrade, 'side'>) => OPENING_SIDES.includes(trade.side)
+
+/**
+ * The figure a close is judged by: dollars for a US close, as Rakuten shows
+ * it, yen for anything else. Its sign decides won or lost.
+ */
+export const judgedBy = (trade: CalendarTrade): string | null => trade.realizedUsd ?? trade.realizedJpy
+
+/** A price in its own currency, as Rakuten quotes it. Funds arrive per 10,000 口. */
+export function unitPrice(amount: string, currency: string, assetClass: string): string {
+  const figure =
+    currency === 'USD'
+      ? `$${Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+      : `¥${Number(amount).toLocaleString('en-US', { maximumFractionDigits: 4 })}`
+  return assetClass === 'FUND' ? `${figure}/万口` : figure
+}
+
+/** `300 × ¥3,905`, or for a fund `52,839 口 at ¥37,410/万口`. */
+export function sizeText(trade: CalendarTrade): string {
+  const price = unitPrice(trade.unitPrice, trade.currency, trade.assetClass)
+  return trade.assetClass === 'FUND' ? `${qty(trade.quantity)} 口 at ${price}` : `${qty(trade.quantity)} × ${price}`
+}
+
+/**
+ * No lot is identified — 移動平均法 pools the units — so this is the pool's
+ * weighted-average cost at the moment of the sale, which is what the realized
+ * figure was actually measured against.
+ */
+const avgCostTitle = (trade: CalendarTrade, avg: string) =>
+  `Closed against a weighted-average cost of ${avg}${
+    trade.holdingDays == null
+      ? ''
+      : `, held ${String(trade.holdingDays)} day${trade.holdingDays === 1 ? '' : 's'} on average`
+  }. Moving-average cost basis pools units, so no single buy is matched to this sale.`
+
+const SIDE_CLASS: Record<string, string | undefined> = {
+  BUY: styles.sideBuy,
+  REINVEST: styles.sideBuy,
+  SELL: styles.sideSell,
+  REDEEM: styles.sideSell,
+}
+
+function SideBadge({ side }: { side: string }) {
+  return <span className={cx(styles.side, SIDE_CLASS[side])}>{side}</span>
+}
+
+function AccountTag({ accountType }: { accountType: string }) {
+  return (
+    <span className={styles.account}>
+      <AccountDot accountType={accountType} />
+      {ACCOUNT_LABEL[accountType] ?? accountType}
+    </span>
+  )
+}
+
+const toneClass = (value: string | number | null | undefined) => {
+  const name = tone(value)
+  return name === 'flat' ? undefined : styles[name]
+}
+
+const cashDirection = (trade: CalendarTrade) =>
+  trade.side === 'REINVEST' ? 'reinvested' : isOpening(trade) ? 'paid' : 'received'
+
+/** A US close's dollars with the yen under them; any other close in yen. */
+function Realized({ trade }: { trade: CalendarTrade }) {
+  if (trade.realizedJpy == null) return <span className={styles.none}>—</span>
+  if (trade.realizedUsd == null) return <>{yenSigned(trade.realizedJpy)}</>
+  return (
+    <span
+      title={[
+        trade.netUsd == null ? null : `${moneySigned(trade.netUsd, 'USD')} after the sell commission as well`,
+        `${yenSigned(trade.realizedJpy)} in yen, the currency move included`,
+      ]
+        .filter((line) => line != null)
+        .join('\n')}
+    >
+      {moneySigned(trade.realizedUsd, 'USD')}
+      <span className={styles.subline}>({yenSigned(trade.realizedJpy)})</span>
+    </span>
+  )
+}
+
+// ── The journal ─────────────────────────────────────────────────────────────
+
+function useTradeJournal(trade: CalendarTrade) {
   const queryClient = useQueryClient()
 
   /** Last persisted values — what Cancel reverts to and what "dirty" compares against. */
@@ -36,7 +126,6 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
   const [memo, setMemo] = useState(savedMemo)
   const [motivation, setMotivation] = useState<number | null>(savedMotivation)
   const [open, setOpen] = useState(false)
-  const [justSaved, setJustSaved] = useState(false)
 
   const hasJournal = Boolean(savedMemo) || savedMotivation != null
   const dirty = memo.trim() !== savedMemo.trim() || motivation !== savedMotivation
@@ -68,11 +157,6 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
 
       setSavedMemo(journal.memo ?? '')
       setSavedMotivation(journal.motivation)
-      setJustSaved(true)
-      setTimeout(() => {
-        setJustSaved(false)
-      }, 1600)
-
       patchCache(journal)
       return previous
     },
@@ -84,226 +168,279 @@ export function TradeJournalRow({ trade }: { trade: CalendarTrade }) {
       if (!previous) return
       setSavedMemo(previous.memo ?? '')
       setSavedMotivation(previous.motivation)
-      setJustSaved(false)
+      setMemo(previous.memo ?? '')
+      setMotivation(previous.motivation)
       patchCache(previous)
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['calendar'] }),
   })
 
-  const commit = () => {
-    save.mutate({ memo: memo.trim() || null, motivation })
+  return {
+    memo,
+    setMemo,
+    motivation,
+    setMotivation,
+    open,
+    savedMemo,
+    savedMotivation,
+    hasJournal,
+    dirty,
+    failed: save.isError,
+    openEditor: () => {
+      setOpen(true)
+    },
+    /** Save and collapse. */
+    commit: () => {
+      save.mutate({ memo: memo.trim() || null, motivation })
+      setOpen(false)
+    },
+    /** Discard edits and collapse. Never writes. */
+    cancel: () => {
+      setMemo(savedMemo)
+      setMotivation(savedMotivation)
+      setOpen(false)
+    },
+    /** Wipe the stored journal for this trade. */
+    clear: () => {
+      setMemo('')
+      setMotivation(null)
+      setOpen(false)
+      save.mutate({ memo: null, motivation: null })
+    },
   }
+}
 
-  /** Discard edits and collapse. Never writes. */
-  const cancel = () => {
-    setMemo(savedMemo)
-    setMotivation(savedMotivation)
-    setOpen(false)
-  }
+type Journal = ReturnType<typeof useTradeJournal>
 
-  /** Wipe the stored journal for this trade. */
-  const clear = () => {
-    setMemo('')
-    setMotivation(null)
-    save.mutate({ memo: null, motivation: null })
-  }
+const noteLabel = (trade: CalendarTrade, journal: Journal) =>
+  `${journal.open ? 'Close note for' : journal.hasJournal ? 'Edit note for' : 'Add a note for'} ${trade.side.toLowerCase()} ${trade.symbol}`
 
-  const isClose = trade.side === 'SELL' || trade.side === 'REDEEM'
-
+/**
+ * A saved note stays readable without reopening the editor, which is the
+ * whole point of writing it down. Pressing it opens the editor.
+ */
+function SavedNote({ journal }: { journal: Journal }) {
   return (
-    <li className={styles.row}>
-      <div className={styles.head}>
-        <InstrumentLink
-          symbol={trade.symbol}
-          name={trade.name}
-          assetClass={trade.assetClass}
-          size="compact"
-        />
-
-        <span className={styles.account}>
-          {ACCOUNT_LABEL[trade.accountType] ?? trade.accountType}
-        </span>
-
-        <span className={cx(styles.side, isClose ? styles.sideSell : styles.sideBuy)}>
-          {trade.side}
-        </span>
-
-        <span className={styles.size}>
-          <span className={styles.qty}>{qty(trade.quantity)}</span>
-          <span className={styles.at}>@ {price(trade.unitPrice, trade.currency)}</span>
-          {/* No lot is identified — 移動平均法 pools the units — so this is the
-              pool's weighted-average cost at the moment of the sale, which is
-              what the realized figure was actually measured against. */}
-          {trade.entryPrice != null ? (
-            <span
-              className={styles.from}
-              title={`Closed against a weighted-average cost of ${price(trade.entryPrice, trade.currency)}${
-                trade.holdingDays == null
-                  ? ''
-                  : `, held ${String(trade.holdingDays)} day${trade.holdingDays === 1 ? '' : 's'} on average`
-              }. Moving-average cost basis pools units, so no single buy is matched to this sale.`}
-            >
-              from {price(trade.entryPrice, trade.currency)}
-            </span>
-          ) : null}
-        </span>
-
-        <span className={styles.amount} title={isClose ? 'Proceeds received' : 'Cash paid'}>
-          {yen(trade.amountJpy)}
-        </span>
-
-        <span className={styles.pnl}>
-          {trade.realizedJpy == null ? (
-            <span className={styles.muted}>—</span>
-          ) : trade.realizedUsd != null ? (
-            // A US close in dollars with its yen in brackets, as Rakuten shows it.
-            <span
-              className={tone(trade.realizedUsd) === 'loss' ? styles.loss : styles.profit}
-              title={[
-                trade.netUsd == null
-                  ? null
-                  : `${moneySigned(trade.netUsd, 'USD')} after the sell commission as well`,
-                `${yenSigned(trade.realizedJpy)} in yen, the currency move included`,
-              ]
-                .filter((line) => line != null)
-                .join('\n')}
-            >
-              {moneySigned(trade.realizedUsd, 'USD')}
-              <span className={styles.aside}>({yenSigned(trade.realizedJpy)})</span>
-            </span>
-          ) : (
-            <span className={tone(trade.realizedJpy) === 'profit' ? styles.profit : styles.loss}>
-              {yenSigned(trade.realizedJpy)}
-            </span>
-          )}
-        </span>
-
-        <span className={styles.pct}>
-          {trade.returnPct == null ? (
-            <span className={styles.muted}>—</span>
-          ) : (
-            <span className={trade.returnPct >= 0 ? styles.profit : styles.loss}>
-              {trade.returnPct >= 0 ? '+' : ''}
-              {(trade.returnPct * 100).toFixed(1)}%
-            </span>
-          )}
-        </span>
-
-        <button
-          type="button"
-          className={cx(styles.toggle, hasJournal && styles.toggleActive)}
-          aria-expanded={open}
-          onClick={() => {
-            if (open) cancel()
-            else setOpen(true)
-          }}
-        >
-          {open ? <CloseIcon /> : <PenIcon />}
-          <span className="visually-hidden">
-            {open ? 'Close note for' : hasJournal ? 'Edit note for' : 'Add note for'}{' '}
-            {trade.symbol}
-          </span>
-        </button>
-      </div>
-
-      {/* Collapsed summary: a saved note stays readable without reopening the
-          editor, which is the whole point of writing it down. */}
-      {!open && hasJournal ? (
-        <button
-          type="button"
-          className={styles.saved}
-          onClick={() => {
-            setOpen(true)
-          }}
-        >
-          {savedMotivation != null ? (
+    <>
+      {journal.failed ? (
+        <p className={styles.failed} role="alert">
+          Could not save that note — it has been put back as it was.
+        </p>
+      ) : null}
+      {journal.hasJournal ? (
+        <button type="button" className={styles.saved} onClick={journal.openEditor}>
+          {journal.savedMotivation != null ? (
             <span className={styles.savedScore}>
-              <span className="visually-hidden">Motivation </span>
-              {savedMotivation}
-              <span aria-hidden="true">/5</span>
+              Motivation {journal.savedMotivation}/5{journal.savedMemo ? ' · ' : ''}
             </span>
           ) : null}
-          {savedMemo ? <span className={styles.savedMemo}>{savedMemo}</span> : null}
+          {journal.savedMemo ? <span className={styles.savedMemo}>{journal.savedMemo}</span> : null}
         </button>
       ) : null}
+    </>
+  )
+}
 
-      {open ? (
-        <div className={styles.journal}>
-          <fieldset className={styles.fieldset}>
-            <legend className={styles.label}>Motivation</legend>
-            <div className={styles.scores}>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <label key={n} className={cx(styles.score, motivation === n && styles.scoreActive)}>
-                  <input
-                    type="radio"
-                    name={`motivation-${trade.id}`}
-                    className="visually-hidden"
-                    checked={motivation === n}
-                    onChange={() => {
-                      setMotivation(n)
-                    }}
-                    onClick={() => {
-                      // Clicking the active value clears it, so "not recorded"
-                      // stays reachable after a mis-click.
-                      if (motivation === n) setMotivation(null)
-                    }}
-                  />
-                  <span aria-hidden="true">{n}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
+function Editor({ trade, journal }: { trade: CalendarTrade; journal: Journal }) {
+  return (
+    <div className={styles.editor}>
+      <ScoreGroup
+        legend="Motivation for this trade"
+        labels={MOTIVATION_LABELS}
+        value={journal.motivation}
+        onChange={journal.setMotivation}
+        name={`motivation-${trade.id}`}
+      />
 
-          <label className={styles.memoField}>
-            <span className={styles.label}>Note</span>
-            <textarea
-              className={styles.memoInput}
-              rows={2}
-              value={memo}
-              placeholder="Why this trade? What would you repeat or avoid?"
-              onChange={(e) => {
-                setMemo(e.target.value)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault()
-                  // The day dialog binds the same chord on its content element.
-                  // Without this the event bubbles on, saving a blank day-level
-                  // note and closing the dialog out from under this trade.
-                  e.stopPropagation()
-                  commit()
-                }
-              }}
-            />
-          </label>
+      <label className={styles.field}>
+        <span className={styles.fieldLabel}>Note</span>
+        <textarea
+          className={styles.memoInput}
+          rows={2}
+          value={journal.memo}
+          placeholder="Why this trade? What would you repeat or avoid?"
+          onChange={(event) => {
+            journal.setMemo(event.target.value)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault()
+              // The day dialog binds the same chord on its content element.
+              // Without this the event bubbles on, saving a blank day-level
+              // note and closing the dialog out from under this trade.
+              event.stopPropagation()
+              journal.commit()
+            }
+          }}
+        />
+      </label>
 
-          <div className={styles.actions}>
-            <button
-              type="button"
-              className={cx(styles.actionButton, styles.primary)}
-              disabled={!dirty}
-              onClick={commit}
-            >
-              {justSaved ? 'Saved' : 'Save'}
-            </button>
+      <div className={styles.actions}>
+        {/* Only once there is something to destroy. */}
+        {journal.hasJournal ? (
+          <ConfirmButton onConfirm={journal.clear} confirmLabel="Delete note?" variant="text" className={styles.delete}>
+            Delete note
+          </ConfirmButton>
+        ) : (
+          <span />
+        )}
+        <span className={styles.actionGroup}>
+          <button type="button" className={styles.button} onClick={journal.cancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={cx(styles.button, styles.primary)}
+            disabled={!journal.dirty}
+            onClick={journal.commit}
+          >
+            Save note
+          </button>
+        </span>
+      </div>
+    </div>
+  )
+}
 
-            {/* Cancel while nothing is stored; once a journal exists the same
-                slot deletes it, so the destructive action only appears when
-                there is actually something to destroy. */}
-            {hasJournal ? (
-              <ConfirmButton onConfirm={clear} confirmLabel="Delete?">
-                Delete
-              </ConfirmButton>
-            ) : (
-              <button type="button" className={styles.actionButton} onClick={cancel}>
-                Cancel
-              </button>
-            )}
+// ── Desktop: rows of the day's table ────────────────────────────────────────
 
-            <span className={styles.status} aria-live="polite">
-              {save.isError ? 'Save failed — restored' : dirty ? 'Unsaved' : ''}
+/** How many columns the day's table has — the memo and editor rows span them. */
+export const TRADE_COLUMNS = 6
+
+export function TradeTableRows({ trade, showAccount }: { trade: CalendarTrade; showAccount: boolean }) {
+  const journal = useTradeJournal(trade)
+  const opening = isOpening(trade)
+  const avg = trade.entryPrice == null ? null : unitPrice(trade.entryPrice, trade.currency, trade.assetClass)
+  const tint = toneClass(judgedBy(trade))
+
+  return (
+    <tbody className={styles.trade}>
+      <tr className={styles.main}>
+        <td>
+          <span className={styles.instrument}>
+            <SideBadge side={trade.side} />
+            <span className={styles.who}>
+              <InstrumentLink symbol={trade.symbol} name={trade.name} assetClass={trade.assetClass} size="compact" />
+              {showAccount ? <AccountTag accountType={trade.accountType} /> : null}
             </span>
-          </div>
+          </span>
+        </td>
+        <td data-numeric="">
+          {sizeText(trade)}
+          {avg ? (
+            <span className={styles.subline} title={avgCostTitle(trade, avg)}>
+              avg cost {avg}
+            </span>
+          ) : null}
+        </td>
+        <td data-numeric="">
+          {yen(trade.amountJpy)}
+          <span className={styles.subline}>{cashDirection(trade)}</span>
+        </td>
+        <td data-numeric="" className={cx(styles.realized, tint)}>
+          {opening ? null : <Realized trade={trade} />}
+        </td>
+        <td data-numeric="" className={tint}>
+          {opening ? null : pctSigned(trade.returnPct)}
+        </td>
+        <td className={styles.journalCell}>
+          <button
+            type="button"
+            className={cx(styles.noteButton, (journal.hasJournal || journal.open) && styles.noteButtonActive)}
+            aria-expanded={journal.open}
+            aria-label={noteLabel(trade, journal)}
+            onClick={journal.open ? journal.cancel : journal.openEditor}
+          >
+            {journal.open ? <CloseIcon /> : <PenIcon />}
+            <span aria-hidden="true">{journal.open ? 'Close' : journal.hasJournal ? 'Edit' : 'Add'}</span>
+          </button>
+        </td>
+      </tr>
+      {!journal.open && (journal.hasJournal || journal.failed) ? (
+        <tr className={styles.noteRow}>
+          <td colSpan={TRADE_COLUMNS}>
+            <SavedNote journal={journal} />
+          </td>
+        </tr>
+      ) : null}
+      {journal.open ? (
+        <tr className={styles.noteRow}>
+          <td colSpan={TRADE_COLUMNS}>
+            <Editor trade={trade} journal={journal} />
+          </td>
+        </tr>
+      ) : null}
+    </tbody>
+  )
+}
+
+// ── Phone: a card per trade ─────────────────────────────────────────────────
+
+/**
+ * What it is and what it came to on the first line, how many at what on the
+ * second: a buy leads with the cash it took, a close with its result.
+ */
+export function TradeCard({ trade, showAccount }: { trade: CalendarTrade; showAccount: boolean }) {
+  const journal = useTradeJournal(trade)
+  const opening = isOpening(trade)
+  const avg = trade.entryPrice == null ? null : unitPrice(trade.entryPrice, trade.currency, trade.assetClass)
+  const tint = toneClass(judgedBy(trade))
+  const isFund = trade.assetClass === 'FUND'
+
+  return (
+    <li className={styles.card}>
+      <span className={styles.cardWho}>
+        <SideBadge side={trade.side} />
+        <span className={cx(styles.cardSymbol, isFund && styles.cardSymbolFund)}>{trade.symbol}</span>
+        {isFund ? null : <span className={styles.cardName}>{trade.name}</span>}
+      </span>
+      <span className={cx(styles.cardFigure, !opening && tint)}>
+        {opening ? (
+          yen(trade.amountJpy)
+        ) : trade.realizedUsd != null ? (
+          moneySigned(trade.realizedUsd, 'USD')
+        ) : trade.realizedJpy != null ? (
+          yenSigned(trade.realizedJpy)
+        ) : (
+          '—'
+        )}
+      </span>
+      <button
+        type="button"
+        className={cx(
+          styles.cardNote,
+          journal.hasJournal && styles.noteButtonActive,
+          journal.open && styles.cardNoteOpen,
+        )}
+        aria-expanded={journal.open}
+        aria-label={noteLabel(trade, journal)}
+        onClick={journal.open ? journal.cancel : journal.openEditor}
+      >
+        {journal.open ? <CloseIcon /> : <PenIcon />}
+      </button>
+      <span className={styles.cardLine}>
+        {showAccount ? <AccountTag accountType={trade.accountType} /> : null}
+        <span className={styles.cardSize}>
+          {sizeText(trade)}
+          {avg ? ` · avg ${avg}` : ''}
+        </span>
+      </span>
+      <span className={cx(styles.cardSub, opening ? styles.none : tint)}>
+        {opening ? cashDirection(trade) : pctSigned(trade.returnPct)}
+      </span>
+      {!opening && trade.realizedUsd != null && trade.realizedJpy != null ? (
+        <span className={styles.cardExtra}>
+          {yenSigned(trade.realizedJpy)} in yen, the currency move included
+        </span>
+      ) : null}
+      {!journal.open && (journal.hasJournal || journal.failed) ? (
+        <div className={styles.cardMemo}>
+          <SavedNote journal={journal} />
+        </div>
+      ) : null}
+      {journal.open ? (
+        <div className={styles.cardEditor}>
+          <Editor trade={trade} journal={journal} />
         </div>
       ) : null}
     </li>

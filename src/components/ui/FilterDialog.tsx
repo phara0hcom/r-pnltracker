@@ -9,7 +9,9 @@
  * and the table stays visible above them.
  */
 import * as Dialog from '@radix-ui/react-dialog'
+import { useState } from 'react'
 import styles from './FilterDialog.module.scss'
+import { useDialogHistory } from './useDialogHistory'
 
 export function FilterDialog({
   activeCount,
@@ -21,8 +23,14 @@ export function FilterDialog({
   children: React.ReactNode
   title?: string
 }) {
+  // Controlled so that Back can close the sheet as well as ✕ and Done.
+  const [open, setOpen] = useState(false)
+  useDialogHistory(open, () => {
+    setOpen(false)
+  })
+
   return (
-    <Dialog.Root>
+    <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger className={styles.trigger}>
         <span aria-hidden="true">▽</span>
         {title}

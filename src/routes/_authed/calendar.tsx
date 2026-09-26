@@ -1,21 +1,33 @@
+/**
+ * The trading calendar: a month of days, each tinted by what it realized, a
+ * total per week, and the journal a day opens into.
+ *
+ * Every figure is worked out on the server — the days, the weeks and the
+ * month's best, worst and average. The only arithmetic here is the tint's
+ * scale, which is a matter of drawing rather than of money.
+ */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { z } from 'zod'
 import styles from './calendar.module.scss'
+import { CalendarGrid } from '~/components/calendar/CalendarGrid'
+import { DayByDay } from '~/components/calendar/DayByDay'
+import { monthLabel, weekdayDayMonth } from '~/components/calendar/dayText'
+import { MoodFace } from '~/components/calendar/MoodFace'
 import { NoteDialog, type NotePayload } from '~/components/calendar/NoteDialog'
-import { ZeroBar } from '~/components/charts/ZeroBar'
-import { moneySigned, tone, yenSigned } from '~/components/format'
+import { tone, yenSigned } from '~/components/format'
 import { MarketBreakdown } from '~/components/pnl/MarketSplit'
-import { HeroStat, PageHeader, StatStrip, StripCell } from '~/components/screen'
+import { PageHeader } from '~/components/screen'
 import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
 import { useIsMobile } from '~/components/ui/useIsMobile'
+import { useToday } from '~/components/ui/useToday'
 import { accountScopeSchema } from '~/lib/accountScope'
 import { withNote } from '~/lib/calendarPatch'
 import { cx } from '~/lib/cx'
 import { thisMonthLocal } from '~/lib/localDate'
-import { monthGrid, shiftMonth } from '~/lib/monthGrid'
+import { shiftMonth } from '~/lib/monthGrid'
 import { reportError } from '~/lib/observability/report'
 import { removeNote, saveNote } from '~/server/notes'
 import { getCalendar, type CalendarDay, type CalendarMonth } from '~/server/screens'
@@ -35,71 +47,83 @@ export const Route = createFileRoute('/_authed/calendar')({
   component: Calendar,
 })
 
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const MOOD_GLYPH = ['', '😞', '🙁', '😐', '🙂', '😄']
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-]
-
-function monthLabel(month: string): string {
-  const [year, monthNum] = month.split('-').map(Number)
-  return `${MONTH_NAMES[(monthNum ?? 1) - 1] ?? ''} ${String(year ?? '')}`
+const toneClass = (value: string | null | undefined) => {
+  const name = tone(value)
+  return name === 'flat' ? undefined : styles[name]
 }
 
-function shortDayMonth(date: string): string {
-  const [, monthNum, day] = date.split('-').map(Number)
-  const name = MONTH_NAMES[(monthNum ?? 1) - 1] ?? ''
-  return `${String(Number(day))} ${name.slice(0, 3)}`
+/** Previous, the month, next — one control — and Today beside it. */
+function MonthNav({
+  month,
+  isCurrent,
+  compact,
+  onGo,
+}: {
+  month: string
+  isCurrent: boolean
+  compact: boolean
+  onGo: (month: string) => void
+}) {
+  return (
+    <nav className={cx(styles.monthNav, compact && styles.monthNavCompact)} aria-label="Month">
+      <div className={styles.monthGroup}>
+        <button
+          type="button"
+          className={styles.monthStep}
+          onClick={() => {
+            onGo(shiftMonth(month, -1))
+          }}
+          aria-label="Previous month"
+        >
+          ‹
+        </button>
+        <span className={styles.monthName} aria-live="polite">
+          {monthLabel(month)}
+        </span>
+        <button
+          type="button"
+          className={styles.monthStep}
+          onClick={() => {
+            onGo(shiftMonth(month, 1))
+          }}
+          aria-label="Next month"
+        >
+          ›
+        </button>
+      </div>
+      <button
+        type="button"
+        className={styles.todayButton}
+        disabled={isCurrent}
+        onClick={() => {
+          onGo(thisMonthLocal())
+        }}
+      >
+        Today
+      </button>
+    </nav>
+  )
 }
 
-/** Compact grid-cell figure — the full-width `yenSigned` doesn't fit an 84px cell. */
-const shortPnl = (n: number) => (n > 0 ? '+' : '−') + '¥' + (Math.abs(n) / 1000).toFixed(1) + 'k'
-
-/** The dollar twin of `shortPnl`: whole dollars, thousands abbreviated. */
-const shortUsd = (n: number) => {
-  const abs = Math.abs(n)
-  return (n > 0 ? '+' : '−') + '$' + (abs >= 1000 ? (abs / 1000).toFixed(1) + 'k' : abs.toFixed(0))
-}
-
-/**
- * A day's figures the way Rakuten's app gives them: the JPY account in yen,
- * the USD account in dollars. Null sides are left out.
- */
-function dayFigures(day: CalendarDay): { key: string; text: string; value: number }[] {
-  const split = day.markets
-  if (!split) return []
-  const out: { key: string; text: string; value: number }[] = []
-  if (split.jpyRealizedJpy != null) {
-    const value = Number(split.jpyRealizedJpy)
-    out.push({ key: 'jpy', text: shortPnl(value), value })
-  }
-  if (split.usdRealizedUsd != null) {
-    const value = Number(split.usdRealizedUsd)
-    out.push({ key: 'usd', text: shortUsd(value), value })
-  }
-  return out
-}
-
-/** Screen-reader text for a day's figures, in full. */
-function dayLabel(day: CalendarDay): string {
-  const split = day.markets
-  if (!split) return ''
-  const parts = [
-    split.jpyRealizedJpy == null ? null : `JPY account ${yenSigned(split.jpyRealizedJpy)}`,
-    split.usdRealizedUsd == null
-      ? null
-      : `USD account ${moneySigned(split.usdRealizedUsd, 'USD')}, ${yenSigned(split.usdRealizedJpy)} in yen`,
-  ]
-  return `, realized ${parts.filter((part) => part != null).join(' and ')}`
-}
-
-/** Opacity encodes magnitude, hue encodes direction — same read at either cell size. */
-function tint(pnl: number | null, peak: number): string | undefined {
-  if (pnl == null || pnl === 0) return undefined
-  const intensity = Math.min(Math.abs(pnl) / peak, 1)
-  const token = pnl > 0 ? 'var(--color-profit)' : 'var(--color-loss)'
-  return `color-mix(in srgb, ${token} ${String(10 + intensity * 40)}%, transparent)`
+/** One figure in the month's summary: a label, the figure, and what it is of. */
+function Fact({
+  label,
+  value,
+  sub,
+  tint,
+}: {
+  label: string
+  value: string
+  sub?: string
+  tint?: string | undefined
+}) {
+  return (
+    <div className={styles.fact}>
+      <dt className={styles.factLabel}>{label}</dt>
+      <dd className={cx(styles.factValue, tint)}>{value}</dd>
+      {sub ? <dd className={styles.factSub}>{sub}</dd> : null}
+    </div>
+  )
 }
 
 function Calendar() {
@@ -112,17 +136,16 @@ function Calendar() {
   const [openDate, setOpenDate] = useState<string | null>(null)
   const isMobile = useIsMobile()
 
+  const today = useToday()
+
   const calendarKey = ['calendar', month, account]
 
-  const { data: calendar, isPending } = useQuery({
+  const { data: calendar } = useQuery({
     queryKey: calendarKey,
     queryFn: () => getCalendar({ data: { month, account } }),
   })
   const dayList = calendar?.days
   const openDay = openDate == null ? null : (dayList?.find((day) => day.date === openDate) ?? null)
-  const setOpenDay = (day: CalendarDay | null) => {
-    setOpenDate(day?.date ?? null)
-  }
 
   /**
    * Apply an edit to the cached month straight away.
@@ -147,7 +170,7 @@ function Calendar() {
       // An in-flight refetch would otherwise land after this and overwrite it
       // with the pre-edit month.
       await queryClient.cancelQueries({ queryKey: calendarKey })
-      setOpenDay(null)
+      setOpenDate(null)
       return {
         previous: patchDay(data.date, {
           title: data.title ?? '',
@@ -171,7 +194,7 @@ function Calendar() {
     mutationFn: (date: string) => removeNote({ data: { date } }),
     onMutate: async (date: string) => {
       await queryClient.cancelQueries({ queryKey: calendarKey })
-      setOpenDay(null)
+      setOpenDate(null)
       return { previous: patchDay(date, null) }
     },
     onError: (error, date, context) => {
@@ -187,99 +210,81 @@ function Calendar() {
     void navigate({ search: (prev) => ({ ...prev, month: next }) })
   }
 
-  // Drawn from the URL month, not from the response, so the squares are on
-  // screen before the engine has finished replaying the history behind them.
-  const { dates, leadingBlanks } = useMemo(() => monthGrid(month), [month])
-
-  // One pass for the lookup map and every hero/strip figure. Typing in the
-  // journal dialog re-renders this screen on every keystroke, and separate
-  // walks of the month happened on each of them.
-  // The month's total comes from the server, split as the days are.
-  const monthPnl = calendar?.markets ? Number(calendar.markets.totalJpy) : 0
-
-  const {
-    byDate,
-    tradedDays,
-    journalled,
-    peak,
-    bestDay,
-    worstDay,
-    greenDays,
-    movedDays,
-    moveMaxPos,
-    moveMaxNeg,
-  } = useMemo(() => {
-    const days = dayList ?? []
-    const map = new Map<string, CalendarDay>()
-    let traded = 0
+  const { byDate, peak, journalled } = useMemo(() => {
+    if (!dayList) return { byDate: null, peak: 0, journalled: 0 }
+    // The tint's scale: the month's largest day, so a quiet month still shows
+    // contrast. A drawing scale, not a figure anyone reads.
+    let largest = 0
     let noted = 0
-    // Scale tint by the largest absolute day so a quiet month still shows contrast.
-    let largest = 1
-    let green = 0
-    let best: { date: string; pnl: number } | null = null
-    let worst: { date: string; pnl: number } | null = null
-    const moved: MovedDay[] = []
-    let maxPos = 0
-    let maxNeg = 0
-
-    for (const day of days) {
-      map.set(day.date, day)
-      if (day.tradeCount > 0) traded += 1
+    for (const day of dayList) {
+      if (day.realizedJpy != null) largest = Math.max(largest, Math.abs(Number(day.realizedJpy)))
       if (day.note != null) noted += 1
-      const realized = day.realizedJpy ? Number(day.realizedJpy) : 0
-      largest = Math.max(largest, Math.abs(realized))
-
-      // "Moved" = actually realized something that day — an opening trade with
-      // no close yet has nothing to compare against best/worst/green.
-      if (day.tradeCount > 0 && day.realizedJpy != null) {
-        const value = Number(day.realizedJpy)
-        if (value > 0) green += 1
-        if (!best || value > best.pnl) best = { date: day.date, pnl: value }
-        if (!worst || value < worst.pnl) worst = { date: day.date, pnl: value }
-        moved.push({ day, pnl: value, mood: day.note?.mood ?? null })
-        maxPos = Math.max(maxPos, value)
-        maxNeg = Math.max(maxNeg, -value)
-      }
     }
-
-    return {
-      byDate: map,
-      tradedDays: traded,
-      journalled: noted,
-      peak: largest,
-      bestDay: best,
-      worstDay: worst,
-      greenDays: green,
-      movedDays: moved,
-      moveMaxPos: maxPos,
-      moveMaxNeg: maxNeg,
-    }
+    return { byDate: new Map(dayList.map((day) => [day.date, day])), peak: largest, journalled: noted }
   }, [dayList])
 
+  const summary = calendar?.summary
+  const total = calendar?.markets?.totalJpy ?? null
   const failed = save.isError || del.isError
 
-  const monthNav = (
+  const nav = (
+    <MonthNav
+      month={month}
+      isCurrent={today?.startsWith(month) === true}
+      compact={isMobile}
+      onGo={goToMonth}
+    />
+  )
+
+  const facts = summary ? (
     <>
-      <button
-        type="button"
-        className={styles.navButton}
-        onClick={() => { goToMonth(shiftMonth(month, -1)) }}
-        aria-label="Previous month"
-      >
-        ←
-      </button>
-      <span className={styles.monthLabel}>{month}</span>
-      <button
-        type="button"
-        className={styles.navButton}
-        onClick={() => { goToMonth(shiftMonth(month, 1)) }}
-        aria-label="Next month"
-      >
-        →
-      </button>
-      <button type="button" className={styles.navButton} onClick={() => { goToMonth(thisMonthLocal()) }}>
-        Today
-      </button>
+      <Fact
+        label="Best day"
+        value={summary.best ? yenSigned(summary.best.realizedJpy) : '—'}
+        sub={summary.best ? weekdayDayMonth(summary.best.date) : 'Nothing closed'}
+        tint={toneClass(summary.best?.realizedJpy)}
+      />
+      <Fact
+        label="Worst day"
+        value={summary.worst ? yenSigned(summary.worst.realizedJpy) : '—'}
+        sub={
+          summary.worst
+            ? weekdayDayMonth(summary.worst.date)
+            : summary.closeDays === 1
+              ? 'Only one day closed'
+              : 'Nothing closed'
+        }
+        tint={toneClass(summary.worst?.realizedJpy)}
+      />
+      <Fact
+        label="Green days"
+        value={`${String(summary.greenDays)} green · ${String(summary.redDays)} red`}
+        sub={`of ${String(summary.closeDays)} day${summary.closeDays === 1 ? '' : 's'} with a close`}
+      />
+      <Fact
+        label="Avg per trading day"
+        value={summary.avgPerTradingDayJpy == null ? '—' : yenSigned(summary.avgPerTradingDayJpy)}
+        sub={`over ${String(summary.tradingDays)} trading day${summary.tradingDays === 1 ? '' : 's'}`}
+        tint={toneClass(summary.avgPerTradingDayJpy)}
+      />
+      {isMobile ? null : (
+        <Fact label="Journalled" value={String(journalled)} sub={`day${journalled === 1 ? '' : 's'} with an entry`} />
+      )}
+    </>
+  ) : null
+
+  const hero = (
+    <>
+      <span className={styles.heroLabel}>Realized this month</span>
+      <span className={cx(styles.heroValue, toneClass(total))}>
+        {calendar ? yenSigned(total ?? 0) : <span className={styles.pendingBar} aria-hidden="true" />}
+      </span>
+      <span className={styles.heroContext}>In yen, currency moves included</span>
+      {calendar?.markets ? (
+        <div className={styles.heroSplit}>
+          <MarketBreakdown split={calendar.markets} />
+        </div>
+      ) : null}
     </>
   )
 
@@ -287,15 +292,19 @@ function Calendar() {
     <>
       <PageHeader
         title="Calendar"
-        meta={dayList ? `${monthLabel(month)} · ${String(tradedDays)} trading day${tradedDays === 1 ? '' : 's'}` : 'Loading…'}
+        meta={
+          summary
+            ? `${monthLabel(month)} · ${String(summary.tradingDays)} trading day${
+                summary.tradingDays === 1 ? '' : 's'
+              } · ${String(journalled)} journalled`
+            : 'Loading…'
+        }
+        filter={<AccountFilterControl value={account} onChange={setAccount} />}
       >
-        <div className={styles.nav}>
-          <AccountFilterControl value={account} onChange={setAccount} />
-          {isMobile ? null : monthNav}
-        </div>
+        {isMobile ? null : nav}
       </PageHeader>
 
-      {isMobile ? <div className={styles.mobileNav}>{monthNav}</div> : null}
+      {isMobile ? nav : null}
 
       {failed ? (
         <p className={styles.error} role="alert">
@@ -303,245 +312,80 @@ function Calendar() {
         </p>
       ) : null}
 
-      <div className={styles.heroRow}>
-        <HeroStat
-          label="Realized this month"
-          value={yenSigned(monthPnl)}
-          tone={tone(monthPnl)}
-          context="In yen, currency moves included"
-        >
-          {calendar?.markets ? <MarketBreakdown split={calendar.markets} /> : null}
-        </HeroStat>
-        <StatStrip>
-          <StripCell
-            label="Best day"
-            value={bestDay ? `${yenSigned(bestDay.pnl)} · ${shortDayMonth(bestDay.date)}` : '—'}
-            tone={bestDay ? tone(bestDay.pnl) : 'flat'}
-          />
-          <StripCell
-            label="Worst day"
-            value={worstDay ? `${yenSigned(worstDay.pnl)} · ${shortDayMonth(worstDay.date)}` : '—'}
-            tone={worstDay ? tone(worstDay.pnl) : 'flat'}
-          />
-          <StripCell label="Green days" value={`${String(greenDays)} of ${String(tradedDays)}`} />
-          <StripCell label="Journalled" value={String(journalled)} />
-          <StripCell
-            label="Avg per trading day"
-            value={tradedDays > 0 ? yenSigned(monthPnl / tradedDays) : '—'}
-            tone={tradedDays > 0 ? tone(monthPnl / tradedDays) : 'flat'}
-          />
-        </StatStrip>
-      </div>
+      {isMobile ? (
+        <section className={cx(styles.card, styles.heroCard)} aria-label="This month">
+          {hero}
+          {facts ? <dl className={styles.factsCompact}>{facts}</dl> : null}
+        </section>
+      ) : (
+        <div className={styles.summary}>
+          <section className={cx(styles.card, styles.heroCard)} aria-label="Realized this month">
+            {hero}
+          </section>
+          <dl className={cx(styles.card, styles.facts)} aria-busy={summary == null}>
+            {facts}
+          </dl>
+        </div>
+      )}
 
-      <div
-        className={cx(styles.grid, isMobile && styles.gridCompact)}
-        role="grid"
-        aria-label={`Trading calendar for ${month}`}
-        aria-busy={isPending}
-      >
-        {WEEKDAYS.map((weekday) => (
-          <div key={weekday} className={styles.weekday} role="columnheader">
-            {weekday}
-          </div>
-        ))}
+      <CalendarGrid
+        month={month}
+        label={`Trading calendar for ${monthLabel(month)}`}
+        days={byDate}
+        weeks={calendar?.weeks ?? null}
+        peak={peak}
+        today={today}
+        compact={isMobile}
+        onOpen={setOpenDate}
+      />
 
-        {Array.from({ length: leadingBlanks }, (_, i) => (
-          // Empty grid cells offsetting the 1st to its weekday. They need no
-          // styling: grid stretches them to the row height the day cells set.
-          <div key={`blank-${String(i)}`} aria-hidden="true" />
-        ))}
+      {isMobile ? (
+        <p className={styles.legendText}>
+          Tint and figure are the day&apos;s realized P&amp;L in yen, currency moves included. A blue dot
+          marks a journal entry. Tap a day to open it.
+        </p>
+      ) : (
+        <div className={styles.legend}>
+          <span className={styles.legendItem}>
+            <span className={styles.scale} aria-hidden="true">
+              <span className={cx(styles.swatch, styles.lossStrong)} />
+              <span className={cx(styles.swatch, styles.lossWeak)} />
+              <span className={styles.swatch} />
+              <span className={cx(styles.swatch, styles.profitWeak)} />
+              <span className={cx(styles.swatch, styles.profitStrong)} />
+            </span>
+            Tint is the day in yen, currency moves included — stronger for larger
+          </span>
+          <span className={styles.legendItem}>
+            <MoodFace mood={4} className={styles.legendFace} />
+            Journal entry — the face shows the mood
+          </span>
+          <span className={styles.legendItem}>
+            Each day shows the JPY account in yen and the USD account in dollars, as Rakuten does. Select a
+            day for its trades and journal.
+          </span>
+        </div>
+      )}
 
-        {dates.map((date) => {
-          const dayNum = Number(date.slice(-2))
-          const day = byDate.get(date)
-
-          if (isMobile) {
-            return (
-              <CompactDayCell
-                key={date}
-                date={date}
-                dayNum={dayNum}
-                day={day}
-                peak={peak}
-                onOpen={setOpenDay}
-              />
-            )
-          }
-          return (
-            <FullDayCell key={date} date={date} dayNum={dayNum} day={day} peak={peak} onOpen={setOpenDay} />
-          )
-        })}
-      </div>
-
-      <p className={styles.legend}>
-        Each day shows the JPY account in yen and the USD account in dollars, as Rakuten does. The
-        tint is the day in yen, currency moves included — green for gains, red for losses, stronger
-        for larger. Click any day to journal how it felt.
-      </p>
-
-      {isMobile ? <DaysMovedList days={movedDays} maxPos={moveMaxPos} maxNeg={moveMaxNeg} /> : null}
+      {isMobile && byDate && calendar ? (
+        <DayByDay weeks={calendar.weeks} days={byDate} today={today} onOpen={setOpenDate} />
+      ) : null}
 
       {openDay ? (
         <NoteDialog
           day={openDay}
-          onClose={() => { setOpenDay(null) }}
-          onSave={(note) => { save.mutate({ data: note }) }}
-          onDelete={(date) => { del.mutate(date) }}
+          scope={account}
+          onClose={() => {
+            setOpenDate(null)
+          }}
+          onSave={(note) => {
+            save.mutate({ data: note })
+          }}
+          onDelete={(date) => {
+            del.mutate(date)
+          }}
         />
       ) : null}
-    </>
-  )
-}
-
-/** PC day cell: full detail, 84px tall. */
-function FullDayCell({
-  date,
-  dayNum,
-  day,
-  peak,
-  onOpen,
-}: {
-  date: string
-  dayNum: number
-  day: CalendarDay | undefined
-  peak: number
-  onOpen: (day: CalendarDay) => void
-}) {
-  if (!day) {
-    return (
-      <div key={date} className={cx(styles.day, styles.pending)} role="gridcell" aria-label={date}>
-        <span className={styles.dayNum}>{dayNum}</span>
-        <span className={styles.pendingBar} aria-hidden="true" />
-      </div>
-    )
-  }
-
-  const pnl = day.realizedJpy == null ? null : Number(day.realizedJpy)
-  const bg = tint(pnl, peak)
-  const hasData = pnl != null || day.tradeCount > 0
-
-  return (
-    <button
-      type="button"
-      role="gridcell"
-      className={cx(styles.day, day.note && styles.hasNote)}
-      style={bg ? { backgroundColor: bg } : undefined}
-      onClick={() => { onOpen(day) }}
-      aria-label={`${day.date}${dayLabel(day)}${day.note ? ', has journal entry' : ''}`}
-    >
-      <span className={styles.dayTop}>
-        <span className={cx(styles.dayNum, !hasData && styles.dayNumMuted)}>{dayNum}</span>
-        {day.note?.mood ? (
-          <span className={styles.mood} aria-hidden="true">
-            {MOOD_GLYPH[day.note.mood]}
-          </span>
-        ) : null}
-      </span>
-      {hasData ? (
-        <span className={styles.dayBottom}>
-          {dayFigures(day).map((figure) => (
-            <span
-              key={figure.key}
-              className={cx(styles.dayPnl, figure.value >= 0 ? styles.profit : styles.loss)}
-            >
-              {figure.text}
-            </span>
-          ))}
-          {day.tradeCount > 0 ? (
-            <span className={styles.dayCount}>
-              {day.tradeCount} trade{day.tradeCount === 1 ? '' : 's'}
-            </span>
-          ) : null}
-        </span>
-      ) : null}
-    </button>
-  )
-}
-
-/** SP day cell: a 44px tint-and-number heat cell, detail moves to `DaysMovedList`. */
-function CompactDayCell({
-  date,
-  dayNum,
-  day,
-  peak,
-  onOpen,
-}: {
-  date: string
-  dayNum: number
-  day: CalendarDay | undefined
-  peak: number
-  onOpen: (day: CalendarDay) => void
-}) {
-  if (!day) {
-    return (
-      <div key={date} className={cx(styles.dayCompactCell, styles.pending)} role="gridcell" aria-label={date}>
-        <span className={styles.dayNumMuted}>{dayNum}</span>
-      </div>
-    )
-  }
-
-  const pnl = day.realizedJpy == null ? null : Number(day.realizedJpy)
-  const bg = tint(pnl, peak)
-
-  return (
-    <button
-      type="button"
-      role="gridcell"
-      className={cx(styles.dayCompactCell, day.note && styles.hasNote)}
-      style={bg ? { backgroundColor: bg } : undefined}
-      onClick={() => { onOpen(day) }}
-      aria-label={`${day.date}${dayLabel(day)}${day.note ? ', has journal entry' : ''}`}
-    >
-      <span className={pnl == null && day.tradeCount === 0 ? styles.dayNumMuted : undefined}>{dayNum}</span>
-      {day.note ? <span className={styles.compactDot} aria-hidden="true" /> : null}
-    </button>
-  )
-}
-
-/** A day that realized something, for the SP list. */
-interface MovedDay {
-  day: CalendarDay
-  /** The day in yen, currency moves included — what the bar is drawn from. */
-  pnl: number
-  mood: number | null
-}
-
-/** SP-only: days with a realized close, as zero-origin rows — the detail the compact grid has no room for. */
-function DaysMovedList({
-  days,
-  maxPos,
-  maxNeg,
-}: {
-  days: MovedDay[]
-  maxPos: number
-  maxNeg: number
-}) {
-  if (days.length === 0) return null
-
-  return (
-    <>
-      <h2 className={styles.movedTitle}>Days that moved</h2>
-      <div className={styles.movedList}>
-        {days.map((row) => (
-          <div key={row.day.date} className={styles.movedRow}>
-            <span className={styles.movedLabel}>{shortDayMonth(row.day.date)}</span>
-            <span className={styles.movedMood} aria-hidden="true">
-              {row.mood ? MOOD_GLYPH[row.mood] : ''}
-            </span>
-            <div className={styles.movedTrack}>
-              <ZeroBar value={row.pnl} maxPos={maxPos} maxNeg={maxNeg} />
-            </div>
-            <span className={styles.movedCount}>{row.day.tradeCount}</span>
-            <span className={styles.movedValue}>
-              {dayFigures(row.day).map((figure) => (
-                <span key={figure.key} className={figure.value >= 0 ? styles.profit : styles.loss}>
-                  {figure.text}
-                </span>
-              ))}
-            </span>
-          </div>
-        ))}
-      </div>
     </>
   )
 }

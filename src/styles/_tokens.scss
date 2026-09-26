@@ -21,7 +21,12 @@
   /* ── Text ─────────────────────────────────────────────────────────────── */
   --color-text: #e8eaed;
   --color-text-muted: #9aa4b2;
-  --color-text-subtle: #6b7684;
+  /* Captions and axis labels. #6b7684 came to 3.9:1 on the surface and 4.2:1
+     on the page, under the 4.5:1 small text needs; this is 5.2:1 and 5.6:1. */
+  --color-text-subtle: #808b99;
+  /* Figures laid over a profit or loss tint — a step above --color-text, so
+     they hold 4.5:1 on the strongest tint the Calendar draws. */
+  --color-text-on-tint: #f4f6f8;
 
   /* ── Semantics ─────────────────────────────────────────────────────────── */
   /* Profit is teal rather than pure green: with loss-red it stays separable for
@@ -42,6 +47,12 @@
   --color-nisa-growth: #2dd4a7;
   --color-nisa-tsumitate: #a78bfa;
   --color-nisa-old: #6b7684;
+
+  /* Asset classes — the Positions allocation bars. Apart from the account
+     colours, which the bar above them uses. */
+  --color-class-jp: #4dd0e1;
+  --color-class-us: #f5a623;
+  --color-class-fund: #8b95a3;
 
   /* Chart marks sit ON a surface, so they are validated against it rather than
      for text contrast. The text tokens above are lighter than the categorical

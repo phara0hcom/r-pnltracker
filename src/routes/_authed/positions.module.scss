@@ -1,19 +1,5 @@
 @use '../../styles/mixins' as m;
 
-.heroRow {
-  margin-bottom: var(--space-4);
-
-  @include m.hero-row;
-}
-
-.heroContext {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  color: var(--color-text-muted);
-
-  @include m.tabular-nums;
-}
-
 /* The yen beneath a US position's dollar figure. */
 .aside {
   display: block;
@@ -29,138 +15,192 @@
   color: var(--color-loss);
 }
 
-/* ── Table cells ──────────────────────────────────────────────────────────── */
+.muted {
+  color: var(--color-text-muted);
+}
 
-.accountCell {
+.strong {
+  font-weight: var(--weight-medium);
+}
+
+/* "/万口" after a fund's price — the unit, quieter than the figure. */
+.unit {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.noPrice {
+  display: inline-block;
+  padding: 0 6px;
+  font-size: 0.6875rem;
+  line-height: 1.6;
+  color: var(--color-warn);
+  white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--color-warn) 35%, var(--color-bg));
+  border-radius: var(--radius-sm);
+}
+
+/* ── Account headings and the total ───────────────────────────────────────── */
+
+.groupName {
   display: inline-flex;
+  gap: 0;
   align-items: center;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
 }
 
-/* ── Allocation ───────────────────────────────────────────────────────────── */
-
-.allocation {
-  margin-bottom: var(--space-4);
+.groupCount {
+  margin-left: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+  color: var(--color-text-muted);
 }
 
-.allocationTrack {
-  display: flex;
-  gap: 2px;
-  height: 10px;
-  overflow: hidden;
-}
+/*
+ * Each account is its own `tbody`, so the table's rule dropping the last row's
+ * border ends every group: the heading draws the line above itself instead.
+ */
+.groupRow {
+  th,
+  td {
+    font-weight: var(--weight-semibold);
+    background-color: color-mix(in srgb, var(--color-surface-raised) 55%, var(--color-surface));
+    border-top: 1px solid var(--color-border);
+  }
 
-.allocationSegment {
-  border-radius: 2px;
-}
-
-.allocationLegend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  margin-top: var(--space-2);
-
-  /* Supplementary to the bar, which already shows the shape — dropped on SP
-     for room, where the same bar sits inside the hero card. */
-  @include m.mobile {
-    display: none;
+  th {
+    text-align: left;
   }
 }
 
-.allocationItem {
-  display: flex;
-  gap: 6px;
-  align-items: center;
+.group:first-of-type .groupRow {
+  th,
+  td {
+    border-top: none;
+  }
+}
+
+.totalRow {
+  th,
+  td {
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-3);
+    font-weight: var(--weight-semibold);
+    background-color: var(--color-surface-raised);
+    border-top: 1px solid var(--color-border-strong);
+    border-bottom: none;
+  }
+
+  th {
+    text-align: left;
+  }
+}
+
+.footnote {
+  margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-}
-
-.allocationSwatch {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-}
-
-.allocationValue {
-  color: var(--color-text);
-
-  @include m.tabular-nums;
-}
-
-.note {
-  padding: var(--space-3);
-  margin-bottom: var(--space-4);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  background-color: var(--color-surface);
-  border-left: 2px solid var(--color-warn);
-  border-radius: var(--radius-sm);
 }
 
 /* ── SP card list ─────────────────────────────────────────────────────────── */
 
 .sortControl {
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.cardGroup + .cardGroup {
+  margin-top: var(--space-1);
+}
+
+.cardGroupHead {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) 0 var(--space-2);
+}
+
+.cardGroupFigures {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  align-items: baseline;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+
+  @include m.tabular-nums;
 }
 
 .cardList {
-  display: flex;
-  flex-direction: column;
+  padding: 0;
+  margin: 0;
+  list-style: none;
 }
 
+/* Two lines: what it is and is worth, then how many at what and how it is doing. */
 .card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--space-3) 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--space-3);
+  align-items: baseline;
+  padding: 11px 0;
   border-top: 1px solid var(--color-border);
 }
 
-.cardRow {
+.cardWho {
   display: flex;
-  gap: var(--space-3);
+  gap: 6px;
   align-items: baseline;
-  justify-content: space-between;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .cardSymbol {
+  flex: none;
+  max-width: 100%;
+  font-size: 0.9375rem;
+  font-weight: var(--weight-semibold);
+
+  @include m.truncate;
+}
+
+.cardName {
   min-width: 0;
-  font-weight: var(--weight-medium);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 
   @include m.truncate;
 }
 
 .cardValue {
-  flex: none;
-  font-weight: var(--weight-medium);
+  font-size: 0.9375rem;
+  font-weight: var(--weight-semibold);
+  text-align: right;
 
   @include m.tabular-nums;
 }
 
-.cardMeta {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
+.cardDetail {
   min-width: 0;
   font-size: var(--text-xs);
-  color: var(--color-text-subtle);
-}
-
-.cardMetaText {
-  min-width: 0;
+  color: var(--color-text-muted);
 
   @include m.tabular-nums;
   @include m.truncate;
 }
 
-.cardUnreal {
-  flex: none;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
+.cardResult {
+  font-size: var(--text-sm);
+  text-align: right;
+  white-space: nowrap;
 
   @include m.tabular-nums;
 }
 
-.cardDim {
-  color: var(--color-text-subtle);
+.cardPct {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
 }

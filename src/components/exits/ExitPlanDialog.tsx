@@ -21,6 +21,7 @@ import { AccountDot } from '~/components/AccountDot'
 import { ACCOUNT_LABEL, ASSET_LABEL, money, moneySigned, qty, tone } from '~/components/format'
 import { ExternalIcon } from '~/components/icons/ExternalIcon'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
+import { useDialogHistory } from '~/components/ui/useDialogHistory'
 import { cx } from '~/lib/cx'
 import { tradingViewUrl } from '~/lib/tradingview'
 import type { ExitRuleRow } from '~/server/exit'
@@ -75,6 +76,7 @@ export function ExitPlanDialog({
    * Suppressing the restore leaves the form's own focus management unopposed.
    */
   const handingOff = useRef(false)
+  useDialogHistory(row !== null, onClose)
 
   /** `null` for funds, which carry no ticker in any export. */
   const chart = row === null ? null : tradingViewUrl(row.symbol, row.assetClass)
