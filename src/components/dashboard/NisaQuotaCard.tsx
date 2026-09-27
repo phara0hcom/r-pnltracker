@@ -112,8 +112,12 @@ export function NisaQuotaCard({ nisa }: { nisa: DashboardNisa }) {
                   <span className={styles.of}> of {yen(row.limit)}</span>
                 </span>
                 <span className={cx(styles.left, tight && styles.warn)}>
+                  {/* A full lifetime pool does not reset in January — only this
+                      year's sales come back, which the heading already says. */}
                   {full
-                    ? 'Full until January'
+                    ? row.annual
+                      ? 'Full until January'
+                      : 'Full'
                     : tight
                       ? `Only ${yen(row.remaining)} left this year`
                       : `${yen(row.remaining)} left${row.annual ? ' this year' : ''}`}
