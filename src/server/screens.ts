@@ -23,7 +23,6 @@ import {
 import { accountFilterInput } from '~/lib/accountScope'
 import { summarizeMonth, type MonthSummary } from '~/lib/calendar/monthSummary'
 import {
-  FUND_UNIT_DIVISOR,
   matchesAccountFilter,
   OPENING_SIDES,
   ZERO,
@@ -54,6 +53,7 @@ import {
 } from '~/lib/pnl/positionSummary'
 import { valuePosition, type PositionValue } from '~/lib/pnl/positionValue'
 import { usdResult, type UsdResult } from '~/lib/pnl/usdResult'
+import { quotedPrice } from '~/lib/prices/quoteUnit'
 import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
 import { findReinvestment } from '~/lib/tax/reinvestment'
 import { buildYearOverYear, type TaxYearBasis } from '~/lib/tax/report'
@@ -119,9 +119,7 @@ export interface PositionsData {
 
 /** A fund's price per 10,000 口, the unit it is quoted in; anything else as is. */
 const quoted = (price: Decimal, assetClass: AssetClass): string =>
-  assetClass === 'FUND'
-    ? price.mul(FUND_UNIT_DIVISOR).toFixed(0)
-    : price.toFixed(assetClass === 'US_EQUITY' ? 2 : 1)
+  quotedPrice(price, assetClass).toFixed(assetClass === 'FUND' ? 0 : assetClass === 'US_EQUITY' ? 2 : 1)
 
 export const getPositions = createServerFn({ method: 'GET' })
   .middleware([authed])

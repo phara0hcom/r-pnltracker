@@ -9,7 +9,13 @@ import { Empty, PageHeader, Section, Table } from '~/components/screen'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
 import type { ProviderState } from '~/lib/prices/providers'
-import { checkProviders, listPrices, refreshPrices, setManualPrice } from '~/server/prices'
+import {
+  checkProviders,
+  listPrices,
+  refreshPrices,
+  setManualPrice,
+  type PriceEntry,
+} from '~/server/prices'
 
 export const Route = createFileRoute('/_authed/settings')({
   component: Settings,
@@ -21,6 +27,24 @@ const STATE_LABEL: Record<ProviderState, string> = {
   BAD_KEY: 'Key rejected',
   RATE_LIMITED: 'Quota exhausted',
   UNREACHABLE: 'Unreachable',
+}
+
+/**
+ * A fund price typed below this is almost certainly per single 口, the unit
+ * this screen used to take: a 基準価額 starts at ¥10,000 and is rarely under
+ * ¥1,000. Warned about rather than refused, so an outlier can still be entered.
+ */
+const FUND_PRICE_FLOOR = 100
+
+const isFund = (entry: PriceEntry) => entry.assetClass === 'FUND'
+
+/** As quoted, a fund's per 10,000 口 — the server sends it in that unit. */
+function priceText(entry: PriceEntry, price: string): string {
+  const figure =
+    entry.currency === 'USD'
+      ? `$${Number(price).toFixed(2)}`
+      : `¥${Number(price).toLocaleString('en-US')}`
+  return isFund(entry) ? `${figure}/万口` : figure
 }
 
 function Settings() {
@@ -108,19 +132,16 @@ function Settings() {
             <tbody>
               {prices.map((entry) => {
                 const draft = drafts[entry.symbol] ?? entry.manualOverride ?? ''
+                const looksPerKuchi =
+                  isFund(entry) && draft.trim() !== '' && Number(draft) > 0 && Number(draft) < FUND_PRICE_FLOOR
+                const hintId = `price-hint-${entry.symbol}`
                 return (
                   <tr key={entry.symbol}>
                     <td>
                       <InstrumentLink symbol={entry.symbol} name={entry.name} assetClass={entry.assetClass} />
                     </td>
                     <td>{ASSET_LABEL[entry.assetClass] ?? entry.assetClass}</td>
-                    <td data-numeric>
-                      {entry.price == null
-                        ? '—'
-                        : entry.currency === 'USD'
-                          ? `$${Number(entry.price).toFixed(2)}`
-                          : `¥${Number(entry.price).toLocaleString('en-US')}`}
-                    </td>
+                    <td data-numeric>{entry.price == null ? '—' : priceText(entry, entry.price)}</td>
                     <td>
                       {entry.source ? (
                         <span className={cx(styles.tag, entry.source === 'MANUAL' && styles.tagManual)}>
@@ -135,21 +156,33 @@ function Settings() {
                     </td>
                     <td>
                       <div className={styles.overrideCell}>
-                        <input
-                          inputMode="decimal"
-                          className={styles.input}
-                          value={draft}
-                          placeholder={entry.needsManual ? 'set price' : 'auto'}
-                          onChange={(event) => {
-                            setDrafts((previous) => ({ ...previous, [entry.symbol]: event.target.value }))
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              save.mutate({ symbol: entry.symbol, price: draft || null })
+                        <span className={styles.inputWrap}>
+                          <input
+                            inputMode="decimal"
+                            className={styles.input}
+                            value={draft}
+                            placeholder={isFund(entry) ? '基準価額' : entry.needsManual ? 'set price' : 'auto'}
+                            onChange={(event) => {
+                              setDrafts((previous) => ({ ...previous, [entry.symbol]: event.target.value }))
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                save.mutate({ symbol: entry.symbol, price: draft || null })
+                              }
+                            }}
+                            aria-label={
+                              isFund(entry)
+                                ? `Manual price for ${entry.symbol}, per 10,000 口`
+                                : `Manual price for ${entry.symbol}`
                             }
-                          }}
-                          aria-label={`Manual price for ${entry.symbol}`}
-                        />
+                            aria-describedby={looksPerKuchi ? hintId : undefined}
+                          />
+                          {isFund(entry) ? (
+                            <span className={styles.unit} aria-hidden="true">
+                              /万口
+                            </span>
+                          ) : null}
+                        </span>
                         <button
                           type="button"
                           className={styles.small}
@@ -171,6 +204,12 @@ function Settings() {
                           </ConfirmButton>
                         ) : null}
                       </div>
+                      {looksPerKuchi ? (
+                        <p id={hintId} className={styles.unitHint}>
+                          That reads as a price per 口. Enter the 基準価額 per 10,000 口, as Rakuten
+                          shows it.
+                        </p>
+                      ) : null}
                     </td>
                   </tr>
                 )
@@ -228,7 +267,9 @@ function Settings() {
             <dt>JP equities</dt>
             <dd>Best-effort; blocked frequently. Manual entry is the reliable path.</dd>
             <dt>Funds</dt>
-            <dd>No free source for 基準価額. Manual entry only.</dd>
+            <dd>
+              No free source for 基準価額. Manual entry only, per 10,000 口 as Rakuten shows it.
+            </dd>
             <dt>USD/JPY</dt>
             <dd>open.er-api.com — free, no key, updated daily.</dd>
             <dt>US dividends</dt>
