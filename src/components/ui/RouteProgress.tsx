@@ -80,9 +80,11 @@ export function RouteProgress({ loading }: { loading: boolean }) {
 /**
  * Whether a route change is in flight — for `aria-busy` and dimming.
  *
- * Both flags, not just `isLoading`: that covers the loader phase, while
- * `isTransitioning` covers React committing the new tree. Watching only the
- * first lets the indicator disappear while the screen is still the old one.
+ * `isLoading` covers React committing the new tree as well as the loaders: the
+ * router holds it until the new matches have rendered. Older routers dropped it
+ * when the loaders finished and needed `isTransitioning` (since removed) for the
+ * commit — watching `isLoading` alone then let the indicator disappear while the
+ * screen was still the old one.
  *
  * Two things count as busy: opening a different screen, and changing `scope`.
  * A pathname check alone would miss the second — the sidebar's All/NISA/特定
@@ -100,7 +102,7 @@ export function RouteProgress({ loading }: { loading: boolean }) {
 export function useRouteLoading(): boolean {
   return useRouterState({
     select: (s) => {
-      if (!s.isLoading && !s.isTransitioning) return false
+      if (!s.isLoading) return false
       const from = s.resolvedLocation
       // Nothing resolved yet means the first load, which is a real one.
       if (!from) return true
