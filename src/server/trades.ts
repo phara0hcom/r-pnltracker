@@ -22,6 +22,7 @@ import {
 import type { AssetClass, NormalizedTrade } from '~/lib/domain/types'
 import { runEngine } from '~/lib/pnl/engine'
 import { usdResult } from '~/lib/pnl/usdResult'
+import { quotedPrice } from '~/lib/prices/quoteUnit'
 import { validateManualTrade, type ManualTradeInput } from '~/lib/trades/manual'
 
 /** One row as the table needs it. Decimals are strings — exact on the wire. */
@@ -88,12 +89,6 @@ type RealizedFields = Pick<
   | 'returnPct'
 >
 
-/**
- * Funds are stored per single 口 but displayed per 10,000, so the form round-trips
- * the same number the user sees on Rakuten's site.
- */
-const FUND_DISPLAY_MULTIPLIER = 10_000
-
 export const listTradeRows = createServerFn({ method: 'GET' })
   .middleware([authed])
   .handler(async ({ context }): Promise<TradeRow[]> => {
@@ -122,10 +117,9 @@ export const listTradeRows = createServerFn({ method: 'GET' })
     }
 
     return records.map(({ id, trade, origin, isEdited, memo }) => {
-      const displayPrice =
-        trade.assetClass === 'FUND'
-          ? trade.unitPrice.mul(FUND_DISPLAY_MULTIPLIER).toFixed()
-          : trade.unitPrice.toFixed()
+      // A fund's per 10,000 口, the number Rakuten shows; the edit form takes it
+      // back in that unit (`buildManualTrade`), so an edit round-trips it.
+      const displayPrice = quotedPrice(trade.unitPrice, trade.assetClass).toFixed()
 
       const hit = realizedBy.get(trade)
 

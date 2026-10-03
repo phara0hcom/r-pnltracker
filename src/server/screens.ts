@@ -40,6 +40,7 @@ import {
   buildNisaReport,
   legacyNisaBookValue,
 } from '~/lib/nisa/quota'
+import { costPerUnit } from '~/lib/pnl/costPerUnit'
 import { orderedPoolDays, poolKey } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
@@ -75,6 +76,14 @@ async function dividendsFor(userId: string) {
     .where(eq(dividendsTable.userId, userId))
   return rows.map(fromDividendRow)
 }
+
+/**
+ * A price as the instrument is quoted: a fund's per 10,000 口, anything else as
+ * stored, to the precision each shows at. Positions and the calendar both quote
+ * through this, so a holding's prices read alike on the two screens.
+ */
+const quoted = (price: Decimal, assetClass: AssetClass): string =>
+  quotedPrice(price, assetClass).toFixed(assetClass === 'FUND' ? 0 : assetClass === 'US_EQUITY' ? 2 : 1)
 
 // ── Positions ───────────────────────────────────────────────────────────────
 
@@ -116,10 +125,6 @@ export interface PositionsData {
   /** The rate a US holding's yen figures use, when one is held. */
   usdJpy: string | null
 }
-
-/** A fund's price per 10,000 口, the unit it is quoted in; anything else as is. */
-const quoted = (price: Decimal, assetClass: AssetClass): string =>
-  quotedPrice(price, assetClass).toFixed(assetClass === 'FUND' ? 0 : assetClass === 'US_EQUITY' ? 2 : 1)
 
 export const getPositions = createServerFn({ method: 'GET' })
   .middleware([authed])
@@ -776,13 +781,14 @@ export interface CalendarTrade {
   /** In dollars for a US close, matching the figure shown. */
   returnPct: number | null
   /**
-   * Weighted-average cost of the units sold, in the instrument's own currency.
+   * What each unit sold cost, buy costs included: the figure the result is
+   * measured against. Dollars on a US close, a fund's per 10,000 口 — see
+   * `lib/pnl/costPerUnit.ts`.
    *
    * There is no link back to an individual buy: 移動平均法 pools units, so a
-   * sell closes against the pool average rather than an identified lot. This is
-   * the closest thing to "what this sell was measured against".
+   * sell closes against the pool's average rather than an identified lot.
    */
-  entryPrice: string | null
+  avgCost: string | null
   /** Days from the quantity-weighted mean acquisition date to this sale. */
   holdingDays: number | null
   memo: string | null
@@ -863,7 +869,7 @@ export const getCalendar = createServerFn({ method: 'GET' })
         realized: string
         usd: UsdResult | null
         pct: number | null
-        entryPrice: string
+        avgCost: string
         holdingDays: number
       }
     >()
@@ -880,12 +886,9 @@ export const getCalendar = createServerFn({ method: 'GET' })
           : close.costJpy.gt(0)
             ? close.realizedJpy.div(close.costJpy).toNumber()
             : null,
-        // Same per-10,000 convention as the exit price, so the two are
-        // directly comparable on screen.
-        entryPrice:
-          close.assetClass === 'FUND'
-            ? close.entryPriceNative.mul(10_000).toFixed(0)
-            : close.entryPriceNative.toFixed(close.assetClass === 'US_EQUITY' ? 2 : 1),
+        // Quoted as the sale price beside it is, so the two compare directly —
+        // and the cost, not the average buy price, so they give back the result.
+        avgCost: quoted(costPerUnit(close), close.assetClass),
         holdingDays: close.holdingDays,
       })
     }
@@ -908,17 +911,14 @@ export const getCalendar = createServerFn({ method: 'GET' })
         quantity: trade.quantity.toFixed(),
         // Funds are stored per single 口 but quoted per 10,000, so display the
         // figure Rakuten shows rather than the internal one.
-        unitPrice:
-          trade.assetClass === 'FUND'
-            ? trade.unitPrice.mul(10_000).toFixed(0)
-            : trade.unitPrice.toFixed(trade.currency === 'USD' ? 2 : 1),
+        unitPrice: quoted(trade.unitPrice, trade.assetClass),
         currency: trade.currency,
         amountJpy: trade.netAmountJpy.toFixed(0),
         realizedJpy: isClose ? (realized?.realized ?? null) : null,
         realizedUsd: isClose ? (realized?.usd?.gainUsd ?? null) : null,
         netUsd: isClose ? (realized?.usd?.netUsd ?? null) : null,
         returnPct: isClose ? (realized?.pct ?? null) : null,
-        entryPrice: isClose ? (realized?.entryPrice ?? null) : null,
+        avgCost: isClose ? (realized?.avgCost ?? null) : null,
         holdingDays: isClose ? (realized?.holdingDays ?? null) : null,
         memo: record.memo,
         motivation: record.motivation,

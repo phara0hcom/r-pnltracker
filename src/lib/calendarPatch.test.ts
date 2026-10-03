@@ -26,7 +26,7 @@ const trade = (id: string): CalendarDay['trades'][number] => ({
   realizedUsd: null,
   netUsd: null,
   returnPct: 0.04,
-  entryPrice: '2680.0',
+  avgCost: '2680.0',
   holdingDays: 21,
   memo: null,
   motivation: null,

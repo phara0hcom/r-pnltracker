@@ -56,16 +56,23 @@ export function sizeText(trade: CalendarTrade): string {
 }
 
 /**
- * No lot is identified — 移動平均法 pools the units — so this is the pool's
- * weighted-average cost at the moment of the sale, which is what the realized
- * figure was actually measured against.
+ * The avg cost under a sale, explained on hover. It is the pool's cost per unit
+ * at the sale, buy costs included — what the result beside it is measured
+ * against. A yen result is also after the sale's own costs, which quantity ×
+ * (price − avg cost) leaves out; the dollar result, as Rakuten states it, is
+ * not, so a US row works out exactly.
  */
 const avgCostTitle = (trade: CalendarTrade, avg: string) =>
-  `Closed against a weighted-average cost of ${avg}${
+  [
+    `Average cost ${avg}, buy costs included — what this result is measured against.`,
+    trade.currency === 'USD' ? null : 'The result is also after this sale’s own costs.',
     trade.holdingDays == null
-      ? ''
-      : `, held ${String(trade.holdingDays)} day${trade.holdingDays === 1 ? '' : 's'} on average`
-  }. Moving-average cost basis pools units, so no single buy is matched to this sale.`
+      ? null
+      : `Held ${String(trade.holdingDays)} day${trade.holdingDays === 1 ? '' : 's'} on average.`,
+    'Moving-average cost basis pools units, so no single buy is matched to this sale.',
+  ]
+    .filter((line) => line != null)
+    .join(' ')
 
 const SIDE_CLASS: Record<string, string | undefined> = {
   BUY: styles.sideBuy,
@@ -310,7 +317,7 @@ export const TRADE_COLUMNS = 6
 export function TradeTableRows({ trade, showAccount }: { trade: CalendarTrade; showAccount: boolean }) {
   const journal = useTradeJournal(trade)
   const opening = isOpening(trade)
-  const avg = trade.entryPrice == null ? null : unitPrice(trade.entryPrice, trade.currency, trade.assetClass)
+  const avg = trade.avgCost == null ? null : unitPrice(trade.avgCost, trade.currency, trade.assetClass)
   const tint = toneClass(judgedBy(trade))
 
   return (
@@ -383,7 +390,7 @@ export function TradeTableRows({ trade, showAccount }: { trade: CalendarTrade; s
 export function TradeCard({ trade, showAccount }: { trade: CalendarTrade; showAccount: boolean }) {
   const journal = useTradeJournal(trade)
   const opening = isOpening(trade)
-  const avg = trade.entryPrice == null ? null : unitPrice(trade.entryPrice, trade.currency, trade.assetClass)
+  const avg = trade.avgCost == null ? null : unitPrice(trade.avgCost, trade.currency, trade.assetClass)
   const tint = toneClass(judgedBy(trade))
   const isFund = trade.assetClass === 'FUND'
 

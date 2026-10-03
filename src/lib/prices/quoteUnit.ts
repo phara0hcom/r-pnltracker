@@ -5,12 +5,14 @@
  * holding's 口 by. It is quoted per 10,000 口, as the 基準価額 that Rakuten and
  * every fund house publish. Anything else is quoted in the unit it is stored in.
  *
- * Every screen that shows a fund's price, or takes one typed in, converts here.
- * Settings once took the stored unit while Positions showed the quoted one, so
- * a 基準価額 copied from Rakuten valued the fund 10,000 times too high.
+ * Every screen that shows a fund's price, or takes one typed in, converts here:
+ * Positions, the calendar, Trades and its forms, the import preview, Settings.
+ * Only the CSV parsers divide on their own, as a file is read. Settings once
+ * took the stored unit while Positions showed the quoted one, so a 基準価額
+ * copied from Rakuten valued the fund 10,000 times too high.
  */
 import Decimal from 'decimal.js'
-import { FUND_UNIT_DIVISOR, type AssetClass } from '~/lib/domain/types'
+import { FUND_UNIT_DIVISOR, type AssetClass } from '../domain/types'
 
 /** The stored price in the unit it is quoted in. */
 export const quotedPrice = (stored: Decimal.Value, assetClass: AssetClass): Decimal =>
