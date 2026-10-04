@@ -17,6 +17,7 @@
  */
 import { useState } from 'react'
 import styles from './MonthlyPnlChart.module.scss'
+import { pctSigned, yenCompact, yenSigned } from '~/components/format'
 import { cx } from '~/lib/cx'
 
 export interface MonthlyPoint {
@@ -37,22 +38,13 @@ export interface WindowNav {
   onLatest: () => void
 }
 
-const yen = (amount: number) =>
-  (amount > 0 ? '+' : amount < 0 ? '−' : '') +
-  '¥' +
-  Math.abs(amount).toLocaleString('en-US', { maximumFractionDigits: 0 })
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-/** Compact axis labels: ¥1.2M / ¥340k — full precision lives in the tooltip. */
-const compact = (amount: number) => {
-  const magnitude = Math.abs(amount)
-  if (magnitude >= 1_000_000) return `¥${(amount / 1_000_000).toFixed(1)}M`
-  if (magnitude >= 1_000) return `¥${Math.round(amount / 1_000).toString()}k`
-  return `¥${String(Math.round(amount))}`
-}
-
-const monthLabel = (month: string) => {
+/** The month's name, and its year where a reader needs it: January, and the first column. */
+const monthLabel = (month: string, first: boolean) => {
   const [year, monthNumber] = month.split('-')
-  return { short: monthNumber ?? '', year: year ?? '' }
+  const name = MONTHS[Number(monthNumber) - 1] ?? ''
+  return { name, year: first || monthNumber === '01' ? (year ?? '') : '' }
 }
 
 /**
@@ -179,12 +171,10 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
                 )}
               >
                 <span className={styles.valueAmount}>
-                  {datum.tradeCount === 0 ? '·' : compact(realized)}
+                  {datum.tradeCount === 0 ? '·' : yenCompact(realized)}
                 </span>
                 <span className={styles.valuePct}>
-                  {datum.returnPct == null
-                    ? ''
-                    : `${datum.returnPct >= 0 ? '+' : ''}${(datum.returnPct * 100).toFixed(1)}%`}
+                  {datum.returnPct == null ? '' : pctSigned(datum.returnPct)}
                 </span>
               </span>
             )
@@ -200,7 +190,7 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
               className={styles.axisTick}
               style={{ top: `${String(tick.topPct)}%` }}
             >
-              {compact(tick.value)}
+              {yenCompact(tick.value, false)}
             </span>
           ))}
           <span className={styles.axisZero} style={{ top: `${String(baselinePct)}%` }}>
@@ -232,7 +222,7 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
               const heightPct = positive
                 ? (realized / (maxPos || 1)) * 100
                 : (Math.abs(realized) / (negSpan || 1)) * 100
-              const label = monthLabel(datum.month)
+              const label = monthLabel(datum.month, index === 0)
 
               return (
                 <button
@@ -242,7 +232,7 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
                   aria-label={
                     datum.tradeCount === 0
                       ? `${datum.month}: no closed trades`
-                      : `${datum.month}: ${yen(realized)} realized${datum.returnPct == null ? '' : `, ${(datum.returnPct * 100).toFixed(1)} percent`} from ${String(datum.tradeCount)} close${datum.tradeCount === 1 ? '' : 's'}`
+                      : `${datum.month}: ${yenSigned(realized)} realized${datum.returnPct == null ? '' : `, ${pctSigned(datum.returnPct)}`} from ${String(datum.tradeCount)} close${datum.tradeCount === 1 ? '' : 's'}`
                   }
                   onMouseEnter={() => {
                     setHover(index)
@@ -286,14 +276,12 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
                       ) : (
                         <>
                           <span className={positive ? styles.profit : styles.loss}>
-                            {yen(realized)}
-                            {datum.returnPct == null
-                              ? ''
-                              : `  (${datum.returnPct >= 0 ? '+' : ''}${(datum.returnPct * 100).toFixed(1)}%)`}
+                            {yenSigned(realized)}
+                            {datum.returnPct == null ? '' : `  (${pctSigned(datum.returnPct)})`}
                           </span>
                           <span className={styles.tooltipMeta}>
                             {datum.tradeCount} close{datum.tradeCount === 1 ? '' : 's'} · on{' '}
-                            {compact(Number(datum.costJpy))} cost
+                            {yenCompact(Number(datum.costJpy), false)} cost
                           </span>
                         </>
                       )}
@@ -301,10 +289,8 @@ export function MonthlyPnlChart({ data, nav }: { data: MonthlyPoint[]; nav?: Win
                   ) : null}
 
                   <span className={styles.tick} aria-hidden="true">
-                    {label.short}
-                    {label.short === '01' ? (
-                      <span className={styles.tickYear}>{label.year}</span>
-                    ) : null}
+                    {label.name}
+                    {label.year ? <span className={styles.tickYear}>{label.year}</span> : null}
                   </span>
                 </button>
               )

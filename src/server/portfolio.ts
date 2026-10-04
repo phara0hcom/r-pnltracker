@@ -10,15 +10,19 @@ import { authed } from './middleware'
 import { listTrades } from '~/db/trades.service'
 import { accountFilterInput } from '~/lib/accountScope'
 import { matchesAccountFilter, ZERO } from '~/lib/domain/types'
-import { buildNisaReport } from '~/lib/nisa/quota'
+import { ANNUAL_GROWTH_LIMIT, ANNUAL_TSUMITATE_LIMIT, buildNisaReport } from '~/lib/nisa/quota'
 import { runEngine, type RealizedEvent } from '~/lib/pnl/engine'
 import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { splitByMarket, toSplitView, type MarketSplitView } from '~/lib/pnl/markets'
 import { computeStats } from '~/lib/stats/stats'
+import { buildYearOverYear } from '~/lib/tax/report'
 
 /** Aggregates for one time window — reused for week, month and all-time. */
 export interface PeriodSummary {
   label: string
+  /** The window, inclusive ISO dates — what the card says it covers. */
+  from: string
+  to: string
   /** Net realized: gains minus losses. */
   realizedJpy: string
   /** Sum of winning closes only. */
@@ -80,16 +84,54 @@ export interface DashboardData {
   week: PeriodSummary
   month: PeriodSummary
   monthly: MonthlyPoint[]
-  nisaLifetimeUsed: string
-  nisaLifetimeRemaining: string
-  nisaPendingRestoration: string
-  nisaRestorationDate: string
-  nisaGrowthMaxedYear: number | null
+  /** NISA quota. Null under the 特定 filter, which leaves every NISA account out. */
+  nisa: DashboardNisa | null
+  /** This year's taxable result. Only under the 特定 filter, where it replaces the NISA card. */
+  taxYear: DashboardTaxYear | null
   stockEffectJpy: string
   fxEffectJpy: string
   /** FX effect as a share of stock + FX effect combined. Null when both are zero. */
   fxShare: number | null
   equityCurve: { date: string; value: string }[]
+}
+
+export interface DashboardNisa {
+  /** Book value in the ¥18M pool — 旧NISA is not part of it. */
+  lifetimeUsedJpy: string
+  lifetimeLimitJpy: string
+  lifetimeRemainingJpy: string
+  /** 0–1. */
+  lifetimeUtilization: number
+  /** Cost of NISA units sold this year, which comes back to the pool next January. */
+  pendingRestorationJpy: string
+  restorationDate: string
+  /**
+   * This calendar year's annual frames. Only this year's: a frame filled in an
+   * earlier year cannot be used or lost any more, and warning about one — the
+   * dashboard used to say "your 2024 成長投資枠 is fully used" in 2026 — only
+   * reads as an alarm.
+   */
+  year: number
+  growthUsedJpy: string
+  growthLimitJpy: string
+  growthRemainingJpy: string
+  /** 0–1; ≥ 1 is a full frame. */
+  growthUtilization: number
+  tsumitateUsedJpy: string
+  tsumitateLimitJpy: string
+  tsumitateRemainingJpy: string
+  tsumitateUtilization: number
+}
+
+export interface DashboardTaxYear {
+  year: number
+  /** 特定口座 closes settling this year, 受渡日 basis, as the Tax screen counts them. */
+  taxableGainsJpy: string
+  taxableLossesJpy: string
+  netTaxableJpy: string
+  /** 20.315% of a positive net. An estimate: no export carries the withholding. */
+  estimatedTaxJpy: string
+  closes: number
 }
 
 /** Monday-start week containing `now`, as an inclusive ISO date range. */
@@ -122,6 +164,8 @@ function summarize(events: RealizedEvent[], label: string, from: string, to: str
 
   return {
     label,
+    from,
+    to,
     realizedJpy: net.toFixed(0),
     grossProfitJpy: grossProfit.toFixed(0),
     grossLossJpy: grossLoss.toFixed(0),
@@ -206,7 +250,15 @@ export const getDashboard = createServerFn({ method: 'GET' })
     const nisa = buildNisaReport(trades, engine.realized, now.getFullYear())
     const fx = attributeFx(engine.realized)
 
-    const maxedGrowth = nisa.annual.find((frame) => frame.frame === 'NISA_GROWTH' && frame.isMaxed)
+    const year = now.getFullYear()
+    const frameOf = (name: 'NISA_GROWTH' | 'NISA_TSUMITATE') =>
+      nisa.annual.find((usage) => usage.year === year && usage.frame === name)
+    const growth = frameOf('NISA_GROWTH')
+    const tsumitate = frameOf('NISA_TSUMITATE')
+    const taxable =
+      data.account === 'SPECIFIC'
+        ? buildYearOverYear(engine.realized, [], 'CALENDAR').years.find((summary) => summary.year === year)
+        : undefined
     const invested = engine.positions.reduce(
       (running, position) => running.add(position.costBasisJpy),
       ZERO,
@@ -214,7 +266,9 @@ export const getDashboard = createServerFn({ method: 'GET' })
 
     const week = currentWeek(now)
     const monthStart = `${now.toISOString().slice(0, 7)}-01`
-    const monthEnd = `${now.toISOString().slice(0, 7)}-31`
+    const monthEnd = `${now.toISOString().slice(0, 7)}-${String(
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate(),
+    )}`
 
     return {
       tradeCount: trades.length,
@@ -230,11 +284,38 @@ export const getDashboard = createServerFn({ method: 'GET' })
       month: summarize(engine.realized, 'This month', monthStart, monthEnd),
       monthly: monthlySeries(engine.realized),
       markets: toSplitView(splitByMarket(engine.realized)),
-      nisaLifetimeUsed: nisa.lifetime.used.toFixed(0),
-      nisaLifetimeRemaining: nisa.lifetime.remaining.toFixed(0),
-      nisaPendingRestoration: nisa.lifetime.pendingRestoration.toFixed(0),
-      nisaRestorationDate: nisa.lifetime.restorationDate,
-      nisaGrowthMaxedYear: maxedGrowth?.year ?? null,
+      nisa:
+        data.account === 'SPECIFIC'
+          ? null
+          : {
+              lifetimeUsedJpy: nisa.lifetime.used.toFixed(0),
+              lifetimeLimitJpy: nisa.lifetime.limit.toFixed(0),
+              lifetimeRemainingJpy: nisa.lifetime.remaining.toFixed(0),
+              lifetimeUtilization: nisa.lifetime.utilization,
+              pendingRestorationJpy: nisa.lifetime.pendingRestoration.toFixed(0),
+              restorationDate: nisa.lifetime.restorationDate,
+              year,
+              // A frame with no buys this year has no usage row at all.
+              growthUsedJpy: (growth?.used ?? ZERO).toFixed(0),
+              growthLimitJpy: ANNUAL_GROWTH_LIMIT.toFixed(0),
+              growthRemainingJpy: (growth?.remaining ?? ANNUAL_GROWTH_LIMIT).toFixed(0),
+              growthUtilization: growth?.utilization ?? 0,
+              tsumitateUsedJpy: (tsumitate?.used ?? ZERO).toFixed(0),
+              tsumitateLimitJpy: ANNUAL_TSUMITATE_LIMIT.toFixed(0),
+              tsumitateRemainingJpy: (tsumitate?.remaining ?? ANNUAL_TSUMITATE_LIMIT).toFixed(0),
+              tsumitateUtilization: tsumitate?.utilization ?? 0,
+            },
+      taxYear:
+        data.account === 'SPECIFIC'
+          ? {
+              year,
+              taxableGainsJpy: (taxable?.taxableGains ?? ZERO).toFixed(0),
+              taxableLossesJpy: (taxable?.taxableLosses ?? ZERO).toFixed(0),
+              netTaxableJpy: (taxable?.netTaxable ?? ZERO).toFixed(0),
+              estimatedTaxJpy: (taxable?.estimatedCapitalGainsTax ?? ZERO).toFixed(0),
+              closes: taxable?.tradeCount ?? 0,
+            }
+          : null,
       stockEffectJpy: fx.stockEffectJpy.toFixed(0),
       fxEffectJpy: fx.fxEffectJpy.toFixed(0),
       fxShare: fx.fxShare,

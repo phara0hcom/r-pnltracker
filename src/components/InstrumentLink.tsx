@@ -24,12 +24,15 @@ export function InstrumentLink({
   assetClass,
   /** `compact` shrinks the symbol to match dense rows like the calendar dialog. */
   size = 'normal',
+  /** A short tag after the symbol — the asset class, where no column says it. */
+  badge,
   className,
 }: {
   symbol: string
   name: string
   assetClass: AssetClass
   size?: 'normal' | 'compact'
+  badge?: string
   className?: string
 }) {
   const url = tradingViewUrl(symbol, assetClass)
@@ -42,6 +45,7 @@ export function InstrumentLink({
    * line takes over as the name and the reveal goes with it.
    */
   const selfNamed = name === symbol
+  const tag = badge ? <span className={styles.badge}>{badge}</span> : null
 
   if (!url) {
     return (
@@ -52,6 +56,7 @@ export function InstrumentLink({
           ) : (
             <span className={styles.symbolText}>{symbol}</span>
           )}
+          {tag}
         </span>
         {selfNamed ? null : <RevealableText text={name} className={styles.name} />}
       </div>
@@ -75,6 +80,7 @@ export function InstrumentLink({
           <span className={styles.symbolText}>{symbol}</span>
         )}
         <ExternalIcon className={styles.icon} />
+        {tag}
       </span>
       {selfNamed ? null : <RevealableText text={name} className={styles.name} />}
       <span className="visually-hidden">— open chart on TradingView in a new tab</span>

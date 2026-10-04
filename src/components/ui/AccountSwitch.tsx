@@ -14,6 +14,7 @@ import * as ToggleGroup from '@radix-ui/react-toggle-group'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import styles from './AccountSwitch.module.scss'
 import { toAccountFilter } from '~/lib/accountScope'
+import { cx } from '~/lib/cx'
 import type { AccountFilter } from '~/lib/domain/types'
 
 /**
@@ -52,23 +53,33 @@ export function useAccountFilter(): [AccountFilter, (next: AccountFilter) => voi
   ]
 }
 
-const OPTIONS: { value: AccountFilter; label: string; hint: string }[] = [
-  { value: 'ALL', label: 'All', hint: 'Every account' },
-  { value: 'NISA', label: 'NISA', hint: 'Tax-free: 旧NISA, 成長投資枠, つみたて投資枠' },
-  { value: 'SPECIFIC', label: '特定', hint: 'Taxable account only' },
+/** What each bucket covers, said beside the switch rather than only in a tooltip. */
+export const ACCOUNT_SCOPE_HINT: Record<AccountFilter, string> = {
+  ALL: 'Every account',
+  NISA: 'Tax-free: 旧NISA, 成長投資枠, つみたて投資枠',
+  SPECIFIC: 'Taxable account only',
+}
+
+const OPTIONS: { value: AccountFilter; label: string }[] = [
+  { value: 'ALL', label: 'All' },
+  { value: 'NISA', label: 'NISA' },
+  { value: 'SPECIFIC', label: '特定' },
 ]
 
 export function AccountSwitch({
   value,
   onChange,
+  fill = false,
 }: {
   value: AccountFilter
   onChange: (next: AccountFilter) => void
+  /** Full width with 40px-tall segments, for a phone. */
+  fill?: boolean
 }) {
   return (
     <ToggleGroup.Root
       type="single"
-      className={styles.group}
+      className={cx(styles.group, fill && styles.fill)}
       value={value}
       aria-label="Filter by account"
       onValueChange={(next) => {
@@ -79,7 +90,12 @@ export function AccountSwitch({
       }}
     >
       {OPTIONS.map((o) => (
-        <ToggleGroup.Item key={o.value} value={o.value} className={styles.item} title={o.hint}>
+        <ToggleGroup.Item
+          key={o.value}
+          value={o.value}
+          className={styles.item}
+          title={ACCOUNT_SCOPE_HINT[o.value]}
+        >
           {o.label}
         </ToggleGroup.Item>
       ))}

@@ -1,8 +1,9 @@
 import { MutationCache, QueryClient } from '@tanstack/react-query'
-import { createRouter as createTanStackRouter } from '@tanstack/react-router'
-import { routerWithQueryClient } from '@tanstack/react-router-with-query'
+import { createBrowserHistory, createRouter as createTanStackRouter } from '@tanstack/react-router'
+import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query'
 import { routeTree } from './routeTree.gen'
 import { noteActionFailed } from '~/components/offline/offlineStore'
+import { historyWithDialogs } from '~/components/ui/dialogHistory'
 import { isNetworkFailure } from '~/lib/offline/messages'
 
 /** A request that failed because this device has no network at all. */
@@ -53,15 +54,25 @@ export function getRouter() {
     },
   })
 
-  return routerWithQueryClient(
-    createTanStackRouter({
-      routeTree,
-      context: { queryClient },
-      defaultPreload: 'intent',
-      scrollRestoration: true,
-    }),
-    queryClient,
-  )
+  const router = createTanStackRouter({
+    routeTree,
+    context: { queryClient },
+    defaultPreload: 'intent',
+    scrollRestoration: true,
+    // The browser's history, made so an open dialog can take Back for itself
+    // without the router reloading the screen — see `historyWithDialogs`.
+    // The server keeps the router's own memory history.
+    history: typeof window === 'undefined' ? undefined : historyWithDialogs(() => createBrowserHistory()),
+  })
+
+  /*
+   * Not `routerWithQueryClient` from `@tanstack/react-router-with-query`: its
+   * last release calls a router SSR method that router-core 1.171.34 removed,
+   * so every server render that created a query threw, and those screens came
+   * back as client-rendered fallbacks. `router.ssr.test.tsx` renders one.
+   */
+  setupRouterSsrQueryIntegration({ router, queryClient })
+  return router
 }
 
 declare module '@tanstack/react-router' {

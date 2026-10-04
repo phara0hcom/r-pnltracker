@@ -27,6 +27,7 @@ import {
   hasQuotableTicker,
   type ProviderCheck,
 } from '~/lib/prices/providers'
+import { quotedPrice, storedPrice } from '~/lib/prices/quoteUnit'
 
 /** Intraday TTL. A quote younger than this is not re-fetched. */
 const TTL_MS = 15 * 60_000
@@ -172,7 +173,13 @@ export const checkProviders = createServerFn({ method: 'POST' })
     return Promise.all([checkFinnhub(), checkFx(), checkJpScrape()])
   })
 
-/** Every held instrument with its current price state, for the Settings screen. */
+/**
+ * Every held instrument with its current price state, for the Settings screen.
+ *
+ * Prices are in the unit they are quoted in — a fund's per 10,000 口, as the
+ * 基準価額 Rakuten shows — and `setManualPrice` takes them back in that unit.
+ * See `lib/prices/quoteUnit.ts`.
+ */
 export interface PriceEntry {
   symbol: string
   name: string
@@ -211,19 +218,22 @@ export const listPrices = createServerFn({ method: 'GET' })
         const id = instrumentId(position.symbol)
         const cached = byId.get(id)
         const override = overrideById.get(id)
+        // An override wins, exactly as it does in `getPositions` — reading the
+        // cache alone showed "—" for every hand-priced fund, because a fund
+        // has no cache row at all. That is the one case the override exists
+        // for, so the screen denied having saved the value the user just typed.
+        const price = override?.price ?? cached?.price ?? null
+        const asQuoted = (stored: string | null) =>
+          stored == null ? null : quotedPrice(stored, position.assetClass).toFixed()
         return {
           symbol: position.symbol,
           name: position.name,
           assetClass: position.assetClass,
-          // An override wins, exactly as it does in `getPositions` — reading the
-          // cache alone showed "—" for every hand-priced fund, because a fund
-          // has no cache row at all. That is the one case the override exists
-          // for, so the screen denied having saved the value the user just typed.
-          price: override?.price ?? cached?.price ?? null,
+          price: asQuoted(price),
           currency: override?.currency ?? cached?.currency ?? null,
           source: override ? 'MANUAL' : (cached?.source ?? null),
           asOf: (override?.setAt ?? cached?.asOf)?.toISOString() ?? null,
-          manualOverride: override?.price ?? null,
+          manualOverride: asQuoted(override?.price ?? null),
           // Only instruments no provider can quote at all — funds. JP equities
           // scrape reliably, so flagging them here sent the user to type prices
           // the app was already fetching.
@@ -275,13 +285,16 @@ export const setManualPrice = createServerFn({ method: 'POST' })
     }
 
     const currency = inst.assetClass === 'US_EQUITY' ? ('USD' as const) : ('JPY' as const)
+    // Typed as quoted — a fund's per 10,000 口 — and stored per 口, the unit the
+    // engine values a holding in.
+    const price = storedPrice(data.price, inst.assetClass).toFixed()
 
     await db
       .insert(priceOverrides)
-      .values({ userId: context.userId, instrumentId: id, price: data.price, currency })
+      .values({ userId: context.userId, instrumentId: id, price, currency })
       .onConflictDoUpdate({
         target: [priceOverrides.userId, priceOverrides.instrumentId],
-        set: { price: data.price, currency, setAt: new Date() },
+        set: { price, currency, setAt: new Date() },
       })
 
     return { ok: true as const }

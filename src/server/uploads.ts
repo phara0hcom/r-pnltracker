@@ -13,6 +13,7 @@ import { listTrades, setDayOrder } from '~/db/trades.service'
 import type { NormalizedTrade } from '~/lib/domain/types'
 import { daysToOrder, type OrderCandidate } from '~/lib/import/dayOrder'
 import { figuresOf, orderFilesForImport, type StoredTrade } from '~/lib/import/plan'
+import { quotedPrice } from '~/lib/prices/quoteUnit'
 
 export interface UploadPayload {
   filename: string
@@ -203,10 +204,7 @@ export const previewFiles = createServerFn({ method: 'POST' })
         accountType: trade.accountType,
         side: trade.side,
         quantity: trade.quantity.toFixed(),
-        price: `${trade.currency === 'USD' ? '$' : '¥'}${(trade.assetClass === 'FUND'
-          ? trade.unitPrice.mul(10_000)
-          : trade.unitPrice
-        ).toFixed()}`,
+        price: `${trade.currency === 'USD' ? '$' : '¥'}${quotedPrice(trade.unitPrice, trade.assetClass).toFixed()}`,
         isNew,
       })),
     }))

@@ -45,6 +45,26 @@ export function monthGrid(month: string): MonthGrid {
   }
 }
 
+/**
+ * The month's dates cut into Monday-first weeks, for the calendar's rows and
+ * their totals. The first and last weeks are clipped to the month, so a week's
+ * total is this month's part of it — the rest belongs to the next page.
+ */
+export function monthWeeks(month: string): string[][] {
+  const { dates, leadingBlanks } = monthGrid(month)
+  const weeks: string[][] = []
+  let week: string[] = []
+  for (const [index, date] of dates.entries()) {
+    week.push(date)
+    if ((leadingBlanks + index) % 7 === 6) {
+      weeks.push(week)
+      week = []
+    }
+  }
+  if (week.length > 0) weeks.push(week)
+  return weeks
+}
+
 /** The month `delta` months away, as `YYYY-MM`. */
 export function shiftMonth(month: string, delta: number): string {
   const { year, monthIndex } = parse(month)

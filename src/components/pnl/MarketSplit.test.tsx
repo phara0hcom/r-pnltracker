@@ -18,8 +18,8 @@ describe('MarketBreakdown', () => {
   it('gives each account in its own currency', () => {
     render(<MarketBreakdown split={september} currencyEffectJpy="-61000" />)
     expect(screen.getByText('JPY account').nextElementSibling?.textContent).toBe('+¥110,207')
-    expect(screen.getByText('USD account').nextElementSibling?.textContent).toBe('$-818.86(¥-207,087)')
-    expect(screen.getByText(/from the exchange rate/).textContent).toContain('¥-61,000')
+    expect(screen.getByText('USD account').nextElementSibling?.textContent).toBe('−$818.86(−¥207,087)')
+    expect(screen.getByText(/from the exchange rate/).textContent).toContain('−¥61,000')
   })
 
   it('marks an account with no closes rather than showing zero', () => {
@@ -33,12 +33,12 @@ describe('MarketBreakdown', () => {
 describe('MarketInline', () => {
   it('puts both accounts on one line', () => {
     const { container } = render(<MarketInline split={september} />)
-    expect(container.textContent).toBe('JPY +¥110,207·USD $-818.86(¥-207,087)')
+    expect(container.textContent).toBe('JPY +¥110,207·USD −$818.86(−¥207,087)')
   })
 
   it('leaves out a side with no closes, and renders nothing with neither', () => {
     const { container } = render(<MarketInline split={{ ...september, jpyRealizedJpy: null }} />)
-    expect(container.textContent).toBe('USD $-818.86(¥-207,087)')
+    expect(container.textContent).toBe('USD −$818.86(−¥207,087)')
     const empty = render(
       <MarketInline split={{ jpyRealizedJpy: null, usdRealizedUsd: null, usdRealizedJpy: null, totalJpy: '0' }} />,
     )

@@ -1,0 +1,333 @@
+@use '../../styles/mixins' as m;
+
+/* ── Layout ───────────────────────────────────────────────────────────────── */
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr) minmax(0, 1.05fr);
+  gap: var(--space-3);
+  align-items: stretch;
+  margin-bottom: var(--space-4);
+
+  @include m.tablet {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.rowNoSplit {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+/* The allocation card takes the full width once the row wraps to two columns. */
+.splits {
+  @include m.tablet {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+
+  @include m.card;
+
+  @include m.mobile {
+    padding: var(--space-4);
+  }
+}
+
+.label {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+/* ── Market value ─────────────────────────────────────────────────────────── */
+
+.figure {
+  margin-top: var(--space-1);
+  font-size: 2.25rem;
+  font-weight: var(--weight-semibold);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+
+  @include m.tabular-nums;
+
+  @include m.mobile {
+    font-size: 1.875rem;
+  }
+}
+
+.unrealized {
+  margin-top: 6px;
+  font-size: 0.9375rem;
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+
+  @include m.mobile {
+    margin-top: var(--space-1);
+    font-size: var(--text-base);
+  }
+}
+
+.cost {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+/* Pushes the facts to the foot of a card stretched to its row, and keeps
+   some room above their rule when it is not. */
+.spacer {
+  flex: 1;
+  min-height: var(--space-4);
+}
+
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: var(--space-4);
+  margin: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.fact {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  font-size: var(--text-sm);
+
+  dt {
+    color: var(--color-text-muted);
+  }
+
+  dd {
+    margin: 0;
+    font-weight: var(--weight-medium);
+
+    @include m.tabular-nums;
+  }
+}
+
+.valueSplit {
+  margin-top: var(--space-4);
+}
+
+/* ── Allocation ───────────────────────────────────────────────────────────── */
+
+.splits {
+  gap: var(--space-4);
+}
+
+.allocation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.track {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+}
+
+.segment {
+  flex-basis: 0;
+  min-width: 2px;
+  border-radius: 2px;
+}
+
+.legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1) var(--space-5);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+
+  @include m.mobile {
+    column-gap: var(--space-4);
+  }
+}
+
+.legendItem {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+  font-size: var(--text-sm);
+
+  @include m.tabular-nums;
+
+  @include m.mobile {
+    gap: 6px;
+    font-size: var(--text-xs);
+  }
+}
+
+.swatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.legendLabel {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-muted);
+
+  @include m.truncate;
+}
+
+.legendPct {
+  font-weight: var(--weight-medium);
+}
+
+
+/* ── Highlights ───────────────────────────────────────────────────────────── */
+
+.highlights {
+  gap: var(--space-3);
+
+  @include m.mobile {
+    padding: 14px var(--space-4);
+  }
+}
+
+.highlightList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+
+  @include m.mobile {
+    gap: 10px;
+  }
+}
+
+.highlight {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: baseline;
+
+  dd {
+    margin: 0;
+  }
+}
+
+.highlightLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.highlightWho {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.highlightTitle {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+
+  /* A fund's name runs to forty-odd characters; two lines show enough of it
+     to tell one eMAXIS Slim from another. */
+  -webkit-line-clamp: 2;
+}
+
+.highlightWhere {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+
+  @include m.truncate;
+}
+
+.highlightFigure {
+  font-size: 0.9375rem;
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+
+  @include m.tabular-nums;
+
+  @include m.mobile {
+    font-size: var(--text-base);
+  }
+}
+
+/* ── No price ─────────────────────────────────────────────────────────────── */
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  padding: 10px var(--space-4);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  background-color: color-mix(in srgb, var(--color-warn) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warn) 35%, var(--color-bg));
+  border-radius: var(--radius-md);
+
+  @include m.mobile {
+    align-items: flex-start;
+    padding: 10px var(--space-3);
+  }
+}
+
+.noticeIcon {
+  flex: none;
+  color: var(--color-warn);
+}
+
+.noticeText {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.noticeLink {
+  color: var(--color-accent);
+  text-decoration: none;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+
+  @include m.focus-ring;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  /* Under the text on a phone, lined up with it rather than the icon. */
+  @include m.mobile {
+    margin-left: calc(16px + var(--space-3));
+  }
+}

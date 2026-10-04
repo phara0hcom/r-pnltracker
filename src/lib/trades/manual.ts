@@ -19,14 +19,9 @@
 import Decimal from 'decimal.js'
 import { z } from 'zod'
 import { canonicalSymbol } from '../domain/instruments'
-import {
-  FUND_UNIT_DIVISOR,
-  ONE,
-  ZERO,
-  type AssetClass,
-  type NormalizedTrade,
-} from '../domain/types'
+import { ONE, ZERO, type AssetClass, type NormalizedTrade } from '../domain/types'
 import { rowHash, toYen } from '../import/util'
+import { storedPrice } from '../prices/quoteUnit'
 
 const decimalString = z
   .string()
@@ -158,7 +153,7 @@ export function buildManualTrade(
   const quantity = new Decimal(input.quantity)
   const rawPrice = new Decimal(input.unitPrice)
   // Funds are quoted per 10,000 口, exactly as in the CSV export.
-  const unitPrice = assetClass === 'FUND' ? rawPrice.div(FUND_UNIT_DIVISOR) : rawPrice
+  const unitPrice = storedPrice(rawPrice, assetClass)
 
   const fee = dec(input.fee)
   const feeTax = dec(input.feeTax)

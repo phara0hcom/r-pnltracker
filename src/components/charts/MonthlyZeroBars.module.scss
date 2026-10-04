@@ -29,7 +29,10 @@
   gap: var(--space-2);
 }
 
+/* The phone's chart, so thumb-sized. */
 .navButton {
+  min-width: 44px;
+  min-height: 44px;
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
@@ -54,7 +57,7 @@
   display: flex;
   gap: var(--space-2);
   padding-bottom: 4px;
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   color: var(--color-text-subtle);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -69,13 +72,13 @@
   display: flex;
   gap: var(--space-2);
   align-items: center;
-  padding: 5px 0;
+  padding: 7px 0;
   border-top: 1px solid var(--color-border);
 }
 
 .month {
   flex: none;
-  width: 44px;
+  width: 60px;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 
@@ -89,8 +92,9 @@
 
 .net {
   flex: none;
-  width: 62px;
-  font-size: 0.6875rem;
+  width: 58px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   text-align: right;
   white-space: nowrap;
 
@@ -114,4 +118,16 @@
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   text-align: center;
+}
+
+/* Supporting the net figure, so dimmer than it. */
+.pct {
+  flex: none;
+  width: 44px;
+  font-size: 0.6875rem;
+  color: var(--color-text-subtle);
+  text-align: right;
+  white-space: nowrap;
+
+  @include m.tabular-nums;
 }

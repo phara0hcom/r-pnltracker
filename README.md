@@ -231,6 +231,17 @@ Verification loop for any change: `npm run typecheck && npm run lint && npm test
 | `FINNHUB_API_KEY` | US quotes |
 | `TRADINGVIEW_WEBHOOK_SECRET` | 24+ chars; forms the `/api/tv/<secret>` path. Unset disables the exit-rules feed rather than failing |
 
+### Downloading the monthly statements
+
+The 取引残高報告書 is the only source of dividends:
+
+> 楽天証券 → マイメニュー → 取引報告書等（電子書面） → 書面の種類 **取引残高報告書** →
+> この条件で表示する → **CSV** for each month
+
+The other kinds on that menu are not imported — 特定口座年間取引報告書 is the yearly tax
+summary, 外国株式 [配当金・還付金]のお知らせ the US dividend notice. Nor is the separate
+配当・分配金一覧 export (`dividendlist_*.csv`); uploading it fails as "Unrecognised file".
+
 ### The test suite needs data that is not in this repo
 
 `csv/` holds the owner's actual Rakuten exports and is gitignored. `loadFixtures.ts` reads it

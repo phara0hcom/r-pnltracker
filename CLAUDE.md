@@ -185,6 +185,14 @@ that would survive an end-state comparison fails here at the month it starts.
 - `TORIHOU` / `GAIKABU` — daily statements. **Deliberately rejected**; they duplicate the trade
   history. Uploading one yields 0 trades and an explanatory error.
 
+The 取引残高報告書 comes from 楽天証券 → マイメニュー → 取引報告書等（電子書面）, with
+書面の種類 set to **取引残高報告書** — one CSV per month, not the PDF. The other kinds on
+that menu are not imported: 特定口座年間取引報告書 is the yearly tax summary, and
+外国株式 [配当金・還付金]のお知らせ is the US dividend notice. The separate 配当・分配金一覧
+export (`dividendlist_*.csv`) is easy to mistake for the dividend source and fails as
+"Unrecognised file" — it has no parser, though it carries what the 取引残高報告書 does not:
+gross amounts, both withholdings, the account, and US dividends.
+
 Dedupe is `sourceRowHash`, unique per `(userId, sourceRowHash)`. The hash includes a **per-file
 occurrence ordinal** because one order is often filled as several byte-identical executions —
 without it, real trades silently collapse into one. Re-importing an overlapping export is safe.

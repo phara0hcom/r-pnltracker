@@ -20,7 +20,7 @@ export function ScoreGroup({
 }: {
   legend: string
   /** 1-indexed, so `labels[0]` is unused padding. */
-  labels: string[]
+  labels: readonly string[]
   value: number | null
   onChange: (v: number | null) => void
   name: string
@@ -50,6 +50,14 @@ export function ScoreGroup({
             <span className="visually-hidden">{labels[score]}</span>
           </label>
         ))}
+      </div>
+      {/* What the ends of the scale mean; every value is named for a screen
+          reader already, so this is for the eye. */}
+      <div className={styles.ends} aria-hidden="true">
+        <span>1 {labels[1]}</span>
+        <span>
+          {labels[5]} 5
+        </span>
       </div>
     </fieldset>
   )

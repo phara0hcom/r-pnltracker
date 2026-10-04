@@ -3,10 +3,12 @@
 .overlay {
   position: fixed;
   inset: 0;
+  z-index: 50;
   background-color: rgb(0 0 0 / 65%);
   backdrop-filter: blur(2px);
 }
 
+/* Desktop: a centred dialog, as tall as it needs up to the window. */
 .content {
   position: fixed;
   top: 50%;
@@ -14,7 +16,7 @@
   z-index: 50;
   display: flex;
   flex-direction: column;
-  width: min(760px, calc(100vw - var(--space-6)));
+  width: min(880px, calc(100vw - var(--space-6)));
   max-height: calc(100dvh - var(--space-6));
   overflow: hidden;
   background-color: var(--color-surface);
@@ -26,80 +28,482 @@
   @include m.focus-ring;
 }
 
+/* Phone: the whole screen, the footer pinned under the scrolling body. */
+.sheet {
+  inset: 0;
+  width: 100%;
+  max-height: none;
+  height: 100dvh;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+/* ── Head ─────────────────────────────────────────────────────────────────── */
+
 .head {
   display: flex;
-  gap: var(--space-3);
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: var(--space-4);
+  flex: none;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-4) var(--space-5) var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
+
+  .sheet & {
+    gap: var(--space-3);
+    padding: var(--space-2) 6px var(--space-2) var(--space-4);
+  }
+}
+
+.heading {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .title {
+  margin: 0;
   font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: 1.3;
 
-  @include m.tabular-nums;
+  .sheet & {
+    font-size: 1.125rem;
+  }
 }
 
-.subtitle {
-  margin-top: var(--space-1);
+.meta {
+  margin: 0;
   font-size: var(--text-sm);
   color: var(--color-text-muted);
 
   @include m.tabular-nums;
 }
 
-.close {
-  width: 28px;
-  height: 28px;
-  font-size: var(--text-lg);
-  line-height: 1;
-  color: var(--color-text-muted);
-  border-radius: var(--radius-sm);
-
-  @include m.interactive-surface;
-}
-
-.body {
+.headFigure {
   display: flex;
+  flex: none;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-4);
-  overflow-y: auto;
+  align-items: flex-end;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.label {
-  display: flex;
-  gap: var(--space-2);
-  align-items: baseline;
-  padding: 0;
+.figureLabel {
   font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
+.headRealized {
+  font-size: 1.375rem;
+  font-weight: var(--weight-semibold);
+  line-height: 1.25;
+
+  @include m.tabular-nums;
+}
+
+.headSplit {
+  font-size: var(--text-xs);
+}
+
+.close {
+  display: grid;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  place-items: center;
+
+  @include m.interactive-surface;
+
+  .sheet & {
+    width: 44px;
+    height: 44px;
+    border-color: transparent;
+  }
+}
+
+/* ── Body ─────────────────────────────────────────────────────────────────── */
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+
+  .sheet & {
+    gap: var(--space-5);
+    padding: var(--space-4);
+  }
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: var(--space-4) var(--space-5);
+
+  .sheet & {
+    gap: var(--space-2);
+    padding: 0;
+  }
+}
+
+.sectionHead {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+}
+
+.sectionTitles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-3);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sectionHint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.orderButton {
+  flex: none;
+  height: 30px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+
+  .sheet & {
+    height: 40px;
+    padding: 0 14px;
+    font-size: var(--text-sm);
+  }
+}
+
+.orderActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+
+  .sheet & {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+}
+
+.orderError {
+  font-size: var(--text-xs);
+  color: var(--color-loss);
+
+  .sheet & {
+    grid-column: 1 / -1;
+
+    &:empty {
+      display: none;
+    }
+  }
+}
+
+.footnote {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* ── The day's trades, as a table ─────────────────────────────────────────── */
+
+.tableWrap {
+  overflow-x: auto;
+  background-color: color-mix(in srgb, var(--color-bg) 50%, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.table {
+  width: 100%;
+  min-width: 720px;
+  font-size: var(--text-sm);
+  table-layout: fixed;
+  border-collapse: collapse;
+
+  th {
+    padding: 7px var(--space-3);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
+    text-align: left;
+    background-color: var(--color-surface-raised);
+  }
+
+  [data-numeric] {
+    text-align: right;
+  }
+
+  tfoot th,
+  tfoot td {
+    padding: 9px var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    background-color: var(--color-surface);
+    border-top: 1px solid var(--color-border-strong);
+
+    @include m.tabular-nums;
+  }
+
+  tfoot th {
+    font-weight: var(--weight-semibold);
+  }
+}
+
+.colSize {
+  width: 172px;
+}
+
+.colCash {
+  width: 118px;
+}
+
+.colRealized {
+  width: 132px;
+}
+
+.colReturn {
+  width: 68px;
+}
+
+.colJournal {
+  width: 92px;
+}
+
+.cashTotal {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+
+  span {
+    display: block;
+  }
+}
+
+.dayRealized {
+  font-weight: var(--weight-semibold);
+}
+
+/* ── Phone: the day in three figures, and a card per trade ────────────────── */
+
+.strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr);
+  margin: 0;
+  background-color: color-mix(in srgb, var(--color-bg) 50%, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.stripCell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 10px var(--space-3);
+
+  & + & {
+    border-left: 1px solid var(--color-border);
+  }
+
+  dt {
+    font-size: 0.6875rem;
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  dd {
+    margin: 0;
+  }
+}
+
+.stripValue {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: 1.3;
+
+  @include m.tabular-nums;
+  @include m.truncate;
+}
+
+.stripNote {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.stripSplit {
+  margin-top: calc(-1 * var(--space-3));
+  font-size: var(--text-xs);
+}
+
+.cards {
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  list-style: none;
+  background-color: color-mix(in srgb, var(--color-bg) 50%, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+/* ── The day's journal ────────────────────────────────────────────────────── */
+
+.journal {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border-top: 1px solid var(--color-border);
+
+  .sheet & {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: 0;
+    border-top: none;
+  }
+}
+
+.feelings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  .sheet & {
+    gap: var(--space-4);
+  }
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+
+  .sheet & {
+    gap: var(--space-4);
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+
+  .sheet & {
+    font-size: var(--text-base);
+  }
+}
+
 .input,
 .textarea {
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--text-sm);
+  padding: 0 var(--space-3);
+  font-size: var(--text-base);
+  color: var(--color-text);
   background-color: var(--color-bg);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
 
   @include m.focus-ring;
+
+  /* 16px, or iOS zooms the page when the field takes focus. */
+  .sheet & {
+    font-size: var(--text-md);
+  }
+}
+
+.input {
+  height: 36px;
+
+  .sheet & {
+    height: 44px;
+  }
 }
 
 .textarea {
+  padding: var(--space-2) var(--space-3);
   font-family: inherit;
-  line-height: 1.6;
+  line-height: 1.5;
   resize: vertical;
+
+  .sheet & {
+    padding: 10px var(--space-3);
+  }
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+.footer {
+  display: flex;
+  flex: none;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border);
+
+  /* Cancel and a wider Save, within reach of a thumb. */
+  .sheet & {
+    display: block;
+    padding: var(--space-3) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+    background-color: var(--color-surface);
+    box-shadow: 0 -8px 16px rgb(0 0 0 / 30%);
+  }
+}
+
+.footerActions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+
+  .sheet & {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  }
 }
 
 .hint {
@@ -107,31 +511,26 @@
   color: var(--color-text-subtle);
 }
 
-.footer {
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-4);
-  border-top: 1px solid var(--color-border);
-}
-
-.footerActions {
-  display: flex;
-  gap: var(--space-2);
-}
-
 .button {
-  padding: var(--space-2) var(--space-4);
+  height: 36px;
+  padding: 0 var(--space-4);
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
 
   @include m.interactive-surface;
+
+  .sheet & {
+    height: 48px;
+    font-size: 0.9375rem;
+    border-radius: 10px;
+  }
 }
 
 .primary {
+  padding: 0 18px;
+  font-weight: var(--weight-semibold);
   color: var(--color-bg);
   background-color: var(--color-profit);
   border-color: var(--color-profit);
@@ -143,67 +542,13 @@
   }
 }
 
-.profit {
-  color: var(--color-profit);
-}
+/* Sized to sit level with the footer's buttons; its colour is the
+   ConfirmButton's own, which has to change once armed. */
+.deleteEntry {
+  height: 36px;
 
-.loss {
-  color: var(--color-loss);
-}
-
-/* ── Trades in the day dialog ────────────────────────────────────────────── */
-
-.tradesSection {
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.tradesHead {
-  display: flex;
-  gap: var(--space-3);
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: var(--space-2);
-}
-
-.sectionTitle {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.tradesHint {
-  font-size: var(--text-xs);
-  color: var(--color-text-subtle);
-}
-
-.tradeList {
-  overflow: hidden;
-  background-color: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.orderButton {
-  flex-shrink: 0;
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-
-  @include m.interactive-surface;
-}
-
-.orderActions {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  margin-top: var(--space-3);
-}
-
-.orderError {
-  font-size: var(--text-xs);
-  color: var(--color-loss);
+  .sheet & {
+    align-self: flex-start;
+    height: 44px;
+  }
 }

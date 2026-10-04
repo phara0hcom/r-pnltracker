@@ -122,6 +122,28 @@
   align-items: center;
 }
 
+.inputWrap {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: baseline;
+}
+
+/* "/万口" after a fund's field: the unit it takes, which is not the one the
+   database holds. */
+.unit {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* The table does not wrap its cells; this sentence has to. */
+.unitHint {
+  max-width: 18rem;
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-warn);
+  white-space: normal;
+}
+
 .input {
   width: 7rem;
   padding: var(--space-1) var(--space-2);

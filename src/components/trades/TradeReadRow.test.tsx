@@ -63,14 +63,14 @@ describe('realized cell', () => {
   it('shows a US close in dollars, with its yen in brackets as Rakuten does', () => {
     renderRow(soxlSell)
     const cell = screen.getByText('$60.94')
-    expect(cell.textContent).toBe('$60.94(¥-3,246)')
+    expect(cell.textContent).toBe('$60.94(−¥3,246)')
   })
 
   it('explains both figures in the hover text', () => {
     renderRow(soxlSell)
     const title = screen.getByText('$60.94').getAttribute('title') ?? ''
     expect(title).toContain('$46.42 after the sell commission as well')
-    expect(title).toContain('¥-3,246 in yen, the currency move included')
+    expect(title).toContain('−¥3,246 in yen, the currency move included')
   })
 
   it('leaves a yen close as it was', () => {

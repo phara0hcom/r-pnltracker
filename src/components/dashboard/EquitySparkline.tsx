@@ -1,6 +1,14 @@
 import { useId } from 'react'
 import styles from './EquitySparkline.module.scss'
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** `2024-02-12` → `Feb 2024`: where the history starts only needs the month. */
+const monthYear = (iso: string) => `${MONTHS[Number(iso.slice(5, 7)) - 1] ?? ''} ${iso.slice(0, 4)}`
+
+/** `2026-09-25` → `25 Sep 2026`: the latest close is worth the day. */
+const dayMonthYear = (iso: string) => `${String(Number(iso.slice(8, 10)))} ${monthYear(iso)}`
+
 /** Cumulative realized P&L as a filled area + line, from first close to latest. */
 export function EquitySparkline({
   points,
@@ -36,6 +44,8 @@ export function EquitySparkline({
   const stroke = tone === 'loss' ? 'var(--color-loss)' : 'var(--color-profit)'
   const first = points[0]
   const last = points.at(-1)
+  // The line to read the curve against, when it spends time on both sides.
+  const zeroY = min < 0 && max > 0 ? yFor(0) : null
 
   return (
     <div>
@@ -52,6 +62,17 @@ export function EquitySparkline({
             <stop offset="100%" style={{ stopColor: stroke, stopOpacity: 0 }} />
           </linearGradient>
         </defs>
+        {zeroY == null ? null : (
+          <line
+            x1="0"
+            x2="100"
+            y1={zeroY}
+            y2={zeroY}
+            stroke="var(--color-border-strong)"
+            strokeDasharray="3 3"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
         <polygon fill={`url(#${gradientId})`} points={areaPoints} />
         <polyline
           fill="none"
@@ -63,9 +84,20 @@ export function EquitySparkline({
         />
       </svg>
       <div className={styles.axis}>
-        <span>{first?.date}</span>
-        <span>cumulative</span>
-        <span>{last?.date}</span>
+        <span>{first ? monthYear(first.date) : ''}</span>
+        {/* A key rather than a sentence when the line crosses zero: at this
+            width "dashed line ¥0" wrapped onto three lines with the dates. */}
+        <span className={styles.axisMiddle}>
+          {zeroY == null ? (
+            'cumulative'
+          ) : (
+            <>
+              <span className={styles.dash} aria-hidden="true" />
+              ¥0
+            </>
+          )}
+        </span>
+        <span>{last ? dayMonthYear(last.date) : ''}</span>
       </div>
     </div>
   )

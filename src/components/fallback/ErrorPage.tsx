@@ -5,7 +5,7 @@ import { reloadScreen, useOnline } from '~/components/offline/offlineStore'
 import { isNetworkFailure } from '~/lib/offline/messages'
 
 /** The root route's `errorComponent`. */
-export function ErrorPage({ error }: { error: Error }) {
+export function ErrorPage({ error }: { error: unknown }) {
   /*
    * Reported here because nothing else reports it.
    *
@@ -72,7 +72,7 @@ export function ErrorPage({ error }: { error: Error }) {
   return (
     <FallbackPage
       title="Something went wrong"
-      message={error.message || 'An unexpected error occurred.'}
+      message={(error instanceof Error && error.message) || 'An unexpected error occurred.'}
       onRetry={networkFailure ? reloadScreen : undefined}
     />
   )

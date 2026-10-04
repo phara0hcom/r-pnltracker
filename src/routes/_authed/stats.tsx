@@ -498,9 +498,8 @@ function Stats() {
       <PageHeader
         title="Stats"
         meta={`${String(d.tradeCount)} closed trades · ${String(d.winCount)}W / ${String(d.lossCount)}L`}
-      >
-        <AccountFilterControl value={account} onChange={setAccount} />
-      </PageHeader>
+        filter={<AccountFilterControl value={account} onChange={setAccount} />}
+      />
 
       <div className={styles.heroRow}>
         <HeroStat
