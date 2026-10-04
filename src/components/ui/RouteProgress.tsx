@@ -81,10 +81,8 @@ export function RouteProgress({ loading }: { loading: boolean }) {
  * Whether a route change is in flight — for `aria-busy` and dimming.
  *
  * `isLoading` covers React committing the new tree as well as the loaders: the
- * router holds it until the new matches have rendered. Older routers dropped it
- * when the loaders finished and needed `isTransitioning` (since removed) for the
- * commit — watching `isLoading` alone then let the indicator disappear while the
- * screen was still the old one.
+ * router holds it until the new matches have rendered, so the indicator cannot
+ * disappear while the screen is still the old one.
  *
  * Two things count as busy: opening a different screen, and changing `scope`.
  * A pathname check alone would miss the second — the sidebar's All/NISA/特定
