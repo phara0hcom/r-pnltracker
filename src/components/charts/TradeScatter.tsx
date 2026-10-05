@@ -10,7 +10,11 @@
  * pinhead is a good result on a tiny position, and seeing it beside a +3% coin
  * is the point. Polarity is carried by position first (above or below the zero
  * line) and colour second, so a colourblind reader is never relying on the fill
- * alone.
+ * alone — and both come from the return, so they cannot disagree.
+ *
+ * A US close is judged in dollars, as Rakuten shows it: its return is the
+ * dollar one, and its figures read in dollars with the yen in brackets. Its
+ * circle is still sized by the yen, the one measure every close shares.
  *
  * Colours come from `--chart-profit` / `--chart-loss`, matching the monthly
  * chart. Fills are translucent so overlapping circles read as denser rather
@@ -23,7 +27,7 @@
  */
 import { useState } from 'react'
 import styles from './TradeScatter.module.scss'
-import { ACCOUNT_LABEL } from '~/components/format'
+import { ACCOUNT_LABEL, money, moneySigned, pctSigned, yen, yenSigned } from '~/components/format'
 import {
   type ReturnDomain,
   dayParts,
@@ -39,6 +43,9 @@ export interface ScatterTrade {
   accountType: string
   costJpy: string
   realizedJpy: string
+  /** A US close's result and cost in dollars. Null for anything else. */
+  realizedUsd: string | null
+  costUsd: string | null
   returnPct: number | null
   holdingDays: number
 }
@@ -53,14 +60,17 @@ const COMPACT_RADIUS = { min: 3, max: 13 }
  */
 const DENSE_COLUMNS = 10
 
-const yen = (amount: number) =>
-  '¥' + Math.abs(amount).toLocaleString('en-US', { maximumFractionDigits: 0 })
+/**
+ * The result as it is read: dollars with the yen in brackets for a US close.
+ * Takes the yen as a number too — a mark carries it as one, for sizing.
+ */
+const resultText = (trade: { realizedJpy: string | number; realizedUsd: string | null }) =>
+  trade.realizedUsd == null
+    ? yenSigned(trade.realizedJpy)
+    : `${moneySigned(trade.realizedUsd, 'USD')} (${yenSigned(trade.realizedJpy)})`
 
-/** For the result itself, where the sign is the point. Cost basis uses `yen`. */
-const yenSigned = (amount: number) =>
-  (amount > 0 ? '+' : amount < 0 ? '−' : '') + yen(amount)
-
-const percent = (value: number) => `${value >= 0 ? '+' : '−'}${Math.abs(value * 100).toFixed(1)}%`
+const costText = (trade: { costJpy: string; costUsd: string | null }) =>
+  trade.costUsd == null ? yen(trade.costJpy) : money(trade.costUsd, 'USD')
 
 export function TradeScatter({
   trades,
@@ -106,7 +116,7 @@ export function TradeScatter({
         <div className={styles.axis} aria-hidden="true">
           {ticks.map((tick) => (
             <span key={tick.value} className={styles.axisTick} style={{ top: `${String(tick.topPct)}%` }}>
-              {percent(tick.value)}
+              {pctSigned(tick.value)}
             </span>
           ))}
           <span className={styles.axisZero} style={{ top: `${String(domain.zeroPct)}%` }}>
@@ -135,7 +145,7 @@ export function TradeScatter({
 
           {marks.map((mark, index) => {
             const { trade } = mark
-            const positive = trade.realizedJpy >= 0
+            const positive = trade.returnPct >= 0
             const size = mark.radius * 2
 
             return (
@@ -149,7 +159,7 @@ export function TradeScatter({
                   width: `${String(size)}px`,
                   height: `${String(size)}px`,
                 }}
-                aria-label={`${trade.symbol} on ${trade.date}: ${percent(trade.returnPct)}, ${yenSigned(trade.realizedJpy)} on ${yen(Number(trade.costJpy))} cost, held ${String(trade.holdingDays)} days`}
+                aria-label={`${trade.symbol} on ${trade.date}: ${pctSigned(trade.returnPct)}, ${resultText(trade)} on ${costText(trade)} cost, held ${String(trade.holdingDays)} days`}
                 onMouseEnter={() => {
                   setHover(index)
                 }}
@@ -192,14 +202,14 @@ export function TradeScatter({
                 {trade.name === trade.symbol ? null : (
                   <span className={styles.tooltipMeta}>{trade.name}</span>
                 )}
-                <span className={trade.realizedJpy >= 0 ? styles.profit : styles.loss}>
-                  {percent(trade.returnPct)} · {yenSigned(trade.realizedJpy)}
+                <span className={trade.returnPct >= 0 ? styles.profit : styles.loss}>
+                  {pctSigned(trade.returnPct)} · {resultText(trade)}
                 </span>
                 <span className={styles.tooltipMeta}>
                   {trade.date} · {ACCOUNT_LABEL[trade.accountType] ?? trade.accountType} · held{' '}
                   {trade.holdingDays}d
                 </span>
-                <span className={styles.tooltipMeta}>on {yen(Number(trade.costJpy))} cost</span>
+                <span className={styles.tooltipMeta}>on {costText(trade)} cost</span>
               </div>
             )
           })}

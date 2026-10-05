@@ -11,6 +11,7 @@
 import type Decimal from 'decimal.js'
 import { ZERO, type AccountType, type AssetClass } from '../domain/types'
 import type { RealizedEvent } from '../pnl/engine'
+import { splitByMarket } from '../pnl/markets'
 
 export interface StatsFilter {
   accountTypes?: AccountType[]
@@ -184,7 +185,13 @@ export interface SymbolPerformance {
   name: string
   assetClass: AssetClass
   tradeCount: number
+  /** In yen, the currency move included — what the ranking compares. */
   netPnl: Decimal
+  /**
+   * A US stock's closes in dollars, as Rakuten shows them — see
+   * `pnl/usdResult.ts`. Null for anything else.
+   */
+  netUsd: Decimal | null
   winCount: number
   winRate: number
 }
@@ -206,6 +213,7 @@ export function bySymbol(events: RealizedEvent[], filter: StatsFilter = {}): Sym
         assetClass: symbolCloses[0]!.assetClass,
         tradeCount: symbolCloses.length,
         netPnl: symbolCloses.reduce((running, close) => running.add(close.realizedJpy), ZERO),
+        netUsd: splitByMarket(symbolCloses).usd?.realizedUsd ?? null,
         winCount,
         winRate: winCount / symbolCloses.length,
       }

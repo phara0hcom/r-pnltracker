@@ -55,7 +55,7 @@ import {
 import { valuePosition, type PositionValue } from '~/lib/pnl/positionValue'
 import { usdResult, type UsdResult } from '~/lib/pnl/usdResult'
 import { quotedPrice } from '~/lib/prices/quoteUnit'
-import { bySymbol, computeStats, dailyPnl } from '~/lib/stats/stats'
+import { applyFilter, bySymbol, computeStats, dailyPnl, type StatsFilter } from '~/lib/stats/stats'
 import { findReinvestment } from '~/lib/tax/reinvestment'
 import { buildYearOverYear, type TaxYearBasis } from '~/lib/tax/report'
 
@@ -572,6 +572,21 @@ export const getDividends = createServerFn({ method: 'GET' })
 
 // ── Stats ───────────────────────────────────────────────────────────────────
 
+/** One account or asset class on the Stats screen. */
+export interface StatsGroup {
+  key: string
+  tradeCount: number
+  winRate: number | null
+  /** In yen, the currency move included. */
+  netPnl: string
+  /**
+   * In dollars, as Rakuten shows them, when every close in the group is a US
+   * one. A group with yen closes in it has no single currency to show.
+   */
+  netUsd: string | null
+  profitFactor: number | null
+}
+
 export interface StatsScreenData {
   tradeCount: number
   winCount: number
@@ -580,6 +595,8 @@ export interface StatsScreenData {
   grossProfit: string
   grossLoss: string
   netPnl: string
+  /** The same total split as the dashboard splits it: JPY account, USD account. Null with no closes. */
+  markets: MarketSplitView | null
   avgWin: string | null
   avgLoss: string | null
   payoffRatio: number | null
@@ -591,9 +608,18 @@ export interface StatsScreenData {
   avgHoldingDays: number | null
   medianHoldingDays: number | null
   equityCurve: { date: string; value: string }[]
-  byAccount: { key: string; tradeCount: number; winRate: number | null; netPnl: string; profitFactor: number | null }[]
-  byAssetClass: { key: string; tradeCount: number; winRate: number | null; netPnl: string; profitFactor: number | null }[]
-  symbols: { symbol: string; name: string; tradeCount: number; netPnl: string; winRate: number }[]
+  byAccount: StatsGroup[]
+  byAssetClass: StatsGroup[]
+  symbols: {
+    symbol: string
+    name: string
+    tradeCount: number
+    /** In yen — what the ranking compares across markets. */
+    netPnl: string
+    /** A US stock's total in dollars; null for anything else. */
+    netUsd: string | null
+    winRate: number
+  }[]
   fx: {
     closes: number
     stockEffect: string
@@ -629,9 +655,15 @@ export interface StatsClose {
   quantity: string
   /** JPY cost of exactly the units sold. */
   costJpy: string
+  /** In yen, the currency move included — what sizes the chart's circles. */
   realizedJpy: string
+  /** A US close in dollars as Rakuten shows it — see `lib/pnl/usdResult.ts`. */
+  realizedUsd: string | null
+  /** The dollar cost of the shares sold, buy commission included. US only. */
+  costUsd: string | null
   /**
-   * Realized ÷ cost basis of the units sold.
+   * Realized ÷ cost basis of the units sold — in dollars for a US close,
+   * matching the figure shown beside it.
    *
    * Null when that basis is zero — a pool built entirely from 再投資 rows can
    * close with nothing to measure the return against. Such a close still
@@ -653,15 +685,18 @@ export const getStats = createServerFn({ method: 'GET' })
     const journal = await listNotes(context.userId)
 
     /** Same stats recomputed per bucket, dropping buckets with no closes. */
-    const group = (keys: string[], filterFor: (key: string) => Parameters<typeof computeStats>[1]) =>
+    const group = (keys: string[], filterFor: (key: string) => StatsFilter): StatsGroup[] =>
       keys
         .map((key) => {
-          const bucketStats = computeStats(engine.realized, filterFor(key))
+          const filter = filterFor(key)
+          const bucketStats = computeStats(engine.realized, filter)
+          const split = splitByMarket(applyFilter(engine.realized, filter))
           return {
             key,
             tradeCount: bucketStats.tradeCount,
             winRate: bucketStats.winRate,
             netPnl: bucketStats.netPnl.toFixed(0),
+            netUsd: split.jpy == null && split.usd ? split.usd.realizedUsd.toFixed(2) : null,
             profitFactor: bucketStats.profitFactor,
           }
         })
@@ -696,6 +731,7 @@ export const getStats = createServerFn({ method: 'GET' })
       grossProfit: stats.grossProfit.toFixed(0),
       grossLoss: stats.grossLoss.toFixed(0),
       netPnl: stats.netPnl.toFixed(0),
+      markets: engine.realized.length ? toSplitView(splitByMarket(engine.realized)) : null,
       avgWin: stats.avgWin?.toFixed(0) ?? null,
       avgLoss: stats.avgLoss?.toFixed(0) ?? null,
       payoffRatio: stats.payoffRatio,
@@ -721,6 +757,7 @@ export const getStats = createServerFn({ method: 'GET' })
         name: performance.name,
         tradeCount: performance.tradeCount,
         netPnl: performance.netPnl.toFixed(0),
+        netUsd: performance.netUsd?.toFixed(2) ?? null,
         winRate: performance.winRate,
       })),
       fx: {
@@ -738,17 +775,26 @@ export const getStats = createServerFn({ method: 'GET' })
       // Already chronological — the engine emits closes in the order it
       // processes them — so the client can take the first and last as the range
       // it may page over without sorting again.
-      closes: engine.realized.map((close) => ({
-        date: close.tradeDate,
-        symbol: close.symbol,
-        name: close.name,
-        accountType: close.accountType,
-        quantity: close.quantity.toFixed(),
-        costJpy: close.costJpy.toFixed(0),
-        realizedJpy: close.realizedJpy.toFixed(0),
-        returnPct: close.costJpy.gt(0) ? close.realizedJpy.div(close.costJpy).toNumber() : null,
-        holdingDays: close.holdingDays,
-      })),
+      closes: engine.realized.map((close) => {
+        const usd = usdResult(close)
+        return {
+          date: close.tradeDate,
+          symbol: close.symbol,
+          name: close.name,
+          accountType: close.accountType,
+          quantity: close.quantity.toFixed(),
+          costJpy: close.costJpy.toFixed(0),
+          realizedJpy: close.realizedJpy.toFixed(0),
+          realizedUsd: usd?.gainUsd ?? null,
+          costUsd: usd?.costUsd ?? null,
+          returnPct: usd
+            ? usd.returnPct
+            : close.costJpy.gt(0)
+              ? close.realizedJpy.div(close.costJpy).toNumber()
+              : null,
+          holdingDays: close.holdingDays,
+        }
+      }),
     }
   })
 

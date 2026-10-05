@@ -5,7 +5,8 @@ import styles from './stats.module.scss'
 import { AccountDot } from '~/components/AccountDot'
 import { TradeScatter } from '~/components/charts/TradeScatter'
 import { ZeroBar } from '~/components/charts/ZeroBar'
-import { ACCOUNT_LABEL, ASSET_LABEL, days, pct, ratio, tone, yen, yenSigned } from '~/components/format'
+import { ACCOUNT_LABEL, ASSET_LABEL, days, moneySigned, pct, pctSigned, ratio, tone, yen, yenSigned } from '~/components/format'
+import { MarketBreakdown } from '~/components/pnl/MarketSplit'
 import { Empty, HeroStat, PageHeader, Pagination, SegmentedTabs, Section, StatStrip, StripCell, Table } from '~/components/screen'
 import { AttrBar } from '~/components/stats/AttrBar'
 import { CorrelationTable } from '~/components/stats/CorrelationTable'
@@ -77,6 +78,25 @@ const VIEW_TABS = [
  * 390px phone would be 12px each, which is narrower than the smallest circle.
  */
 const stepFor = (isMobile: boolean): WindowUnit => (isMobile ? 'week' : 'month')
+
+/**
+ * A result in the currency it is judged in. A US close — or a row made of US
+ * closes alone — in dollars as Rakuten shows them, with its yen, the currency
+ * move included, in brackets; anything else in yen. Totals across markets stay
+ * in yen, so a row's yen is what adds up to them.
+ */
+function Result({ jpy, usd, inline = false }: { jpy: string; usd: string | null; inline?: boolean }) {
+  if (usd == null) return <>{yenSigned(jpy)}</>
+  return (
+    <>
+      {moneySigned(usd, 'USD')}
+      <span className={inline ? styles.yenInline : styles.yenBelow}>({yenSigned(jpy)})</span>
+    </>
+  )
+}
+
+/** Tinted by the figure shown first — the dollars, for a US result. */
+const resultTone = (jpy: string, usd: string | null) => tone(usd ?? jpy)
 
 function InstrumentCell({ symbol, name }: { symbol: string; name: string }) {
   return name === symbol ? (
@@ -237,6 +257,16 @@ function Stats() {
       />
     ) : null
 
+  // The same closes in dollars, as Rakuten's US screen totals them — the bars
+  // above decompose the yen, which is why they lead.
+  const usdTotal =
+    d.markets?.usdRealizedUsd == null ? null : (
+      <p className={styles.attrUsd}>
+        <span>In dollars, as Rakuten shows them</span>
+        <span className={tone(d.markets.usdRealizedUsd)}>{moneySigned(d.markets.usdRealizedUsd, 'USD')}</span>
+      </p>
+    )
+
   const attribution = (
     <>
       <AttrBar label="Stock movement" value={d.fx.stockEffect} scale={attrScale} />
@@ -246,6 +276,7 @@ function Stats() {
         <span>Total US realized</span>
         <strong className={tone(d.fx.total)}>{yenSigned(d.fx.total)}</strong>
       </div>
+      {usdTotal}
       <p className={styles.note}>
         {d.fx.closes} closes · FX explains {pct(d.fx.fxShare)} of gross movement · average entry
         rate {d.fx.avgEntryFx}, exit {d.fx.avgExitFx}
@@ -275,7 +306,9 @@ function Stats() {
             </td>
             <td data-numeric>{group.tradeCount}</td>
             <td data-numeric>{pct(group.winRate, 0)}</td>
-            <td data-numeric className={tone(group.netPnl)}>{yen(group.netPnl)}</td>
+            <td data-numeric className={resultTone(group.netPnl, group.netUsd)}>
+              <Result jpy={group.netPnl} usd={group.netUsd} />
+            </td>
             <td data-numeric>{ratio(group.profitFactor)}</td>
           </tr>
         ))}
@@ -305,7 +338,9 @@ function Stats() {
             </td>
             <td data-numeric>{group.tradeCount}</td>
             <td data-numeric>{pct(group.winRate, 0)}</td>
-            <td data-numeric className={tone(group.netPnl)}>{yen(group.netPnl)}</td>
+            <td data-numeric className={resultTone(group.netPnl, group.netUsd)}>
+              <Result jpy={group.netPnl} usd={group.netUsd} />
+            </td>
             <td data-numeric>{ratio(group.profitFactor)}</td>
           </tr>
         ))}
@@ -331,7 +366,9 @@ function Stats() {
             </td>
             <td data-numeric>{row.tradeCount}</td>
             <td data-numeric>{pct(row.winRate, 0)}</td>
-            <td data-numeric className={tone(row.netPnl)}>{yen(row.netPnl)}</td>
+            <td data-numeric className={resultTone(row.netPnl, row.netUsd)}>
+              <Result jpy={row.netPnl} usd={row.netUsd} />
+            </td>
           </tr>
         ))}
       </tbody>
@@ -350,7 +387,7 @@ function Stats() {
           <th scope="col">Account</th>
           <th scope="col" data-numeric>Held</th>
           <th scope="col" data-numeric>Return</th>
-          <th scope="col" data-numeric>Net P&L</th>
+          <th scope="col" data-numeric>Realized</th>
         </tr>
       </thead>
       <tbody>
@@ -367,8 +404,10 @@ function Stats() {
               </span>
             </td>
             <td data-numeric>{days(close.holdingDays)}</td>
-            <td data-numeric className={tone(close.returnPct)}>{pct(close.returnPct)}</td>
-            <td data-numeric className={tone(close.realizedJpy)}>{yenSigned(close.realizedJpy)}</td>
+            <td data-numeric className={tone(close.returnPct)}>{pctSigned(close.returnPct)}</td>
+            <td data-numeric className={resultTone(close.realizedJpy, close.realizedUsd)}>
+              <Result jpy={close.realizedJpy} usd={close.realizedUsd} />
+            </td>
           </tr>
         ))}
       </tbody>
@@ -384,8 +423,8 @@ function Stats() {
         >
           <div className={styles.spCloseHead}>
             <span className={styles.spCloseName}>{close.symbol}</span>
-            <span className={cx(styles.spCloseNet, tone(close.realizedJpy))}>
-              {yenSigned(close.realizedJpy)}
+            <span className={cx(styles.spCloseNet, resultTone(close.realizedJpy, close.realizedUsd))}>
+              <Result jpy={close.realizedJpy} usd={close.realizedUsd} inline />
             </span>
           </div>
           <div className={styles.spCloseMeta}>
@@ -393,7 +432,7 @@ function Stats() {
             <span>{ACCOUNT_LABEL[close.accountType] ?? close.accountType}</span>
             <span>held {days(close.holdingDays)}</span>
             <span className={cx(styles.spCloseReturn, tone(close.returnPct))}>
-              {pct(close.returnPct)}
+              {pctSigned(close.returnPct)}
             </span>
           </div>
         </div>
@@ -504,10 +543,18 @@ function Stats() {
       <div className={styles.heroRow}>
         <HeroStat
           label="Net P&L"
-          value={yen(d.netPnl)}
+          value={yenSigned(d.netPnl)}
           tone={tone(d.netPnl)}
-          context={`${pct(d.winRate)} win rate · ${String(d.winCount)}W / ${String(d.lossCount)}L`}
-        />
+          context="In yen, currency moves included"
+        >
+          {/* The US side in dollars, as on the dashboard: the total above is
+              yen, and so is every aggregate figure on this screen. */}
+          {d.markets ? (
+            <div className={styles.heroSplit}>
+              <MarketBreakdown split={d.markets} />
+            </div>
+          ) : null}
+        </HeroStat>
         <StatStrip>
           <StripCell label="Win rate" value={pct(d.winRate)} hint={`${String(d.winCount)}W / ${String(d.lossCount)}L`} />
           <StripCell label="Avg win / loss" value={`${yen(d.avgWin)} / ${yen(d.avgLoss)}`} hint={`payoff ${ratio(d.payoffRatio)}`} />
@@ -597,6 +644,7 @@ function Stats() {
                 <span>Total US realized</span>
                 <strong className={tone(d.fx.total)}>{yenSigned(d.fx.total)}</strong>
               </div>
+              {usdTotal}
 
               <h2 className={styles.spSectionTitle}>By account</h2>
               {byAccountTable}
@@ -609,7 +657,9 @@ function Stats() {
                   <div key={row.symbol} className={styles.spSymbolRow}>
                     <div className={styles.spSymbolHead}>
                       <span className={styles.spSymbolName}>{row.symbol}</span>
-                      <span className={cx(styles.spSymbolNet, tone(row.netPnl))}>{yenSigned(row.netPnl)}</span>
+                      <span className={cx(styles.spSymbolNet, resultTone(row.netPnl, row.netUsd))}>
+                        <Result jpy={row.netPnl} usd={row.netUsd} inline />
+                      </span>
                     </div>
                     <div className={styles.spSymbolBar}>
                       <span className={styles.spSymbolCloses}>{row.tradeCount} closes</span>
@@ -634,7 +684,7 @@ function Stats() {
               <p className={styles.spSectionDesc}>
                 {view === 'chart'
                   ? 'One circle per close: the day it closed across, its return on cost up, and the yen size of the result as the circle area.'
-                  : 'Every close in the week, with the return measured against the cost basis of the units sold.'}
+                  : 'Every close in the week, with the return measured against the cost basis of the units sold. US closes in dollars, their yen in brackets.'}
               </p>
               {distributionBody}
             </>
@@ -675,7 +725,7 @@ function Stats() {
             description={
               view === 'chart'
                 ? 'One circle per close: the day it closed across, its return on cost up, and the yen size of the gain or loss as the circle area. Return and contribution are not the same thing — a small position can post a large percentage — and the two encodings are what separate them.'
-                : 'Every close in the month, with the return measured against the weighted-average cost of the units sold. There is no link back to an individual buy: 移動平均法 pools units, so a sale closes against the pool.'
+                : 'Every close in the month, with the return measured against the weighted-average cost of the units sold. There is no link back to an individual buy: 移動平均法 pools units, so a sale closes against the pool. US closes are in dollars as Rakuten shows them, with the yen — the currency move included — in brackets.'
             }
             actions={viewSwitch}
           >
