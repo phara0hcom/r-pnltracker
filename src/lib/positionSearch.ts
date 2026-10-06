@@ -6,10 +6,12 @@
  *
  * Built on `accountScopeSchema` rather than beside it: a zod object strips
  * unknown keys, so a screen that declares its own params must still carry
- * `scope` or the All/NISA/特定 switch is discarded the moment you sort.
+ * `scope` or the All/NISA/特定 switch is discarded the moment you sort. The
+ * same goes for `market`, the All/JP/US switch this screen alone offers.
  */
 import { z } from 'zod'
 import { accountScopeSchema } from './accountScope'
+import { marketScopeSchema } from './marketScope'
 
 /**
  * The columns, in the order the table renders them.
@@ -19,10 +21,10 @@ import { accountScopeSchema } from './accountScope'
  * each; naming them after the column keeps the header and the ordering in step.
  * `weight` is each row's share of the book, which the server works out.
  *
- * There is no Account or Class column. The table is grouped by account, under
- * a header carrying the account's totals, and each instrument is tagged with
- * its class — a column repeating one of four values down every row said
- * nothing a heading could not say once.
+ * There is no Account, Market or Class column. The table is grouped by market
+ * and account, under a header carrying the block's totals, and each instrument
+ * is tagged with its class — a column repeating one of four values down every
+ * row said nothing a heading could not say once.
  *
  * `unrealizedPct` stays its own column rather than being folded into
  * `unrealizedJpy`: sorting by return and sorting by yen answer different
@@ -53,7 +55,7 @@ export type PositionSortKey = (typeof POSITION_SORTABLE)[number]
  * click rather than rearranging itself on arrival. A bookmark still naming the
  * Account or Class column, both since removed, lands here too.
  */
-export const positionSearchSchema = accountScopeSchema.extend({
+export const positionSearchSchema = accountScopeSchema.extend(marketScopeSchema.shape).extend({
   sortBy: z.enum(POSITION_SORTABLE).catch('marketValueJpy'),
   sortDir: z.enum(['asc', 'desc']).catch('desc'),
 })

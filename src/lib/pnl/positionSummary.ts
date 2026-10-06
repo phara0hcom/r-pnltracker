@@ -12,7 +12,7 @@
  * reads as a loss that is not there.
  */
 import Decimal from 'decimal.js'
-import type { AccountType, AssetClass } from '../domain/types'
+import { marketOf, MARKETS, type AccountType, type AssetClass, type Market } from '../domain/types'
 
 export interface SummaryInput {
   symbol: string
@@ -45,6 +45,22 @@ export interface AccountTotal extends PositionTotal {
   accountType: AccountType
 }
 
+/**
+ * One block of the table: a market, an account, both, or — when the filters
+ * have already narrowed the screen to one of each — neither, which is the whole
+ * list with no heading. A null side is "not split on this".
+ */
+export interface GroupTotal extends PositionTotal {
+  market: Market | null
+  accountType: AccountType | null
+}
+
+/** Which axes the table is cut along. */
+export interface GroupSplit {
+  market: boolean
+  account: boolean
+}
+
 export interface ClassTotal {
   assetClass: AssetClass
   marketValueJpy: string
@@ -64,6 +80,11 @@ export interface PositionSummary {
   total: PositionTotal
   /** Largest value first. */
   accounts: AccountTotal[]
+  /**
+   * The table's blocks, in display order: JP before US, then each market's
+   * accounts largest first. Only blocks holding something are present.
+   */
+  groups: GroupTotal[]
   /** Largest value first; classes with nothing priced are left out. */
   classes: ClassTotal[]
   /** Each row's share of the book's value, by input index. */
@@ -110,7 +131,48 @@ function totalOf(rows: readonly SummaryInput[], bookValue: Decimal): PositionTot
   }
 }
 
-export function summarizePositions(rows: readonly SummaryInput[]): PositionSummary {
+/** Whether a row belongs to a block — the client's way of filling one with rows. */
+export function inGroup(
+  row: Pick<SummaryInput, 'assetClass' | 'accountType'>,
+  group: Pick<GroupTotal, 'market' | 'accountType'>,
+): boolean {
+  return (
+    (group.market == null || marketOf(row.assetClass) === group.market) &&
+    (group.accountType == null || row.accountType === group.accountType)
+  )
+}
+
+/**
+ * Totals for each block of the table, in display order: JP before US, and
+ * within a market the accounts in `accounts`' order (largest first) — so the
+ * accounts read the same way under JP as under US rather than each market
+ * ranking them afresh. With neither axis split it is one block, the whole list.
+ *
+ * Summed here, not by the screen, for the reason the rest of this file exists:
+ * a block's heading carries a total, and adding it up in the browser is
+ * financial arithmetic in the UI. Weights stay shares of the whole book shown,
+ * not of the block.
+ */
+function groupTotals(
+  rows: readonly SummaryInput[],
+  bookValue: Decimal,
+  accounts: readonly AccountTotal[],
+  split: GroupSplit,
+): GroupTotal[] {
+  const markets = split.market ? MARKETS : [null]
+  const accountTypes = split.account ? accounts.map((entry) => entry.accountType) : [null]
+
+  return markets
+    .flatMap((market) => accountTypes.map((accountType) => ({ market, accountType })))
+    .map((block) => ({ block, members: rows.filter((row) => inGroup(row, block)) }))
+    .filter(({ members }) => members.length > 0)
+    .map(({ block, members }) => ({ ...block, ...totalOf(members, bookValue) }))
+}
+
+export function summarizePositions(
+  rows: readonly SummaryInput[],
+  split: GroupSplit = { market: false, account: true },
+): PositionSummary {
   const bookValue = rows.reduce((running, row) => (isPriced(row) ? running.add(row.marketValueJpy) : running), ZERO)
   const shareOf = (value: string | null) =>
     value == null || !bookValue.gt(0) ? null : new Decimal(value).div(bookValue).toNumber()
@@ -173,6 +235,7 @@ export function summarizePositions(rows: readonly SummaryInput[]): PositionSumma
   return {
     total: totalOf(rows, bookValue),
     accounts,
+    groups: groupTotals(rows, bookValue, accounts, split),
     classes,
     weights: rows.map((row) => (isPriced(row) ? shareOf(row.marketValueJpy) : null)),
     highlights: {

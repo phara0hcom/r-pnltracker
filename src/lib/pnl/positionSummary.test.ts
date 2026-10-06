@@ -2,7 +2,7 @@
  * Positions totals, summed on the server from the rows' own strings.
  */
 import { describe, expect, it } from 'vitest'
-import { summarizePositions, type SummaryInput } from './positionSummary'
+import { inGroup, summarizePositions, type SummaryInput } from './positionSummary'
 
 const row = (overrides: Partial<SummaryInput>): SummaryInput => ({
   symbol: '7203',
@@ -80,5 +80,86 @@ describe('summarizePositions', () => {
     expect(total.weight).toBeNull()
     expect(classes).toEqual([])
     expect(highlights.largest).toBeNull()
+  })
+})
+
+describe('groups', () => {
+  const both = { market: true, account: true }
+  const shape = (groups: ReturnType<typeof summarizePositions>['groups']) =>
+    groups.map((group) => [group.market, group.accountType, group.count])
+
+  // A US holding in NISA as well, so no block is only ever one thing.
+  const MIXED = [...BOOK, row({ symbol: 'VOO', assetClass: 'US_EQUITY', accountType: 'NISA_GROWTH', costShownJpy: '500000', marketValueJpy: '600000', unrealizedJpy: '100000', unrealizedPct: 0.2 })]
+
+  it('cuts by market then account, JP first and accounts largest first within each', () => {
+    const { groups } = summarizePositions(MIXED, both)
+    expect(shape(groups)).toEqual([
+      ['JP', 'NISA_TSUMITATE', 1],
+      ['JP', 'NISA_GROWTH', 1],
+      ['JP', 'SPECIFIC', 2],
+      ['US', 'NISA_GROWTH', 1],
+      ['US', 'SPECIFIC', 1],
+    ])
+  })
+
+  it('leaves out blocks that hold nothing', () => {
+    const { groups } = summarizePositions(BOOK.filter((entry) => entry.assetClass !== 'US_EQUITY'), both)
+    expect(groups.every((group) => group.market === 'JP')).toBe(true)
+  })
+
+  it('cuts by market alone when the account is already narrowed', () => {
+    const { groups } = summarizePositions(MIXED, { market: true, account: false })
+    expect(shape(groups)).toEqual([
+      ['JP', null, 4],
+      ['US', null, 2],
+    ])
+  })
+
+  it('cuts by account alone when the market is already narrowed — the default', () => {
+    expect(shape(summarizePositions(MIXED).groups)).toEqual(
+      summarizePositions(MIXED).accounts.map((account) => [null, account.accountType, account.count]),
+    )
+  })
+
+  it('is one block, the whole list, when neither axis is open', () => {
+    const { groups, total } = summarizePositions(MIXED, { market: false, account: false })
+    expect(groups).toHaveLength(1)
+    expect(groups[0]).toMatchObject({ market: null, accountType: null, ...total })
+  })
+
+  it('totals a block from its own rows, but weighs it against the whole book', () => {
+    const { groups, total } = summarizePositions(MIXED, both)
+    const usSpecific = groups.find((group) => group.market === 'US' && group.accountType === 'SPECIFIC')
+    expect(usSpecific?.marketValueJpy).toBe('421614')
+    expect(usSpecific?.unrealizedJpy).toBe('517')
+    expect(usSpecific?.weight).toBeCloseTo(421614 / Number(total.marketValueJpy), 10)
+  })
+
+  it('adds up: the blocks together are the whole book', () => {
+    const { groups, total } = summarizePositions(MIXED, both)
+    const sum = (pick: (group: (typeof groups)[number]) => string) =>
+      groups.reduce((running, group) => running + Number(pick(group)), 0)
+    expect(sum((group) => group.marketValueJpy)).toBe(Number(total.marketValueJpy))
+    expect(sum((group) => group.costShownJpy)).toBe(Number(total.costShownJpy))
+    expect(groups.reduce((running, group) => running + group.count, 0)).toBe(total.count)
+  })
+})
+
+describe('inGroup', () => {
+  const us = { assetClass: 'US_EQUITY', accountType: 'NISA_GROWTH' } as const
+  const fund = { assetClass: 'FUND', accountType: 'SPECIFIC' } as const
+
+  it('matches on whichever sides the block names', () => {
+    expect(inGroup(us, { market: 'US', accountType: 'NISA_GROWTH' })).toBe(true)
+    expect(inGroup(us, { market: 'JP', accountType: 'NISA_GROWTH' })).toBe(false)
+    expect(inGroup(us, { market: 'US', accountType: 'SPECIFIC' })).toBe(false)
+    expect(inGroup(us, { market: 'US', accountType: null })).toBe(true)
+    expect(inGroup(us, { market: null, accountType: 'NISA_GROWTH' })).toBe(true)
+    expect(inGroup(us, { market: null, accountType: null })).toBe(true)
+  })
+
+  it('files a fund under JP', () => {
+    expect(inGroup(fund, { market: 'JP', accountType: null })).toBe(true)
+    expect(inGroup(fund, { market: 'US', accountType: null })).toBe(false)
   })
 })

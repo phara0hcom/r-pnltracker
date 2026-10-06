@@ -40,6 +40,20 @@
   border-radius: var(--radius-sm);
 }
 
+/* The account and market switches, side by side on desktop, stacked on a phone. */
+.filters {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+
+  @include m.mobile {
+    flex-direction: column;
+    gap: var(--space-2);
+    align-items: stretch;
+    width: 100%;
+  }
+}
+
 /* ── Account headings and the total ───────────────────────────────────────── */
 
 .groupName {
@@ -50,6 +64,16 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--color-text);
+}
+
+.groupMarket {
+  color: var(--color-text);
+}
+
+.groupSeparator {
+  margin: 0 var(--space-2);
+  font-weight: var(--weight-normal);
+  color: var(--color-text-subtle);
 }
 
 .groupCount {

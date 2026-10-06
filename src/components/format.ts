@@ -152,6 +152,15 @@ export const ACCOUNT_TITLE: Record<string, string> = {
   NISA_OLD: '旧NISA',
 }
 
+/**
+ * A market's full name, for a heading. Funds sit under JP because they are
+ * held in yen — the split Rakuten's own two accounts make.
+ */
+export const MARKET_TITLE: Record<string, string> = {
+  JP: 'JP stocks & funds',
+  US: 'US stocks',
+}
+
 export const ASSET_LABEL: Record<string, string> = {
   JP_EQUITY: 'JP equity',
   US_EQUITY: 'US equity',

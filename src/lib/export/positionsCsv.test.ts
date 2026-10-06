@@ -146,17 +146,22 @@ describe('positionsCsv', () => {
 
 describe('positionsCsvFilename', () => {
   it('names an unfiltered export by date alone', () => {
-    expect(positionsCsvFilename('ALL', '2026-08-29')).toBe('positions-2026-08-29.csv')
+    expect(positionsCsvFilename('ALL', 'ALL', '2026-08-29')).toBe('positions-2026-08-29.csv')
   })
 
   it('carries the scope so two exports on one day do not collide', () => {
-    expect(positionsCsvFilename('NISA', '2026-08-29')).toBe('positions-nisa-2026-08-29.csv')
-    expect(positionsCsvFilename('SPECIFIC', '2026-08-29')).toBe('positions-specific-2026-08-29.csv')
+    expect(positionsCsvFilename('NISA', 'ALL', '2026-08-29')).toBe('positions-nisa-2026-08-29.csv')
+    expect(positionsCsvFilename('SPECIFIC', 'ALL', '2026-08-29')).toBe('positions-specific-2026-08-29.csv')
+  })
+
+  it('carries the market, alone or after the account', () => {
+    expect(positionsCsvFilename('ALL', 'US', '2026-08-29')).toBe('positions-us-2026-08-29.csv')
+    expect(positionsCsvFilename('NISA', 'JP', '2026-08-29')).toBe('positions-nisa-jp-2026-08-29.csv')
   })
 
   it('defaults to the local calendar date, not the UTC one', () => {
     // The regression this guards is someone reaching for `toISOString()`, which
     // for JST names the file with yesterday's date every morning before 09:00.
-    expect(positionsCsvFilename('ALL')).toBe(`positions-${todayLocal()}.csv`)
+    expect(positionsCsvFilename('ALL', 'ALL')).toBe(`positions-${todayLocal()}.csv`)
   })
 })

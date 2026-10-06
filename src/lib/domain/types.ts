@@ -49,6 +49,26 @@ export function matchesAccountFilter(account: AccountType, filter: AccountFilter
 
 export type AssetClass = 'JP_EQUITY' | 'US_EQUITY' | 'FUND'
 
+/**
+ * Which of Rakuten's two accounts a holding sits in: the yen one (Japanese
+ * stocks *and* funds) or the dollar one (US stocks). The same split
+ * `lib/pnl/markets.ts` totals realized results through, so a figure on one
+ * screen is never filed under a different market on another.
+ */
+export type Market = 'JP' | 'US'
+
+export const MARKETS: readonly Market[] = ['JP', 'US']
+
+export const marketOf = (assetClass: AssetClass): Market => (assetClass === 'US_EQUITY' ? 'US' : 'JP')
+
+/** The market switch: both, or one. Orthogonal to `AccountFilter`. */
+export type MarketFilter = 'ALL' | Market
+
+export const MARKET_FILTERS: readonly MarketFilter[] = ['ALL', 'JP', 'US']
+
+export const matchesMarketFilter = (assetClass: AssetClass, filter: MarketFilter): boolean =>
+  filter === 'ALL' || marketOf(assetClass) === filter
+
 export type Currency = 'JPY' | 'USD'
 
 /**

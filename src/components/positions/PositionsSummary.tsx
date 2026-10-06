@@ -11,7 +11,7 @@ import styles from './PositionsSummary.module.scss'
 import { ACCOUNT_LABEL, ACCOUNT_TITLE, ASSET_LABEL, pct, pctSigned, tone, yen, yenSigned } from '~/components/format'
 import { WarnIcon } from '~/components/icons/WarnIcon'
 import { cx } from '~/lib/cx'
-import type { AccountFilter } from '~/lib/domain/types'
+import type { AccountFilter, MarketFilter } from '~/lib/domain/types'
 import type { Highlight } from '~/lib/pnl/positionSummary'
 import type { PositionRow, PositionsData } from '~/server/screens'
 
@@ -47,8 +47,12 @@ interface Split {
   parts: Part[]
 }
 
-/** By account, then by asset class — or by class alone when one account is shown. */
-function splitsOf(data: PositionsData, account: AccountFilter): Split[] {
+/**
+ * By account, then by asset class — or by class alone when one account is shown.
+ * Under US the class split is dropped: one class is one full bar, which says
+ * nothing the heading above it does not.
+ */
+function splitsOf(data: PositionsData, account: AccountFilter, market: MarketFilter): Split[] {
   const byClass: Split = {
     title: 'By asset class',
     parts: data.classes.map((entry) => ({
@@ -59,7 +63,8 @@ function splitsOf(data: PositionsData, account: AccountFilter): Split[] {
       value: entry.marketValueJpy,
     })),
   }
-  if (account === 'SPECIFIC') return [byClass]
+  const classSplits = market === 'US' ? [] : [byClass]
+  if (account === 'SPECIFIC') return classSplits
   const byAccount: Split = {
     title: 'By account',
     parts: data.accounts
@@ -73,7 +78,7 @@ function splitsOf(data: PositionsData, account: AccountFilter): Split[] {
         value: entry.marketValueJpy,
       })),
   }
-  return [byAccount, byClass]
+  return [byAccount, ...classSplits]
 }
 
 /**
@@ -185,15 +190,17 @@ function Unrealized({ data }: { data: PositionsData }) {
 export function PositionsSummary({
   data,
   account,
+  market,
   compact,
 }: {
   data: PositionsData
   account: AccountFilter
+  market: MarketFilter
   compact: boolean
 }) {
   const { total } = data
   const priced = total.count > total.unpriced
-  const splits = priced ? splitsOf(data, account) : []
+  const splits = priced ? splitsOf(data, account, market) : []
 
   if (compact) {
     const [first] = splits

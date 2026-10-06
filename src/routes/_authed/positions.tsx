@@ -1,12 +1,16 @@
 /**
- * Open positions, grouped by account.
+ * Open positions, split by market (JP / US) and by account (NISA / 特定).
  *
- * Sorting is client-side over rows already in memory: the account filter is a
- * loader dependency and sorting deliberately is not, so clicking a header
+ * Two independent filters narrow the book — account and market — and whichever
+ * is still open becomes a heading: all of both gives a block per market and
+ * account, one account a block per market, one market a block per account.
+ *
+ * Sorting is client-side over rows already in memory: the two filters are
+ * loader dependencies and sorting deliberately is not, so clicking a header
  * reorders instantly rather than making a round trip for the same rows back in
- * a different order. It orders rows within each account; the accounts keep
- * their own order, largest first, so a sort never scatters one account's
- * holdings among another's.
+ * a different order. It orders rows within each block; the blocks keep their
+ * own order (JP before US, accounts largest first), so a sort never scatters
+ * one block's holdings among another's.
  *
  * Every total — the book, each account, each row's weight — is summed on the
  * server. This screen used to add them up in the browser from the strings the
@@ -22,6 +26,7 @@ import {
   ACCOUNT_TITLE,
   ASSET_LABEL,
   ASSET_TAG,
+  MARKET_TITLE,
   money,
   moneySigned,
   pct,
@@ -38,12 +43,12 @@ import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
 import { ColumnMenu } from '~/components/ui/ColumnMenu'
 import { ExportButton } from '~/components/ui/ExportButton'
+import { MarketSwitch, useMarketFilter } from '~/components/ui/MarketSwitch'
 import { useColumnVisibility } from '~/components/ui/useColumnVisibility'
 import { useIsMobile } from '~/components/ui/useIsMobile'
 import { cx } from '~/lib/cx'
-import type { AccountFilter } from '~/lib/domain/types'
 import { positionsCsv, positionsCsvFilename } from '~/lib/export/positionsCsv'
-import type { AccountTotal, PositionTotal } from '~/lib/pnl/positionSummary'
+import { inGroup, type GroupTotal, type PositionTotal } from '~/lib/pnl/positionSummary'
 import { POSITION_SORTABLE, positionSearchSchema, type PositionSortKey } from '~/lib/positionSearch'
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
 import type { TableColumn } from '~/lib/table/columns'
@@ -292,33 +297,44 @@ const isSpSortKey = (key: PositionSortKey): key is SpSortKey =>
 
 export const Route = createFileRoute('/_authed/positions')({
   validateSearch: positionSearchSchema,
-  // The account filter is a loader dependency, so changing it refetches rather
-  // than re-rendering the previous account's figures. Sort is pointedly absent:
-  // it reorders rows the client already has.
-  loaderDeps: ({ search }) => ({ account: search.scope ?? 'ALL' }),
-  loader: ({ deps }) => getPositions({ data: { account: deps.account } }),
+  // The account and market filters are loader dependencies, so changing either
+  // refetches rather than re-rendering the previous view's figures. Sort is
+  // pointedly absent: it reorders rows the client already has.
+  loaderDeps: ({ search }) => ({ account: search.scope ?? 'ALL', market: search.market ?? 'ALL' }),
+  loader: ({ deps }) => getPositions({ data: { account: deps.account, market: deps.market } }),
   component: Positions,
 })
 
 interface Group {
-  /** Null when the screen shows one account and needs no headings. */
-  total: AccountTotal | null
+  /** Null when both filters are narrowed to one choice and no heading is needed. */
+  total: GroupTotal | null
   rows: PositionRow[]
 }
 
 /**
- * The sorted rows cut into accounts, in the server's account order.
+ * The sorted rows cut into the server's blocks, in the server's order.
  *
- * Under 特定 there is one account and a heading repeating the filter would
- * say nothing, so the rows stay one list.
+ * Under 特定 and one market there is nothing left to split on, and a heading
+ * repeating the filters would say nothing, so the rows stay one list.
  */
-function groupRows(data: PositionsData, sorted: PositionRow[], account: AccountFilter): Group[] {
-  if (account === 'SPECIFIC') return [{ total: null, rows: sorted }]
-  return data.accounts.map((entry) => ({
-    total: entry,
-    rows: sorted.filter((row) => row.accountType === entry.accountType),
+function groupRows(data: PositionsData, sorted: PositionRow[]): Group[] {
+  return data.groups.map((entry) => ({
+    total: entry.market == null && entry.accountType == null ? null : entry,
+    rows: sorted.filter((row) => inGroup(row, entry)),
   }))
 }
+
+const groupKey = (group: Group) =>
+  group.total ? `${group.total.market ?? 'all'}-${group.total.accountType ?? 'all'}` : 'all'
+
+/** A block's name as text: `US stocks · 特定口座`, for headings and screen readers. */
+const groupTitle = (total: GroupTotal) =>
+  [
+    total.market ? MARKET_TITLE[total.market] : null,
+    total.accountType ? (ACCOUNT_TITLE[total.accountType] ?? total.accountType) : null,
+  ]
+    .filter((part) => part != null)
+    .join(' · ')
 
 const positionsLabel = (count: number) => `${String(count)} position${count === 1 ? '' : 's'}`
 
@@ -356,12 +372,27 @@ function TotalRow({
   )
 }
 
-/** The account's dot, full name and holding count. */
-function GroupName({ total }: { total: AccountTotal }) {
+/** The block's market and account — dot, full name — and holding count. */
+function GroupName({ total }: { total: GroupTotal }) {
   return (
     <span className={styles.groupName}>
-      <AccountDot accountType={total.accountType} />
-      {ACCOUNT_TITLE[total.accountType] ?? total.accountType}
+      {total.market ? <span className={styles.groupMarket}>{MARKET_TITLE[total.market]}</span> : null}
+      {total.market && total.accountType ? (
+        // Real spaces as well as the margin: the margin is only CSS, so without
+        // them the two names run together in text and in a screen reader.
+        <>
+          {' '}
+          <span className={styles.groupSeparator} aria-hidden="true">
+            ·
+          </span>{' '}
+        </>
+      ) : null}
+      {total.accountType ? (
+        <>
+          <AccountDot accountType={total.accountType} />
+          {ACCOUNT_TITLE[total.accountType] ?? total.accountType}
+        </>
+      ) : null}
       <span className={styles.groupCount}>{positionsLabel(total.count)}</span>
     </span>
   )
@@ -408,10 +439,11 @@ function Positions() {
   const { sortBy, sortDir } = Route.useSearch()
   const navigate = Route.useNavigate()
   const [account, setAccount] = useAccountFilter()
+  const [market, setMarket] = useMarketFilter()
   const isMobile = useIsMobile()
   const { data } = useQuery({
-    queryKey: ['positions', account],
-    queryFn: () => getPositions({ data: { account } }),
+    queryKey: ['positions', account, market],
+    queryFn: () => getPositions({ data: { account, market } }),
     initialData: initial,
   })
   const { rows, total } = data
@@ -442,20 +474,25 @@ function Positions() {
   const totalled = shown.filter((key) => COLUMNS[key].total != null)
 
   const sorted = useMemo(() => sortRows(rows, COLUMNS, sortBy, sortDir), [rows, sortBy, sortDir])
-  const groups = useMemo(() => groupRows(data, sorted, account), [data, sorted, account])
+  const groups = useMemo(() => groupRows(data, sorted), [data, sorted])
 
-  // The file is the table as it reads — account by account, each in the
-  // chosen order — so a spreadsheet opened beside the screen matches it.
+  // The file is the table as it reads — block by block, each in the chosen
+  // order — so a spreadsheet opened beside the screen matches it.
   const exportFile = useCallback(
     () => ({
-      filename: positionsCsvFilename(account),
+      filename: positionsCsvFilename(account, market),
       body: positionsCsv(
         groups.flatMap((group) => group.rows),
         { account: ACCOUNT_LABEL, assetClass: ASSET_LABEL },
       ),
     }),
-    [groups, account],
+    [groups, account, market],
   )
+
+  // What the headings cut the table by — whichever filter is still open.
+  const splitBy = [market === 'ALL' ? 'market' : null, account === 'SPECIFIC' ? null : 'account']
+    .filter((part) => part != null)
+    .join(' and ')
 
   const meta = [
     `${String(total.count)} open`,
@@ -470,7 +507,12 @@ function Positions() {
       <PageHeader
         title="Positions"
         meta={meta}
-        filter={<AccountFilterControl value={account} onChange={setAccount} />}
+        filter={
+          <div className={styles.filters}>
+            <AccountFilterControl value={account} onChange={setAccount} />
+            <MarketSwitch value={market} onChange={setMarket} fill={isMobile} />
+          </div>
+        }
         actionsBeside
       >
         <ExportButton file={exportFile} disabled={rows.length === 0}>
@@ -488,10 +530,14 @@ function Positions() {
       </PageHeader>
 
       {rows.length === 0 ? (
-        <Empty>No open positions.</Empty>
+        <Empty>
+          {market === 'ALL'
+            ? 'No open positions.'
+            : `No open ${market === 'US' ? 'US' : 'JP'} positions${account === 'ALL' ? '' : ' in this account'}.`}
+        </Empty>
       ) : (
         <>
-          <PositionsSummary data={data} account={account} compact={isMobile} />
+          <PositionsSummary data={data} account={account} market={market} compact={isMobile} />
           <UnpricedNotice rows={rows} cost={total.unpricedCostJpy} />
 
           {isMobile ? (
@@ -508,9 +554,9 @@ function Positions() {
               </div>
               {groups.map((group) => (
                 <section
-                  key={group.total?.accountType ?? 'all'}
+                  key={groupKey(group)}
                   className={styles.cardGroup}
-                  aria-label={group.total ? ACCOUNT_TITLE[group.total.accountType] : 'Positions'}
+                  aria-label={group.total ? groupTitle(group.total) : 'Positions'}
                 >
                   {group.total ? (
                     <div className={styles.cardGroupHead}>
@@ -533,7 +579,7 @@ function Positions() {
             </>
           ) : (
             <Table
-              caption={`Positions${account === 'SPECIFIC' ? '' : ' by account'}, sorted by ${
+              caption={`Positions${splitBy ? ` by ${splitBy}` : ''}, sorted by ${
                 COLUMNS[sortBy].label
               } ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
             >
@@ -553,7 +599,7 @@ function Positions() {
                 </tr>
               </thead>
               {groups.map((group) => (
-                <tbody key={group.total?.accountType ?? 'all'} className={styles.group}>
+                <tbody key={groupKey(group)} className={styles.group}>
                   {group.total ? (
                     <TotalRow
                       total={group.total}

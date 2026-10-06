@@ -24,6 +24,7 @@ import { accountFilterInput } from '~/lib/accountScope'
 import { summarizeMonth, type MonthSummary } from '~/lib/calendar/monthSummary'
 import {
   matchesAccountFilter,
+  matchesMarketFilter,
   OPENING_SIDES,
   ZERO,
   type AccountType,
@@ -32,6 +33,7 @@ import {
   type TradeSide,
 } from '~/lib/domain/types'
 import { todayLocal } from '~/lib/localDate'
+import { positionsInput } from '~/lib/marketScope'
 import { monthWeeks } from '~/lib/monthGrid'
 import { daysUntilYearEnd } from '~/lib/nisa/daysLeft'
 import {
@@ -49,6 +51,7 @@ import {
   summarizePositions,
   type AccountTotal,
   type ClassTotal,
+  type GroupTotal,
   type PositionSummary,
   type PositionTotal,
 } from '~/lib/pnl/positionSummary'
@@ -120,6 +123,12 @@ export interface PositionsData {
   total: PositionTotal
   /** One per account holding anything, largest value first. */
   accounts: AccountTotal[]
+  /**
+   * The table's blocks: one per market, per account, or per market and account,
+   * according to which of the two switches is still open. A single block with no
+   * market and no account when both are narrowed to one.
+   */
+  groups: GroupTotal[]
   classes: ClassTotal[]
   highlights: PositionSummary['highlights']
   /** The rate a US holding's yen figures use, when one is held. */
@@ -128,7 +137,7 @@ export interface PositionsData {
 
 export const getPositions = createServerFn({ method: 'GET' })
   .middleware([authed])
-  .validator(accountFilterInput)
+  .validator(positionsInput)
   .handler(async ({ data, context }): Promise<PositionsData> => {
     const { engine } = await engineFor(context.userId, data.account)
 
@@ -143,6 +152,10 @@ export const getPositions = createServerFn({ method: 'GET' })
     const priceBySymbol = new Map(priced.map((row) => [row.instrument.symbol, row.price]))
 
     const rows = engine.positions
+      // After the engine, unlike the account filter: a market is a property of the
+      // instrument, so dropping one cannot change the pool of another. Everything
+      // summed below — weights included — is then of the market shown.
+      .filter((position) => matchesMarketFilter(position.assetClass, data.market))
       .map((position) => {
         const avgCost = position.costBasisJpy.div(position.quantity)
         const cached = priceBySymbol.get(position.symbol)
@@ -179,11 +192,17 @@ export const getPositions = createServerFn({ method: 'GET' })
           : new Decimal(right.marketValueJpy).cmp(left.marketValueJpy),
       )
 
-    const summary = summarizePositions(rows)
+    // A switch narrowed to one choice has nothing left to split on: under 特定
+    // there is one account, under JP or US one market.
+    const summary = summarizePositions(rows, {
+      market: data.market === 'ALL',
+      account: data.account !== 'SPECIFIC',
+    })
     return {
       rows: rows.map((row, index) => ({ ...row, weight: summary.weights[index] ?? null })),
       total: summary.total,
       accounts: summary.accounts,
+      groups: summary.groups,
       classes: summary.classes,
       highlights: summary.highlights,
       usdJpy: rows.find((row) => row.usdJpy != null)?.usdJpy ?? null,
