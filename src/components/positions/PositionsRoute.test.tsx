@@ -2,8 +2,8 @@
  * The Positions screen's blocks, as the page renders them.
  *
  * `getPositions` is stubbed with what the server builds minus the database and
- * the engine: the same scope test the engine's input goes through, and the real
- * `splitFor` and `summarizePositions` over hand-written rows. The stub answers
+ * the engine: the same scope test the engine's input goes through, and the
+ * handler's own `positionsView` over hand-written rows. The stub answers
  * whatever filters the route actually asked for, so a route that sent the wrong
  * ones would render the wrong book. What is pinned is the screen's side: which
  * headings appear under each pairing of the filters, and which rows under each.
@@ -22,7 +22,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { matchesAccountFilter, matchesMarketFilter } from '~/lib/domain/types'
 import { positionsInput } from '~/lib/marketScope'
-import { splitFor, summarizePositions } from '~/lib/pnl/positionSummary'
+import { positionsView } from '~/lib/pnl/positionSummary'
 import type { PositionRow, PositionsData } from '~/server/screens'
 
 const row = (symbol: string, over: Partial<PositionRow>): PositionRow =>
@@ -73,14 +73,8 @@ function serve(input: { account?: string; market?: string }, book = BOOK): Posit
       matchesAccountFilter(entry.accountType, filters.account) &&
       matchesMarketFilter(entry.assetClass, filters.market),
   )
-  const summary = summarizePositions(rows, splitFor(rows, filters))
   return {
-    rows: rows.map((entry, index) => ({ ...entry, weight: summary.weights[index] ?? null })),
-    total: summary.total,
-    accounts: summary.accounts,
-    groups: summary.groups,
-    classes: summary.classes,
-    highlights: summary.highlights,
+    ...positionsView(rows, filters),
     usdJpy: rows.some((entry) => entry.usdJpy != null) ? '150' : null,
   }
 }
@@ -216,6 +210,8 @@ describe('Positions blocks', () => {
       { heading: 'NISA 成長投資枠', symbols: ['8306'] },
       { heading: '特定口座', symbols: ['7203'] },
     ])
+    // Read off the blocks, so it does not claim a market split the table lacks.
+    expect(screen.getByRole('table').querySelector('caption')?.textContent).toMatch(/^Positions by account,/)
   })
 
   it('cuts the phone card list into the same blocks', async () => {

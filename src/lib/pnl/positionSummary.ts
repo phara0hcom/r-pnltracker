@@ -282,3 +282,21 @@ export function summarizePositions(
     },
   }
 }
+
+/** The screen's figures: every row with its weight, and the totals and blocks over them. */
+export type PositionsView<R> = Omit<PositionSummary, 'weights'> & { rows: (R & { weight: number | null })[] }
+
+/**
+ * Everything the Positions screen shows about the rows a pair of filters left,
+ * as `getPositions` returns it — the pure half of that handler, here so it is
+ * tested as written rather than through a copy. The filters only pick the
+ * blocks (`splitFor`); the rows must already be the filtered ones, which
+ * `engineFor` sees to before the engine runs.
+ */
+export function positionsView<R extends SummaryInput>(
+  rows: readonly R[],
+  filters: { account: AccountFilter; market: MarketFilter },
+): PositionsView<R> {
+  const { weights, ...summary } = summarizePositions(rows, splitFor(rows, filters))
+  return { ...summary, rows: rows.map((row, index) => ({ ...row, weight: weights[index] ?? null })) }
+}

@@ -47,8 +47,7 @@ import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
 import { splitByDay, splitByMarket, toSplitView, type MarketSplitView } from '~/lib/pnl/markets'
 import {
-  splitFor,
-  summarizePositions,
+  positionsView,
   type AccountTotal,
   type ClassTotal,
   type GroupTotal,
@@ -190,14 +189,8 @@ export const getPositions = createServerFn({ method: 'GET' })
           : new Decimal(right.marketValueJpy).cmp(left.marketValueJpy),
       )
 
-    const summary = summarizePositions(rows, splitFor(rows, data))
     return {
-      rows: rows.map((row, index) => ({ ...row, weight: summary.weights[index] ?? null })),
-      total: summary.total,
-      accounts: summary.accounts,
-      groups: summary.groups,
-      classes: summary.classes,
-      highlights: summary.highlights,
+      ...positionsView(rows, data),
       usdJpy: rows.find((row) => row.usdJpy != null)?.usdJpy ?? null,
     }
   })

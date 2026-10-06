@@ -10,43 +10,9 @@
  */
 import Decimal from 'decimal.js'
 import { describe, expect, it } from 'vitest'
-import { matchesMarketFilter, ONE, ZERO, type NormalizedTrade } from '../domain/types'
+import { matchesMarketFilter, type NormalizedTrade } from '../domain/types'
 import { runEngine } from './engine'
-
-let serial = 0
-
-function trade(over: Partial<NormalizedTrade>): NormalizedTrade {
-  const quantity = over.quantity ?? new Decimal(10)
-  const unitPrice = over.unitPrice ?? new Decimal(100)
-  const fxRate = over.fxRate ?? ONE
-  const gross = quantity.mul(unitPrice)
-  serial += 1
-  return {
-    tradeDate: '2026-09-01',
-    settleDate: '2026-09-03',
-    symbol: '8411',
-    name: '8411',
-    assetClass: 'JP_EQUITY',
-    accountType: 'SPECIFIC',
-    side: 'BUY',
-    quantity,
-    unitPrice,
-    currency: 'JPY',
-    fee: ZERO,
-    feeTax: ZERO,
-    otherCost: ZERO,
-    fxRate,
-    grossAmount: gross,
-    netAmount: gross,
-    netAmountJpy: gross.mul(fxRate),
-    isSettled: true,
-    sourceRowHash: `synthetic-${String(serial)}`,
-    sourceFile: 'synthetic',
-    ...over,
-  }
-}
-
-const usd = { assetClass: 'US_EQUITY', currency: 'USD', fxRate: new Decimal(150) } as const
+import { makeTrade as trade, US_TRADE as usd } from '~/test/trade'
 
 const BOOK: NormalizedTrade[] = [
   // 特定 holds both markets, bought and part-sold on the same days.
@@ -55,10 +21,15 @@ const BOOK: NormalizedTrade[] = [
   trade({ symbol: '8411', tradeDate: '2026-09-02', quantity: new Decimal(50), unitPrice: new Decimal(3100) }),
   trade({ ...usd, symbol: 'NVDA', tradeDate: '2026-09-02', side: 'SELL', quantity: new Decimal(2), unitPrice: new Decimal(125) }),
   trade({ symbol: '8411', tradeDate: '2026-09-02', side: 'SELL', quantity: new Decimal(30), unitPrice: new Decimal(3150) }),
-  // NISA: a fund (JP), and a US stock with its day's order set by hand.
+  // NISA: a fund (JP), and a US stock whose day is ordered by hand — sell, then
+  // buy, against the engine's default of opens first, so the order changes the
+  // close's cost. A JP buy on the same day in the same account carries no order,
+  // which is what tempts a filter to change the outcome: the hand-set order
+  // holds per pool-day, and must not depend on which other pools are present.
   trade({ symbol: 'eMAXIS Slim', assetClass: 'FUND', accountType: 'NISA_TSUMITATE', quantity: new Decimal(12345), unitPrice: new Decimal('2.9876') }),
-  trade({ ...usd, symbol: 'VOO', accountType: 'NISA_GROWTH', tradeDate: '2026-09-03', side: 'SELL', quantity: new Decimal(1), unitPrice: new Decimal(500), daySequence: 2 }),
-  trade({ ...usd, symbol: 'VOO', accountType: 'NISA_GROWTH', tradeDate: '2026-09-03', quantity: new Decimal(3), unitPrice: new Decimal(490), daySequence: 1 }),
+  trade({ ...usd, symbol: 'VOO', accountType: 'NISA_GROWTH', tradeDate: '2026-09-02', quantity: new Decimal(2), unitPrice: new Decimal(450) }),
+  trade({ ...usd, symbol: 'VOO', accountType: 'NISA_GROWTH', tradeDate: '2026-09-03', side: 'SELL', quantity: new Decimal(1), unitPrice: new Decimal(500), daySequence: 1 }),
+  trade({ ...usd, symbol: 'VOO', accountType: 'NISA_GROWTH', tradeDate: '2026-09-03', quantity: new Decimal(3), unitPrice: new Decimal(490), daySequence: 2 }),
   trade({ symbol: '7203', accountType: 'NISA_GROWTH', tradeDate: '2026-09-03', quantity: new Decimal(100), unitPrice: new Decimal(2800) }),
 ]
 
@@ -90,6 +61,14 @@ describe('filtering by market before the engine is exact', () => {
       expect(realizedKeys(filtered)).toEqual(realizedKeys(subset))
     })
   }
+
+  it('honours the hand-set order in the book it is checked against', () => {
+    // Without this, the case above could pass on a day the order did not matter:
+    // the sale is costed at the 2026-09-02 buy alone ($450), not averaged with
+    // the later $490 one, which an opens-first order would do.
+    const sale = full.realized.find((event) => event.symbol === 'VOO')
+    expect(sale?.costJpy.toFixed()).toBe(new Decimal(450).mul(150).toFixed())
+  })
 
   it('partitions the book — JP and US sum back to ALL, warnings included', () => {
     const jp = runEngine(BOOK.filter((t) => matchesMarketFilter(t.assetClass, 'JP')))

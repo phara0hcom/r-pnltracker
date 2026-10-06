@@ -2,7 +2,7 @@
  * Positions totals, summed on the server from the rows' own strings.
  */
 import { describe, expect, it } from 'vitest'
-import { inGroup, splitFor, summarizePositions, type SummaryInput } from './positionSummary'
+import { inGroup, positionsView, splitFor, summarizePositions, type SummaryInput } from './positionSummary'
 
 const row = (overrides: Partial<SummaryInput>): SummaryInput => ({
   symbol: '7203',
@@ -199,5 +199,29 @@ describe('inGroup', () => {
   it('files a fund under JP', () => {
     expect(inGroup(fund, { market: 'JP', accountType: null })).toBe(true)
     expect(inGroup(fund, { market: 'US', accountType: null })).toBe(false)
+  })
+})
+
+describe('positionsView', () => {
+  it('weighs each row in place and cuts the blocks by what the filters left', () => {
+    const jpOnly = BOOK.filter((entry) => entry.assetClass !== 'US_EQUITY')
+    const view = positionsView(jpOnly, { account: 'ALL', market: 'ALL' })
+    expect(view.rows.map((entry) => entry.symbol)).toEqual(jpOnly.map((entry) => entry.symbol))
+    expect(view.rows.map((entry) => entry.weight)).toEqual(summarizePositions(jpOnly).weights)
+    // One market held, so no market blocks, though the switch is on both.
+    expect(view.groups.map((group) => [group.market, group.accountType])).toEqual([
+      [null, 'NISA_TSUMITATE'],
+      [null, 'NISA_GROWTH'],
+      [null, 'SPECIFIC'],
+    ])
+    expect(view).not.toHaveProperty('weights')
+  })
+
+  it('splits by market when both are held and the switch is on both', () => {
+    const view = positionsView(BOOK, { account: 'SPECIFIC', market: 'ALL' })
+    expect(view.groups.map((group) => [group.market, group.accountType])).toEqual([
+      ['JP', null],
+      ['US', null],
+    ])
   })
 })
