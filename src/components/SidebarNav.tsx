@@ -15,6 +15,7 @@ import { NAV_ICONS, type NavRoute } from './icons/NavIcons'
 import styles from './SidebarNav.module.scss'
 import { clearSavedCopies } from '~/components/offline/offlineStore'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
+import { marketSearch, useRememberedMarket } from '~/components/ui/rememberedMarket'
 import { signOut } from '~/lib/auth-client'
 import { cx } from '~/lib/cx'
 import type { SessionUser } from '~/lib/session'
@@ -72,6 +73,8 @@ export function SidebarNav({
   collapsed?: boolean
 }) {
   const [account] = useAccountFilter()
+  // Positions alone also gets its market back — see `rememberedMarket`.
+  const market = marketSearch(useRememberedMarket())
 
   return (
     /*
@@ -98,7 +101,10 @@ export function SidebarNav({
                    * the switch, which is the whole reason it has its own key
                    * rather than sharing Trades' `account`.
                    */
-                  search={account !== 'ALL' ? { scope: account } : undefined}
+                  search={{
+                    scope: account !== 'ALL' ? account : undefined,
+                    ...(item.to === '/positions' && market ? { market } : {}),
+                  }}
                   className={cx(styles.navLink, collapsed && styles.navLinkRail)}
                   activeProps={{
                     className: cx(

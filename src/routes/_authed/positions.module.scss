@@ -73,12 +73,6 @@
   color: var(--color-text);
 }
 
-.groupSeparator {
-  margin: 0 var(--space-2);
-  font-weight: var(--weight-normal);
-  color: var(--color-text-subtle);
-}
-
 .groupCount {
   margin-left: var(--space-2);
   font-size: var(--text-xs);
@@ -100,6 +94,29 @@
 
   th {
     text-align: left;
+  }
+}
+
+/* A market inside an account: quieter than the account above it, and set in,
+   so the two levels read as a tree rather than as siblings. */
+.subgroupRow {
+  th,
+  td {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
+    background-color: color-mix(in srgb, var(--color-surface-raised) 25%, var(--color-surface));
+  }
+
+  th {
+    padding-left: var(--space-5);
+    text-align: left;
+  }
+
+  .groupName {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
   }
 }
 
@@ -159,6 +176,27 @@
   font-weight: var(--weight-semibold);
 
   @include m.tabular-nums;
+}
+
+/* A market inside an account on the card list. */
+.cardSubHead {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) 0 var(--space-1) var(--space-3);
+
+  .groupName {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
+  }
+
+  .cardGroupFigures {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
+  }
 }
 
 .cardList {

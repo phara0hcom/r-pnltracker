@@ -53,14 +53,24 @@ export interface AccountTotal extends PositionTotal {
   accountType: AccountType
 }
 
+/** One market's share of a block — JP stocks and funds, or US stocks. */
+export interface MarketTotal extends PositionTotal {
+  market: Market
+}
+
 /**
- * One block of the table: a market, an account, both, or — when the filters
- * have already narrowed the screen to one of each — neither, which is the whole
- * list with no heading. A null side is "not split on this".
+ * One block of the table: an account, and within it each market it holds.
+ *
+ * Account first, because that is how the book is read — 特定 or NISA decides
+ * how a holding is taxed, which matters more than the currency it is priced in.
+ * `accountType` is null when the account is not split (under 特定, the one
+ * taxable account), and the block is then the whole book; `markets` is empty
+ * when the market is not split.
  */
 export interface GroupTotal extends PositionTotal {
-  market: Market | null
   accountType: AccountType | null
+  /** JP before US. Only markets the block holds. */
+  markets: MarketTotal[]
 }
 
 /** Which axes the table is cut along. */
@@ -88,11 +98,7 @@ export interface PositionSummary {
   total: PositionTotal
   /** Largest value first. */
   accounts: AccountTotal[]
-  /**
-   * The table's blocks, in display order: JP before US, then the accounts in
-   * `accounts`' order — largest across the book, not re-ranked per market. Only
-   * blocks holding something are present.
-   */
+  /** The table's blocks, in `accounts`' order, each holding something. */
   groups: GroupTotal[]
   /** Largest value first; classes with nothing priced are left out. */
   classes: ClassTotal[]
@@ -140,24 +146,25 @@ function totalOf(rows: readonly SummaryInput[], bookValue: Decimal): PositionTot
   }
 }
 
-/** Whether a row belongs to a block — the client's way of filling one with rows. */
+/** Whether a row belongs to a block's account. */
 export function inGroup(
-  row: Pick<SummaryInput, 'assetClass' | 'accountType'>,
-  group: Pick<GroupTotal, 'market' | 'accountType'>,
+  row: Pick<SummaryInput, 'accountType'>,
+  group: Pick<GroupTotal, 'accountType'>,
 ): boolean {
-  return (
-    (group.market == null || marketOf(row.assetClass) === group.market) &&
-    (group.accountType == null || row.accountType === group.accountType)
-  )
+  return group.accountType == null || row.accountType === group.accountType
 }
+
+/** Whether a row belongs to one market's part of a block. */
+export const inMarket = (row: Pick<SummaryInput, 'assetClass'>, market: Market): boolean =>
+  marketOf(row.assetClass) === market
 
 /**
  * Which axes the table is cut along, given the two filters and what they left.
  *
  * Accounts split unless the switch is on 特定, the one taxable account. Markets
  * split only when the switch is on both *and* both are held: a book of Japanese
- * holdings alone would otherwise put one "JP stocks & funds" heading over the
- * whole table, repeating the total, and prefix every account heading with it.
+ * holdings alone would otherwise give every account one "JP stocks & funds"
+ * sub-heading repeating the account's own total.
  */
 export function splitFor(
   rows: readonly Pick<SummaryInput, 'assetClass'>[],
@@ -170,18 +177,16 @@ export function splitFor(
 }
 
 /**
- * Totals for each block of the table, in display order: JP before US, and
- * within a market the accounts in `accounts`' order — largest across the whole
- * book, so the accounts read the same way under JP as under US rather than each
- * market ranking them afresh.
+ * Totals for each block of the table and each market within it.
+ *
+ * The blocks are the accounts, in `accounts`' order (largest across the book)
+ * and with `accounts`' own totals — or, when the account is not split, one
+ * block that is the book. Within each, JP before US, and only the markets that
+ * block holds.
  *
  * Summed here, not by the screen, for the reason the rest of this file exists:
- * a block's heading carries a total, and adding it up in the browser is
- * financial arithmetic in the UI. Weights stay shares of the whole book shown,
- * not of the block.
- *
- * Unsplit on market, a block is an account and its totals are `accounts`' own;
- * unsplit on both, the one block is the book. Only the cross needs summing.
+ * a heading carries a total, and adding it up in the browser is financial
+ * arithmetic in the UI. Weights stay shares of the whole book shown.
  */
 function groupTotals(
   rows: readonly SummaryInput[],
@@ -190,19 +195,21 @@ function groupTotals(
   accounts: readonly AccountTotal[],
   split: GroupSplit,
 ): GroupTotal[] {
-  if (!split.market) {
-    return split.account
-      ? accounts.map((entry) => ({ ...entry, market: null }))
-      : rows.length > 0
-        ? [{ ...total, market: null, accountType: null }]
-        : []
-  }
+  const blocks: { head: PositionTotal; accountType: AccountType | null }[] = split.account
+    ? accounts.map((entry) => ({ head: entry, accountType: entry.accountType }))
+    : rows.length > 0
+      ? [{ head: total, accountType: null }]
+      : []
 
-  const accountTypes = split.account ? accounts.map((entry) => entry.accountType) : [null]
-  return MARKETS.flatMap((market) => accountTypes.map((accountType) => ({ market, accountType })))
-    .map((block) => ({ block, members: rows.filter((row) => inGroup(row, block)) }))
-    .filter(({ members }) => members.length > 0)
-    .map(({ block, members }) => ({ ...block, ...totalOf(members, bookValue) }))
+  return blocks.map(({ head, accountType }) => {
+    const members = rows.filter((row) => inGroup(row, { accountType }))
+    const markets = split.market
+      ? MARKETS.map((market) => ({ market, inside: members.filter((row) => inMarket(row, market)) }))
+          .filter(({ inside }) => inside.length > 0)
+          .map(({ market, inside }) => ({ market, ...totalOf(inside, bookValue) }))
+      : []
+    return { ...head, accountType, markets }
+  })
 }
 
 export function summarizePositions(

@@ -12,6 +12,7 @@ import { MarketBreakdown, MarketInline } from '~/components/pnl/MarketSplit'
 import { HeroStat, PageHeader, Section, Stat } from '~/components/screen'
 import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
+import { marketSearch, useRememberedMarket } from '~/components/ui/rememberedMarket'
 import { useIsMobile } from '~/components/ui/useIsMobile'
 import { accountScopeSchema } from '~/lib/accountScope'
 import { cx } from '~/lib/cx'
@@ -192,6 +193,8 @@ function Dashboard() {
   const [account, setAccount] = useAccountFilter()
   const navigate = Route.useNavigate()
   const isMobile = useIsMobile()
+  // "View positions" opens Positions on the market it was last left on.
+  const positionsMarket = marketSearch(useRememberedMarket())
 
   // The server sends the whole gap-filled history; windowing here means paging
   // back costs no round-trip.
@@ -339,6 +342,7 @@ function Dashboard() {
               sortBy: 'marketValueJpy',
               sortDir: 'desc',
               scope: account === 'ALL' ? undefined : account,
+              market: positionsMarket,
             }}
             className={styles.capitalLink}
           >

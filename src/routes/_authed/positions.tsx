@@ -1,10 +1,12 @@
 /**
- * Open positions, split by market (JP / US) and by account (NISA / 特定).
+ * Open positions, by account (NISA / 特定) and, within each, by market (JP / US).
  *
  * Two independent filters narrow the book — account and market — and whichever
- * is still open becomes a heading: all of both gives a block per market and
- * account, 特定 a block per market, one market a block per account. A market
- * heading appears only when both markets are held (`splitFor`).
+ * is still open becomes a heading. Account comes first, so an account's
+ * holdings stay together: each account is a block, with a JP and a US
+ * sub-heading inside it. Under 特定 the markets are the blocks; under one market
+ * the accounts are; under both, one list. Markets are split only when both are
+ * held (`splitFor`).
  *
  * The market lives only on this screen, so it is read from this route's own
  * validated search rather than through a cross-route hook like the account's.
@@ -13,8 +15,8 @@
  * loader dependencies and sorting deliberately is not, so clicking a header
  * reorders instantly rather than making a round trip for the same rows back in
  * a different order. It orders rows within each block; the blocks keep their
- * own order (JP before US, accounts largest first), so a sort never scatters
- * one block's holdings among another's.
+ * own order (accounts largest first, JP before US within each), so a sort never
+ * scatters one block's holdings among another's.
  *
  * Every total — the book, each account, each row's weight — is summed on the
  * server. This screen used to add them up in the browser from the strings the
@@ -22,7 +24,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useCallback, useMemo } from 'react'
+import { Fragment, useCallback, useEffect, useMemo } from 'react'
 import styles from './positions.module.scss'
 import { AccountDot } from '~/components/AccountDot'
 import {
@@ -48,12 +50,13 @@ import { ACCOUNT_OPTIONS, useAccountFilter } from '~/components/ui/AccountSwitch
 import { ColumnMenu } from '~/components/ui/ColumnMenu'
 import { ExportButton } from '~/components/ui/ExportButton'
 import { MarketFilterControl } from '~/components/ui/MarketFilterControl'
+import { rememberMarket } from '~/components/ui/rememberedMarket'
 import { useColumnVisibility } from '~/components/ui/useColumnVisibility'
 import { useIsMobile } from '~/components/ui/useIsMobile'
 import { cx } from '~/lib/cx'
-import type { AccountFilter, MarketFilter } from '~/lib/domain/types'
+import type { AccountFilter, AccountType, MarketFilter } from '~/lib/domain/types'
 import { positionsCsv, positionsCsvFilename } from '~/lib/export/positionsCsv'
-import { inGroup, type GroupTotal, type PositionTotal } from '~/lib/pnl/positionSummary'
+import { inGroup, inMarket, type MarketTotal, type PositionTotal } from '~/lib/pnl/positionSummary'
 import { POSITION_SORTABLE, positionSearchSchema, type PositionSortKey } from '~/lib/positionSearch'
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
 import type { TableColumn } from '~/lib/table/columns'
@@ -310,41 +313,71 @@ export const Route = createFileRoute('/_authed/positions')({
   component: Positions,
 })
 
-interface Group {
-  /** Null when both filters are narrowed to one choice and no heading is needed. */
-  total: GroupTotal | null
+/** A heading over part of the table: an account, or a market. */
+interface Heading {
+  /** The name as text — also the section's accessible name. */
+  label: string
+  total: PositionTotal
+  /** Set for an account, whose name is led by its colour dot. */
+  accountType?: AccountType
+}
+
+/** One market's rows inside a section, under its own sub-heading. */
+interface Part {
+  /** Null where the section's heading already says everything. */
+  head: Heading | null
   rows: PositionRow[]
 }
 
-/**
- * The sorted rows cut into the server's blocks, in the server's order.
- *
- * With nothing left to split on — 特定 and one market, say — the server sends
- * one block naming neither, and a heading repeating the filters would say
- * nothing, so the rows stay one list.
- */
-function groupRows(data: PositionsData, sorted: PositionRow[]): Group[] {
-  return data.groups.map((entry) => ({
-    total: entry.market == null && entry.accountType == null ? null : entry,
-    rows: sorted.filter((row) => inGroup(row, entry)),
-  }))
+interface Section {
+  key: string
+  /** Null when both filters are narrowed and a heading would only repeat them. */
+  head: Heading | null
+  parts: Part[]
 }
 
-const groupKey = (group: Group) =>
-  group.total ? `${group.total.market ?? 'all'}-${group.total.accountType ?? 'all'}` : 'all'
+const accountHeading = (total: PositionTotal, accountType: AccountType): Heading => ({
+  label: ACCOUNT_TITLE[accountType] ?? accountType,
+  total,
+  accountType,
+})
+
+const marketHeading = (total: MarketTotal): Heading => ({
+  label: MARKET_TITLE[total.market] ?? total.market,
+  total,
+})
 
 /**
- * A block's name for a screen reader: `US stocks, 特定口座`. A comma, not the
- * heading's `·`, which `GroupName` hides from assistive technology for the
- * same reason — read aloud it is "middle dot".
+ * The sorted rows cut into the server's blocks, in the server's order — an
+ * account with its markets as parts, or, when the account is not split, each
+ * market a section of its own. Structure only: every total is the server's.
  */
-const groupLabel = (total: GroupTotal) =>
-  [
-    total.market ? MARKET_TITLE[total.market] : null,
-    total.accountType ? (ACCOUNT_TITLE[total.accountType] ?? total.accountType) : null,
-  ]
-    .filter((part) => part != null)
-    .join(', ')
+function sectionsOf(data: PositionsData, sorted: PositionRow[]): Section[] {
+  return data.groups.flatMap((group): Section[] => {
+    const rows = sorted.filter((row) => inGroup(row, group))
+    const byMarket = (total: MarketTotal): Part['rows'] => rows.filter((row) => inMarket(row, total.market))
+
+    if (group.accountType != null) {
+      return [
+        {
+          key: group.accountType,
+          head: accountHeading(group, group.accountType),
+          parts:
+            group.markets.length > 0
+              ? group.markets.map((total) => ({ head: marketHeading(total), rows: byMarket(total) }))
+              : [{ head: null, rows }],
+        },
+      ]
+    }
+    return group.markets.length > 0
+      ? group.markets.map((total) => ({
+          key: total.market,
+          head: marketHeading(total),
+          parts: [{ head: null, rows: byMarket(total) }],
+        }))
+      : [{ key: 'all', head: null, parts: [{ head: null, rows }] }]
+  })
+}
 
 /**
  * "No open US positions in NISA." — naming what the filters left out, so an
@@ -358,8 +391,9 @@ const emptyMessage = (account: AccountFilter, market: MarketFilter) => {
 const positionsLabel = (count: number) => `${String(count)} position${count === 1 ? '' : 's'}`
 
 /**
- * An account's heading row, or the book's total at the foot: the label across
- * the columns with no total, then each shown column's own total beneath it.
+ * A heading row — an account's, or a market's within it — or the book's total
+ * at the foot: the label across the columns with no total, then each shown
+ * column's own total beneath it.
  */
 function TotalRow({
   total,
@@ -371,7 +405,11 @@ function TotalRow({
 }: {
   total: PositionTotal
   label: React.ReactNode
-  /** `rowgroup` for an account's heading, which labels the rows under it. */
+  /**
+   * `rowgroup` for a section's heading, which labels the rows under it. A
+   * market's sub-heading inside an account is `row`: one `tbody` has one group
+   * heading, and the account is the one the rows belong to.
+   */
   scope: 'row' | 'rowgroup'
   leading: number
   totalled: readonly PositionSortKey[]
@@ -391,29 +429,40 @@ function TotalRow({
   )
 }
 
-/** The block's market and account — dot, full name — and holding count. */
-function GroupName({ total }: { total: GroupTotal }) {
+/** A heading's name — an account's led by its dot — and its holding count. */
+function HeadingName({ heading }: { heading: Heading }) {
   return (
     <span className={styles.groupName}>
-      {total.market ? MARKET_TITLE[total.market] : null}
-      {total.market && total.accountType ? (
-        // Real spaces as well as the margin: the margin is only CSS, so without
-        // them the two names run together in text and in a screen reader.
-        <>
-          {' '}
-          <span className={styles.groupSeparator} aria-hidden="true">
-            ·
-          </span>{' '}
-        </>
-      ) : null}
-      {total.accountType ? (
-        <>
-          <AccountDot accountType={total.accountType} />
-          {ACCOUNT_TITLE[total.accountType] ?? total.accountType}
-        </>
-      ) : null}
-      <span className={styles.groupCount}>{positionsLabel(total.count)}</span>
+      {heading.accountType ? <AccountDot accountType={heading.accountType} /> : null}
+      {heading.label}
+      <span className={styles.groupCount}>{positionsLabel(heading.total.count)}</span>
     </span>
+  )
+}
+
+/** SP: a heading with its value and return beside it. */
+function CardHeading({ heading, className }: { heading: Heading; className: string | undefined }) {
+  return (
+    <div className={className}>
+      <HeadingName heading={heading} />
+      <span className={styles.cardGroupFigures}>
+        {yen(heading.total.marketValueJpy)}
+        <span className={cx(styles.cardPct, toneClass(heading.total.unrealizedJpy))}>
+          {pctSigned(heading.total.unrealizedPct)}
+        </span>
+      </span>
+    </div>
+  )
+}
+
+/** SP: a list of holdings. */
+function PositionCards({ rows }: { rows: readonly PositionRow[] }) {
+  return (
+    <ul className={styles.cardList}>
+      {rows.map((row) => (
+        <PositionCard key={`${row.symbol}-${row.accountType}`} row={row} />
+      ))}
+    </ul>
   )
 }
 
@@ -505,7 +554,7 @@ function Positions() {
   const totalled = shown.filter((key) => COLUMNS[key].total != null)
 
   const sorted = useMemo(() => sortRows(rows, COLUMNS, sortBy, sortDir), [rows, sortBy, sortDir])
-  const groups = useMemo(() => groupRows(data, sorted), [data, sorted])
+  const sections = useMemo(() => sectionsOf(data, sorted), [data, sorted])
 
   // The file is the table as it reads — block by block, each in the chosen
   // order — so a spreadsheet opened beside the screen matches it.
@@ -513,21 +562,28 @@ function Positions() {
     () => ({
       filename: positionsCsvFilename(account, market),
       body: positionsCsv(
-        groups.flatMap((group) => group.rows),
+        sections.flatMap((section) => section.parts.flatMap((part) => part.rows)),
         { account: ACCOUNT_LABEL, assetClass: ASSET_LABEL },
       ),
     }),
-    [groups, account, market],
+    [sections, account, market],
   )
 
   // What the headings cut the table by, read off the blocks the server sent
   // rather than re-deciding it here from the filters.
   const splitBy = [
-    groups.some((group) => group.total?.market != null) ? 'market' : null,
-    groups.some((group) => group.total?.accountType != null) ? 'account' : null,
+    data.groups.some((group) => group.accountType != null) ? 'account' : null,
+    data.groups.some((group) => group.markets.length > 0) ? 'market' : null,
   ]
     .filter((part) => part != null)
     .join(' and ')
+
+  // Remembered for the links back here, which otherwise drop the market: the
+  // sidebar and the dashboard carry only the account switch, which every screen
+  // shares.
+  useEffect(() => {
+    rememberMarket(market)
+  }, [market])
 
   const meta = [
     `${String(total.count)} open`,
@@ -583,28 +639,27 @@ function Positions() {
                   label="Sort by"
                 />
               </div>
-              {groups.map((group) => (
+              {sections.map((section) => (
                 <section
-                  key={groupKey(group)}
+                  key={section.key}
                   className={styles.cardGroup}
-                  aria-label={group.total ? groupLabel(group.total) : 'Positions'}
+                  aria-label={section.head?.label ?? 'Positions'}
                 >
-                  {group.total ? (
-                    <div className={styles.cardGroupHead}>
-                      <GroupName total={group.total} />
-                      <span className={styles.cardGroupFigures}>
-                        {yen(group.total.marketValueJpy)}
-                        <span className={cx(styles.cardPct, toneClass(group.total.unrealizedJpy))}>
-                          {pctSigned(group.total.unrealizedPct)}
-                        </span>
-                      </span>
-                    </div>
-                  ) : null}
-                  <ul className={styles.cardList}>
-                    {group.rows.map((row) => (
-                      <PositionCard key={`${row.symbol}-${row.accountType}`} row={row} />
-                    ))}
-                  </ul>
+                  {section.head ? <CardHeading heading={section.head} className={styles.cardGroupHead} /> : null}
+                  {section.parts.map((part) =>
+                    part.head ? (
+                      <div
+                        key={part.head.label}
+                        role="group"
+                        aria-label={`${section.head ? `${section.head.label}, ` : ''}${part.head.label}`}
+                      >
+                        <CardHeading heading={part.head} className={styles.cardSubHead} />
+                        <PositionCards rows={part.rows} />
+                      </div>
+                    ) : (
+                      <PositionCards key="rows" rows={part.rows} />
+                    ),
+                  )}
                 </section>
               ))}
             </>
@@ -629,33 +684,47 @@ function Positions() {
                   ))}
                 </tr>
               </thead>
-              {groups.map((group) => (
-                <tbody key={groupKey(group)} className={styles.group}>
-                  {group.total ? (
+              {sections.map((section) => (
+                <tbody key={section.key} className={styles.group}>
+                  {section.head ? (
                     <TotalRow
-                      total={group.total}
-                      label={<GroupName total={group.total} />}
+                      total={section.head.total}
+                      label={<HeadingName heading={section.head} />}
                       scope="rowgroup"
                       leading={leading}
                       totalled={totalled}
                       className={styles.groupRow}
                     />
                   ) : null}
-                  {group.rows.map((row) => (
-                    <tr key={`${row.symbol}-${row.accountType}`}>
-                      {shown.map((key) => {
-                        const column = COLUMNS[key]
-                        return (
-                          <td
-                            key={key}
-                            data-numeric={column.numeric ? '' : undefined}
-                            className={column.tint?.(row)}
-                          >
-                            {column.cell(row)}
-                          </td>
-                        )
-                      })}
-                    </tr>
+                  {section.parts.map((part) => (
+                    <Fragment key={part.head?.label ?? 'rows'}>
+                      {part.head ? (
+                        <TotalRow
+                          total={part.head.total}
+                          label={<HeadingName heading={part.head} />}
+                          scope="row"
+                          leading={leading}
+                          totalled={totalled}
+                          className={styles.subgroupRow}
+                        />
+                      ) : null}
+                      {part.rows.map((row) => (
+                        <tr key={`${row.symbol}-${row.accountType}`}>
+                          {shown.map((key) => {
+                            const column = COLUMNS[key]
+                            return (
+                              <td
+                                key={key}
+                                data-numeric={column.numeric ? '' : undefined}
+                                className={column.tint?.(row)}
+                              >
+                                {column.cell(row)}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
                 </tbody>
               ))}
