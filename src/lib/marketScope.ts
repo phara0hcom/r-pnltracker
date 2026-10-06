@@ -11,12 +11,14 @@ import { accountFilterInput } from './accountScope'
 import { MARKET_FILTERS, type AccountFilter, type MarketFilter } from './domain/types'
 
 /**
- * `.catch()` like `accountScopeSchema`: a stale bookmark or a hand-edited URL
- * falls back to both markets instead of erroring the route. `ALL` is the default
- * and is left out of the URL, so the unfiltered view keeps its clean address.
+ * A stale bookmark or a hand-edited URL falls back to both markets instead of
+ * erroring the route — and falls back to *absent*, not to `'ALL'`. `ALL` is the
+ * default and is kept out of the URL; catching to the value itself would hand
+ * it to the next `(prev) => ({ ...prev, … })` navigation, which would write
+ * `?market=ALL` into the address on the first click of a column header.
  */
 export const marketScopeSchema = z.object({
-  market: z.enum(['ALL', 'JP', 'US']).catch('ALL').optional(),
+  market: z.enum(MARKET_FILTERS).optional().catch(undefined),
 })
 
 /** Narrow an untrusted search value to the three choices. */

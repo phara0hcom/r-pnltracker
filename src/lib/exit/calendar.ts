@@ -24,6 +24,7 @@
  *    all in the past, and an exit rule is only ever evaluated forward from an
  *    open position's entry date.
  */
+import { marketOf, type AssetClass } from '../domain/types'
 
 /** Which exchange's closures apply. Chosen from the instrument's asset class. */
 export type MarketCalendar = 'JP' | 'US'
@@ -243,5 +244,4 @@ export function todayFor(calendar: MarketCalendar, now: Date = new Date()): stri
 }
 
 /** The calendar an instrument trades on. Funds are never exit-rule eligible. */
-export const calendarFor = (assetClass: 'JP_EQUITY' | 'US_EQUITY' | 'FUND'): MarketCalendar =>
-  assetClass === 'US_EQUITY' ? 'US' : 'JP'
+export const calendarFor = (assetClass: AssetClass): MarketCalendar => marketOf(assetClass)

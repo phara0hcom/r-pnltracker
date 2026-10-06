@@ -12,7 +12,15 @@
  * reads as a loss that is not there.
  */
 import Decimal from 'decimal.js'
-import { marketOf, MARKETS, type AccountType, type AssetClass, type Market } from '../domain/types'
+import {
+  marketOf,
+  MARKETS,
+  type AccountFilter,
+  type AccountType,
+  type AssetClass,
+  type Market,
+  type MarketFilter,
+} from '../domain/types'
 
 export interface SummaryInput {
   symbol: string
@@ -81,8 +89,9 @@ export interface PositionSummary {
   /** Largest value first. */
   accounts: AccountTotal[]
   /**
-   * The table's blocks, in display order: JP before US, then each market's
-   * accounts largest first. Only blocks holding something are present.
+   * The table's blocks, in display order: JP before US, then the accounts in
+   * `accounts`' order — largest across the book, not re-ranked per market. Only
+   * blocks holding something are present.
    */
   groups: GroupTotal[]
   /** Largest value first; classes with nothing priced are left out. */
@@ -143,27 +152,54 @@ export function inGroup(
 }
 
 /**
+ * Which axes the table is cut along, given the two filters and what they left.
+ *
+ * Accounts split unless the switch is on 特定, the one taxable account. Markets
+ * split only when the switch is on both *and* both are held: a book of Japanese
+ * holdings alone would otherwise put one "JP stocks & funds" heading over the
+ * whole table, repeating the total, and prefix every account heading with it.
+ */
+export function splitFor(
+  rows: readonly Pick<SummaryInput, 'assetClass'>[],
+  filters: { account: AccountFilter; market: MarketFilter },
+): GroupSplit {
+  return {
+    market: filters.market === 'ALL' && new Set(rows.map((row) => marketOf(row.assetClass))).size > 1,
+    account: filters.account !== 'SPECIFIC',
+  }
+}
+
+/**
  * Totals for each block of the table, in display order: JP before US, and
- * within a market the accounts in `accounts`' order (largest first) — so the
- * accounts read the same way under JP as under US rather than each market
- * ranking them afresh. With neither axis split it is one block, the whole list.
+ * within a market the accounts in `accounts`' order — largest across the whole
+ * book, so the accounts read the same way under JP as under US rather than each
+ * market ranking them afresh.
  *
  * Summed here, not by the screen, for the reason the rest of this file exists:
  * a block's heading carries a total, and adding it up in the browser is
  * financial arithmetic in the UI. Weights stay shares of the whole book shown,
  * not of the block.
+ *
+ * Unsplit on market, a block is an account and its totals are `accounts`' own;
+ * unsplit on both, the one block is the book. Only the cross needs summing.
  */
 function groupTotals(
   rows: readonly SummaryInput[],
   bookValue: Decimal,
+  total: PositionTotal,
   accounts: readonly AccountTotal[],
   split: GroupSplit,
 ): GroupTotal[] {
-  const markets = split.market ? MARKETS : [null]
-  const accountTypes = split.account ? accounts.map((entry) => entry.accountType) : [null]
+  if (!split.market) {
+    return split.account
+      ? accounts.map((entry) => ({ ...entry, market: null }))
+      : rows.length > 0
+        ? [{ ...total, market: null, accountType: null }]
+        : []
+  }
 
-  return markets
-    .flatMap((market) => accountTypes.map((accountType) => ({ market, accountType })))
+  const accountTypes = split.account ? accounts.map((entry) => entry.accountType) : [null]
+  return MARKETS.flatMap((market) => accountTypes.map((accountType) => ({ market, accountType })))
     .map((block) => ({ block, members: rows.filter((row) => inGroup(row, block)) }))
     .filter(({ members }) => members.length > 0)
     .map(({ block, members }) => ({ ...block, ...totalOf(members, bookValue) }))
@@ -232,10 +268,11 @@ export function summarizePositions(
     undefined,
   )
 
+  const total = totalOf(rows, bookValue)
   return {
-    total: totalOf(rows, bookValue),
+    total,
     accounts,
-    groups: groupTotals(rows, bookValue, accounts, split),
+    groups: groupTotals(rows, bookValue, total, accounts, split),
     classes,
     weights: rows.map((row) => (isPriced(row) ? shareOf(row.marketValueJpy) : null)),
     highlights: {

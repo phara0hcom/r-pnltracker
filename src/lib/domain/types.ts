@@ -55,16 +55,23 @@ export type AssetClass = 'JP_EQUITY' | 'US_EQUITY' | 'FUND'
  * `lib/pnl/markets.ts` totals realized results through, so a figure on one
  * screen is never filed under a different market on another.
  */
-export type Market = 'JP' | 'US'
+export const MARKETS = ['JP', 'US'] as const
 
-export const MARKETS: readonly Market[] = ['JP', 'US']
+export type Market = (typeof MARKETS)[number]
 
+/**
+ * The one place an asset class is assigned a market. `lib/pnl/markets.ts` and
+ * the exit-rule trading calendars ask this rather than repeating the test.
+ */
 export const marketOf = (assetClass: AssetClass): Market => (assetClass === 'US_EQUITY' ? 'US' : 'JP')
 
-/** The market switch: both, or one. Orthogonal to `AccountFilter`. */
-export type MarketFilter = 'ALL' | Market
+/**
+ * The market switch: both, or one. Orthogonal to `AccountFilter`. Derived from
+ * `MARKETS` so the URL schema built from it cannot fall behind a new market.
+ */
+export const MARKET_FILTERS = ['ALL', ...MARKETS] as const
 
-export const MARKET_FILTERS: readonly MarketFilter[] = ['ALL', 'JP', 'US']
+export type MarketFilter = (typeof MARKET_FILTERS)[number]
 
 export const matchesMarketFilter = (assetClass: AssetClass, filter: MarketFilter): boolean =>
   filter === 'ALL' || marketOf(assetClass) === filter

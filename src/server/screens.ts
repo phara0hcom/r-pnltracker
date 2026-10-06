@@ -24,7 +24,6 @@ import { accountFilterInput } from '~/lib/accountScope'
 import { summarizeMonth, type MonthSummary } from '~/lib/calendar/monthSummary'
 import {
   matchesAccountFilter,
-  matchesMarketFilter,
   OPENING_SIDES,
   ZERO,
   type AccountType,
@@ -48,6 +47,7 @@ import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
 import { splitByDay, splitByMarket, toSplitView, type MarketSplitView } from '~/lib/pnl/markets'
 import {
+  splitFor,
   summarizePositions,
   type AccountTotal,
   type ClassTotal,
@@ -124,9 +124,8 @@ export interface PositionsData {
   /** One per account holding anything, largest value first. */
   accounts: AccountTotal[]
   /**
-   * The table's blocks: one per market, per account, or per market and account,
-   * according to which of the two switches is still open. A single block with no
-   * market and no account when both are narrowed to one.
+   * The table's blocks: one per market, per account, or per market and account —
+   * see `splitFor`. A single block with neither when there is nothing to split.
    */
   groups: GroupTotal[]
   classes: ClassTotal[]
@@ -139,7 +138,7 @@ export const getPositions = createServerFn({ method: 'GET' })
   .middleware([authed])
   .validator(positionsInput)
   .handler(async ({ data, context }): Promise<PositionsData> => {
-    const { engine } = await engineFor(context.userId, data.account)
+    const { engine } = await engineFor(context.userId, data.account, data.market)
 
     const [priced, overrides, liveFx] = await Promise.all([
       db
@@ -147,15 +146,14 @@ export const getPositions = createServerFn({ method: 'GET' })
         .from(priceCache)
         .innerJoin(instruments, eq(priceCache.instrumentId, instruments.id)),
       overridesFor(context.userId),
-      usdJpyRate(),
+      // Only a US holding is valued in dollars; a JP-only view has none.
+      data.market === 'JP' ? null : usdJpyRate(),
     ])
     const priceBySymbol = new Map(priced.map((row) => [row.instrument.symbol, row.price]))
 
+    // Both filters were applied to the trades, so everything summed below —
+    // weights included — is of the holdings shown.
     const rows = engine.positions
-      // After the engine, unlike the account filter: a market is a property of the
-      // instrument, so dropping one cannot change the pool of another. Everything
-      // summed below — weights included — is then of the market shown.
-      .filter((position) => matchesMarketFilter(position.assetClass, data.market))
       .map((position) => {
         const avgCost = position.costBasisJpy.div(position.quantity)
         const cached = priceBySymbol.get(position.symbol)
@@ -192,12 +190,7 @@ export const getPositions = createServerFn({ method: 'GET' })
           : new Decimal(right.marketValueJpy).cmp(left.marketValueJpy),
       )
 
-    // A switch narrowed to one choice has nothing left to split on: under 特定
-    // there is one account, under JP or US one market.
-    const summary = summarizePositions(rows, {
-      market: data.market === 'ALL',
-      account: data.account !== 'SPECIFIC',
-    })
+    const summary = summarizePositions(rows, splitFor(rows, data))
     return {
       rows: rows.map((row, index) => ({ ...row, weight: summary.weights[index] ?? null })),
       total: summary.total,

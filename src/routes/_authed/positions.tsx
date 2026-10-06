@@ -3,7 +3,11 @@
  *
  * Two independent filters narrow the book — account and market — and whichever
  * is still open becomes a heading: all of both gives a block per market and
- * account, one account a block per market, one market a block per account.
+ * account, 特定 a block per market, one market a block per account. A market
+ * heading appears only when both markets are held (`splitFor`).
+ *
+ * The market lives only on this screen, so it is read from this route's own
+ * validated search rather than through a cross-route hook like the account's.
  *
  * Sorting is client-side over rows already in memory: the two filters are
  * loader dependencies and sorting deliberately is not, so clicking a header
@@ -40,13 +44,14 @@ import { InstrumentLink } from '~/components/InstrumentLink'
 import { PositionsSummary, UnpricedNotice } from '~/components/positions/PositionsSummary'
 import { Empty, PageHeader, SegmentedTabs, SortHeader, Table } from '~/components/screen'
 import { AccountFilterControl } from '~/components/ui/AccountFilterControl'
-import { useAccountFilter } from '~/components/ui/AccountSwitch'
+import { ACCOUNT_OPTIONS, useAccountFilter } from '~/components/ui/AccountSwitch'
 import { ColumnMenu } from '~/components/ui/ColumnMenu'
 import { ExportButton } from '~/components/ui/ExportButton'
-import { MarketSwitch, useMarketFilter } from '~/components/ui/MarketSwitch'
+import { MarketFilterControl } from '~/components/ui/MarketFilterControl'
 import { useColumnVisibility } from '~/components/ui/useColumnVisibility'
 import { useIsMobile } from '~/components/ui/useIsMobile'
 import { cx } from '~/lib/cx'
+import type { AccountFilter, MarketFilter } from '~/lib/domain/types'
 import { positionsCsv, positionsCsvFilename } from '~/lib/export/positionsCsv'
 import { inGroup, type GroupTotal, type PositionTotal } from '~/lib/pnl/positionSummary'
 import { POSITION_SORTABLE, positionSearchSchema, type PositionSortKey } from '~/lib/positionSearch'
@@ -314,8 +319,9 @@ interface Group {
 /**
  * The sorted rows cut into the server's blocks, in the server's order.
  *
- * Under 特定 and one market there is nothing left to split on, and a heading
- * repeating the filters would say nothing, so the rows stay one list.
+ * With nothing left to split on — 特定 and one market, say — the server sends
+ * one block naming neither, and a heading repeating the filters would say
+ * nothing, so the rows stay one list.
  */
 function groupRows(data: PositionsData, sorted: PositionRow[]): Group[] {
   return data.groups.map((entry) => ({
@@ -327,14 +333,27 @@ function groupRows(data: PositionsData, sorted: PositionRow[]): Group[] {
 const groupKey = (group: Group) =>
   group.total ? `${group.total.market ?? 'all'}-${group.total.accountType ?? 'all'}` : 'all'
 
-/** A block's name as text: `US stocks · 特定口座`, for headings and screen readers. */
-const groupTitle = (total: GroupTotal) =>
+/**
+ * A block's name for a screen reader: `US stocks, 特定口座`. A comma, not the
+ * heading's `·`, which `GroupName` hides from assistive technology for the
+ * same reason — read aloud it is "middle dot".
+ */
+const groupLabel = (total: GroupTotal) =>
   [
     total.market ? MARKET_TITLE[total.market] : null,
     total.accountType ? (ACCOUNT_TITLE[total.accountType] ?? total.accountType) : null,
   ]
     .filter((part) => part != null)
-    .join(' · ')
+    .join(', ')
+
+/**
+ * "No open US positions in NISA." — naming what the filters left out, so an
+ * empty view is not read as an empty book.
+ */
+const emptyMessage = (account: AccountFilter, market: MarketFilter) => {
+  const where = ACCOUNT_OPTIONS.find((option) => option.value === account)?.label
+  return `No open ${market === 'ALL' ? '' : `${market} `}positions${account === 'ALL' ? '' : ` in ${where ?? account}`}.`
+}
 
 const positionsLabel = (count: number) => `${String(count)} position${count === 1 ? '' : 's'}`
 
@@ -376,7 +395,7 @@ function TotalRow({
 function GroupName({ total }: { total: GroupTotal }) {
   return (
     <span className={styles.groupName}>
-      {total.market ? <span className={styles.groupMarket}>{MARKET_TITLE[total.market]}</span> : null}
+      {total.market ? MARKET_TITLE[total.market] : null}
       {total.market && total.accountType ? (
         // Real spaces as well as the margin: the margin is only CSS, so without
         // them the two names run together in text and in a screen reader.
@@ -436,10 +455,9 @@ function PositionCard({ row }: { row: PositionRow }) {
 
 function Positions() {
   const initial = Route.useLoaderData()
-  const { sortBy, sortDir } = Route.useSearch()
+  const { sortBy, sortDir, market = 'ALL' } = Route.useSearch()
   const navigate = Route.useNavigate()
   const [account, setAccount] = useAccountFilter()
-  const [market, setMarket] = useMarketFilter()
   const isMobile = useIsMobile()
   const { data } = useQuery({
     queryKey: ['positions', account, market],
@@ -459,6 +477,19 @@ function Positions() {
       })
     },
     [navigate, sortBy, sortDir],
+  )
+
+  // As `useAccountFilter` writes `scope`: `ALL` left out of the URL, `replace`
+  // so Back leaves the screen, and no scroll to the top on a tap in the header.
+  const setMarket = useCallback(
+    (next: MarketFilter) => {
+      void navigate({
+        search: (prev) => ({ ...prev, market: next === 'ALL' ? undefined : next }),
+        replace: true,
+        resetScroll: false,
+      })
+    },
+    [navigate],
   )
 
   const columns = useColumnVisibility('positions', PICKER)
@@ -489,8 +520,12 @@ function Positions() {
     [groups, account, market],
   )
 
-  // What the headings cut the table by — whichever filter is still open.
-  const splitBy = [market === 'ALL' ? 'market' : null, account === 'SPECIFIC' ? null : 'account']
+  // What the headings cut the table by, read off the blocks the server sent
+  // rather than re-deciding it here from the filters.
+  const splitBy = [
+    groups.some((group) => group.total?.market != null) ? 'market' : null,
+    groups.some((group) => group.total?.accountType != null) ? 'account' : null,
+  ]
     .filter((part) => part != null)
     .join(' and ')
 
@@ -510,7 +545,7 @@ function Positions() {
         filter={
           <div className={styles.filters}>
             <AccountFilterControl value={account} onChange={setAccount} />
-            <MarketSwitch value={market} onChange={setMarket} fill={isMobile} />
+            <MarketFilterControl value={market} onChange={setMarket} />
           </div>
         }
         actionsBeside
@@ -530,14 +565,10 @@ function Positions() {
       </PageHeader>
 
       {rows.length === 0 ? (
-        <Empty>
-          {market === 'ALL'
-            ? 'No open positions.'
-            : `No open ${market === 'US' ? 'US' : 'JP'} positions${account === 'ALL' ? '' : ' in this account'}.`}
-        </Empty>
+        <Empty>{emptyMessage(account, market)}</Empty>
       ) : (
         <>
-          <PositionsSummary data={data} account={account} market={market} compact={isMobile} />
+          <PositionsSummary data={data} compact={isMobile} />
           <UnpricedNotice rows={rows} cost={total.unpricedCostJpy} />
 
           {isMobile ? (
@@ -556,7 +587,7 @@ function Positions() {
                 <section
                   key={groupKey(group)}
                   className={styles.cardGroup}
-                  aria-label={group.total ? groupTitle(group.total) : 'Positions'}
+                  aria-label={group.total ? groupLabel(group.total) : 'Positions'}
                 >
                   {group.total ? (
                     <div className={styles.cardGroupHead}>

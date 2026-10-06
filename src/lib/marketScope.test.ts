@@ -28,9 +28,14 @@ describe('toMarketFilter', () => {
 })
 
 describe('marketScopeSchema', () => {
-  it('keeps a valid market and degrades a bad one', () => {
+  it('keeps a valid market', () => {
     expect(marketScopeSchema.parse({ market: 'US' })).toEqual({ market: 'US' })
-    expect(marketScopeSchema.parse({ market: 'BOGUS' })).toEqual({ market: 'ALL' })
+  })
+
+  it('drops a bad one to absent, not to ALL', () => {
+    // Caught to 'ALL', the value would ride the next `{ ...prev }` navigation
+    // into the URL as `?market=ALL` — not the default view's canonical address.
+    expect(marketScopeSchema.parse({ market: 'BOGUS' }).market).toBeUndefined()
   })
 
   it('leaves an absent market absent, so the default view has a clean URL', () => {
@@ -60,6 +65,12 @@ describe('positionSearchSchema', () => {
 
   it('defaults both filters out of the URL and the sort to value, descending', () => {
     expect(positionSearchSchema.parse({})).toEqual({ sortBy: 'marketValueJpy', sortDir: 'desc' })
+  })
+
+  it('keeps a bad market out of the search a sort spreads back into the URL', () => {
+    const parsed = positionSearchSchema.parse({ market: 'EU', sortBy: 'symbol' })
+    expect(parsed.market).toBeUndefined()
+    expect(parsed.sortBy).toBe('symbol')
   })
 })
 

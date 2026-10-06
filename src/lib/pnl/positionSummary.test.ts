@@ -2,7 +2,7 @@
  * Positions totals, summed on the server from the rows' own strings.
  */
 import { describe, expect, it } from 'vitest'
-import { inGroup, summarizePositions, type SummaryInput } from './positionSummary'
+import { inGroup, splitFor, summarizePositions, type SummaryInput } from './positionSummary'
 
 const row = (overrides: Partial<SummaryInput>): SummaryInput => ({
   symbol: '7203',
@@ -88,26 +88,39 @@ describe('groups', () => {
   const shape = (groups: ReturnType<typeof summarizePositions>['groups']) =>
     groups.map((group) => [group.market, group.accountType, group.count])
 
-  // A US holding in NISA as well, so no block is only ever one thing.
-  const MIXED = [...BOOK, row({ symbol: 'VOO', assetClass: 'US_EQUITY', accountType: 'NISA_GROWTH', costShownJpy: '500000', marketValueJpy: '600000', unrealizedJpy: '100000', unrealizedPct: 0.2 })]
+  /*
+   * A US holding in NISA too, so no block is only ever one thing — and a small
+   * one, so the orders disagree: across the book NISA 成長 (¥1,528,800) outranks
+   * 特定 (¥677,714), but within US 特定's COST (¥421,614) outranks VOO. Which one
+   * the US blocks follow is then visible.
+   */
+  const MIXED = [
+    ...BOOK,
+    row({ symbol: 'VOO', assetClass: 'US_EQUITY', accountType: 'NISA_GROWTH', costShownJpy: '250000', marketValueJpy: '300000', unrealizedJpy: '50000', unrealizedPct: 0.2 }),
+  ]
 
-  it('cuts by market then account, JP first and accounts largest first within each', () => {
+  it('cuts by market then account, JP first and accounts in the book-wide order under each', () => {
     const { groups } = summarizePositions(MIXED, both)
     expect(shape(groups)).toEqual([
       ['JP', 'NISA_TSUMITATE', 1],
       ['JP', 'NISA_GROWTH', 1],
       ['JP', 'SPECIFIC', 2],
+      // Not re-ranked within US, where 特定 holds more.
       ['US', 'NISA_GROWTH', 1],
       ['US', 'SPECIFIC', 1],
     ])
   })
 
   it('leaves out blocks that hold nothing', () => {
-    const { groups } = summarizePositions(BOOK.filter((entry) => entry.assetClass !== 'US_EQUITY'), both)
-    expect(groups.every((group) => group.market === 'JP')).toBe(true)
+    const jpOnly = BOOK.filter((entry) => entry.assetClass !== 'US_EQUITY')
+    expect(shape(summarizePositions(jpOnly, both).groups)).toEqual([
+      ['JP', 'NISA_TSUMITATE', 1],
+      ['JP', 'NISA_GROWTH', 1],
+      ['JP', 'SPECIFIC', 2],
+    ])
   })
 
-  it('cuts by market alone when the account is already narrowed', () => {
+  it('cuts by market alone when the account is not split', () => {
     const { groups } = summarizePositions(MIXED, { market: true, account: false })
     expect(shape(groups)).toEqual([
       ['JP', null, 4],
@@ -115,16 +128,20 @@ describe('groups', () => {
     ])
   })
 
-  it('cuts by account alone when the market is already narrowed — the default', () => {
-    expect(shape(summarizePositions(MIXED).groups)).toEqual(
-      summarizePositions(MIXED).accounts.map((account) => [null, account.accountType, account.count]),
-    )
+  it('reuses the account totals when the market is not split — the default', () => {
+    const { groups, accounts } = summarizePositions(MIXED)
+    expect(groups).toEqual(accounts.map((account) => ({ ...account, market: null })))
   })
 
-  it('is one block, the whole list, when neither axis is open', () => {
+  it('is one block, the whole book, when neither axis is split', () => {
     const { groups, total } = summarizePositions(MIXED, { market: false, account: false })
-    expect(groups).toHaveLength(1)
-    expect(groups[0]).toMatchObject({ market: null, accountType: null, ...total })
+    expect(groups).toEqual([{ ...total, market: null, accountType: null }])
+  })
+
+  it('has no blocks for an empty book', () => {
+    for (const split of [both, { market: false, account: false }, { market: false, account: true }]) {
+      expect(summarizePositions([], split).groups).toEqual([])
+    }
   })
 
   it('totals a block from its own rows, but weighs it against the whole book', () => {
@@ -142,6 +159,27 @@ describe('groups', () => {
     expect(sum((group) => group.marketValueJpy)).toBe(Number(total.marketValueJpy))
     expect(sum((group) => group.costShownJpy)).toBe(Number(total.costShownJpy))
     expect(groups.reduce((running, group) => running + group.count, 0)).toBe(total.count)
+  })
+})
+
+describe('splitFor', () => {
+  const jp = { assetClass: 'JP_EQUITY' } as const
+  const fund = { assetClass: 'FUND' } as const
+  const us = { assetClass: 'US_EQUITY' } as const
+
+  it('splits on account unless the switch is on 特定', () => {
+    expect(splitFor([jp, us], { account: 'ALL', market: 'ALL' }).account).toBe(true)
+    expect(splitFor([jp, us], { account: 'NISA', market: 'ALL' }).account).toBe(true)
+    expect(splitFor([jp, us], { account: 'SPECIFIC', market: 'ALL' }).account).toBe(false)
+  })
+
+  it('splits on market only when the switch is on both and both are held', () => {
+    expect(splitFor([jp, us], { account: 'ALL', market: 'ALL' }).market).toBe(true)
+    // Stocks and funds are one market, so this is a JP-only book.
+    expect(splitFor([jp, fund], { account: 'ALL', market: 'ALL' }).market).toBe(false)
+    expect(splitFor([us], { account: 'ALL', market: 'ALL' }).market).toBe(false)
+    expect(splitFor([], { account: 'ALL', market: 'ALL' }).market).toBe(false)
+    expect(splitFor([jp], { account: 'ALL', market: 'JP' }).market).toBe(false)
   })
 })
 

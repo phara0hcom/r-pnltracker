@@ -1,5 +1,6 @@
 /**
- * All / NISA / 特定 switch, shared by every analysis screen.
+ * All / NISA / 特定 switch, shared by every analysis screen: its URL state,
+ * choices and hints. `AccountFilterControl` renders it through `FilterSwitch`.
  *
  * The selection lives in the URL (`?scope=`) rather than in component state,
  * like every other filter here, so a view stays shareable and survives a
@@ -10,11 +11,9 @@
  * frames answer it the same way. Isolating a single frame is a quota question —
  * that is what the NISA screen is for.
  */
-import * as ToggleGroup from '@radix-ui/react-toggle-group'
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import styles from './AccountSwitch.module.scss'
+import type { FilterOption } from './FilterSwitch'
 import { toAccountFilter } from '~/lib/accountScope'
-import { cx } from '~/lib/cx'
 import type { AccountFilter } from '~/lib/domain/types'
 
 /**
@@ -60,45 +59,8 @@ export const ACCOUNT_SCOPE_HINT: Record<AccountFilter, string> = {
   SPECIFIC: 'Taxable account only',
 }
 
-const OPTIONS: { value: AccountFilter; label: string }[] = [
+export const ACCOUNT_OPTIONS: readonly FilterOption<AccountFilter>[] = [
   { value: 'ALL', label: 'All' },
   { value: 'NISA', label: 'NISA' },
   { value: 'SPECIFIC', label: '特定' },
 ]
-
-export function AccountSwitch({
-  value,
-  onChange,
-  fill = false,
-}: {
-  value: AccountFilter
-  onChange: (next: AccountFilter) => void
-  /** Full width with 40px-tall segments, for a phone. */
-  fill?: boolean
-}) {
-  return (
-    <ToggleGroup.Root
-      type="single"
-      className={cx(styles.group, fill && styles.fill)}
-      value={value}
-      aria-label="Filter by account"
-      onValueChange={(next) => {
-        // Radix emits '' when the active item is pressed again. A filter with no
-        // value selected would be a dead screen, so that is ignored rather than
-        // treated as a change.
-        if (next) onChange(next as AccountFilter)
-      }}
-    >
-      {OPTIONS.map((o) => (
-        <ToggleGroup.Item
-          key={o.value}
-          value={o.value}
-          className={styles.item}
-          title={ACCOUNT_SCOPE_HINT[o.value]}
-        >
-          {o.label}
-        </ToggleGroup.Item>
-      ))}
-    </ToggleGroup.Root>
-  )
-}
