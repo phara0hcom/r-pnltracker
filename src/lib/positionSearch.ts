@@ -21,8 +21,8 @@ import { marketScopeSchema } from './marketScope'
  * each; naming them after the column keeps the header and the ordering in step.
  * `weight` is each row's share of the book, which the server works out.
  *
- * There is no Account, Market or Class column. The table is grouped by market
- * and account, under a header carrying the block's totals, and each instrument
+ * There is no Account, Market or Class column. The table is grouped by account
+ * and, within it, by market, under headers carrying their totals, and each instrument
  * is tagged with its class — a column repeating one of four values down every
  * row said nothing a heading could not say once.
  *

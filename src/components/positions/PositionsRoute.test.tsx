@@ -22,6 +22,7 @@ import {
 } from '@tanstack/react-router'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { rememberMarket } from '~/components/ui/rememberedMarket'
 import { matchesAccountFilter, matchesMarketFilter } from '~/lib/domain/types'
 import { positionsInput } from '~/lib/marketScope'
 import { positionsView } from '~/lib/pnl/positionSummary'
@@ -144,68 +145,89 @@ interface Block {
   parts: { heading: string | null; symbols: (string | undefined)[] }[]
 }
 
+/** A heading as it reads on screen: without its count or screen-reader-only text. */
+function headingOf(tr: HTMLElement): string | null {
+  const th = tr.querySelector('th')?.cloneNode(true) as HTMLElement | undefined
+  if (!th) return null
+  for (const hidden of th.querySelectorAll('.visually-hidden')) hidden.remove()
+  return th.textContent?.replace(/\s*\d+ positions?$/, '').trim() ?? null
+}
+
 /**
- * Each block: its heading, then each part under it — a market's sub-heading
- * and the symbols beneath. Headings without their counts.
+ * Each block: its heading, then each market part under it with the symbols
+ * beneath, in order. A market inside an account is a row group of its own,
+ * told apart from a block by the account its heading names for screen readers.
  */
-const blocks = (): Block[] =>
-  screen
-    .getAllByRole('rowgroup')
-    .filter((element) => element.tagName === 'TBODY')
-    .map((body) => {
-      const name = (tr: HTMLElement) => tr.querySelector('th')?.textContent?.replace(/\d+ positions?$/, '').trim() ?? null
-      const block: Block = { heading: null, parts: [] }
-      for (const tr of within(body).getAllByRole('row')) {
-        if (tr.querySelector('th[scope="rowgroup"]')) block.heading = name(tr)
-        else if (tr.querySelector('th[scope="row"]')) block.parts.push({ heading: name(tr), symbols: [] })
-        else {
-          if (block.parts.length === 0) block.parts.push({ heading: null, symbols: [] })
-          block.parts.at(-1)?.symbols.push(BOOK.find((entry) => tr.textContent?.includes(entry.symbol))?.symbol)
-        }
-      }
-      return block
-    })
+function blocks(book: readonly PositionRow[] = BOOK): Block[] {
+  const out: Block[] = []
+  for (const body of screen.getAllByRole('rowgroup').filter((element) => element.tagName === 'TBODY')) {
+    const rows = within(body).getAllByRole('row')
+    const head = rows.find((tr) => tr.querySelector('th[scope="rowgroup"]'))
+    const symbols = rows
+      .filter((tr) => tr !== head)
+      .map((tr) => book.find((entry) => tr.querySelector('td')?.textContent?.startsWith(entry.symbol))?.symbol)
+    const heading = head ? headingOf(head) : null
+    const inAccount = head?.querySelector('.visually-hidden') != null
+    const last = out.at(-1)
+    if (inAccount && last) last.parts.push({ heading, symbols })
+    else out.push({ heading, parts: symbols.length > 0 ? [{ heading: null, symbols }] : [] })
+  }
+  return out
+}
 
 /** A block with no market parts, as `blocks()` reads it. */
 const flat = (heading: string | null, symbols: string[]): Block => ({ heading, parts: [{ heading: null, symbols }] })
 
+/**
+ * The screen-reader name of each market heading in the table — the account it
+ * sits in, then the market — which is all that ties a holding to its market for
+ * someone who cannot see the indent.
+ */
+const marketHeadingNames = () =>
+  screen
+    .getAllByRole('rowheader')
+    .filter((th) => th.querySelector('.visually-hidden'))
+    .map((th) => th.textContent?.replace(/\s*\d+ positions?$/, '').trim())
+
 let mobile = false
 
+beforeAll(() => {
+  // jsdom has no matchMedia. One object for the whole file, read live:
+  // `useIsMobile` caches the first list it is given and reads `matches` on
+  // every render, so a stub installed later would never be seen.
+  const list = {
+    get matches() {
+      return mobile
+    },
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }
+  vi.stubGlobal('matchMedia', () => list)
+  // `PageHeader` watches its title scroll under the bar.
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      observe = () => undefined
+      disconnect = () => undefined
+    },
+  )
+})
+
+afterAll(() => {
+  vi.unstubAllGlobals()
+})
+
+beforeEach(() => {
+  // `mockReset`, not `mockClear`: a test that serves a different book must
+  // not leave it behind for the next.
+  getPositions.mockReset()
+  serving()
+  mobile = false
+  // Through the module, which keeps the value as well as storing it.
+  rememberMarket('ALL')
+})
+
 describe('Positions blocks', () => {
-  beforeAll(() => {
-    // jsdom has no matchMedia. One object, read live, so a test can flip it
-    // between renders — `useIsMobile` caches the list but reads `matches` each time.
-    const list = {
-      get matches() {
-        return mobile
-      },
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-    }
-    vi.stubGlobal('matchMedia', () => list)
-    // `PageHeader` watches its title scroll under the bar.
-    vi.stubGlobal(
-      'IntersectionObserver',
-      class {
-        observe = () => undefined
-        disconnect = () => undefined
-      },
-    )
-  })
-
-  afterAll(() => {
-    vi.unstubAllGlobals()
-  })
-
-  beforeEach(() => {
-    // `mockReset`, not `mockClear`: a test that serves a different book must
-    // not leave it behind for the next.
-    getPositions.mockReset()
-    serving()
-    mobile = false
-    window.sessionStorage.clear()
-  })
-
   it('keeps each account together, with its JP and US holdings beneath it', async () => {
     await renderAt('')
     await screen.findByRole('table')
@@ -260,18 +282,54 @@ describe('Positions blocks', () => {
   })
 
   it('keeps a sort inside each market of each account', async () => {
+    // Descending, so the order shown is neither the book's (7203 first) nor
+    // what an ignored sort would leave.
     const book = [...BOOK, row('8411', { accountType: 'SPECIFIC', marketValueJpy: '900000', costShownJpy: '800000' })]
     serving(book)
-    await renderAt('?sortBy=symbol&sortDir=asc')
+    await renderAt('?sortBy=symbol&sortDir=desc')
     await screen.findByRole('table')
-    const specific = blocks()[0]
-    expect(specific?.heading).toBe('特定口座')
-    // 8411 is not in BOOK, so the helper cannot name it — but it lands with 7203
-    // under JP, sorted by symbol, and NVDA stays alone under US.
-    expect(specific?.parts.map((part) => [part.heading, part.symbols.length])).toEqual([
-      ['JP stocks & funds', 2],
-      ['US stocks', 1],
+    expect(blocks(book)[0]).toEqual({
+      heading: '特定口座',
+      parts: [
+        { heading: 'JP stocks & funds', symbols: ['8411', '7203'] },
+        { heading: 'US stocks', symbols: ['NVDA'] },
+      ],
+    })
+  })
+
+  it('names the one market an account holds in its heading, not under it', async () => {
+    // NISA 成長 holds only VOO: a "US stocks" row beneath would repeat its figures.
+    serving(BOOK.filter((entry) => entry.symbol !== '8306'))
+    await renderAt('')
+    await screen.findByRole('table')
+    expect(blocks()).toEqual([
+      {
+        heading: '特定口座',
+        parts: [
+          { heading: 'JP stocks & funds', symbols: ['7203'] },
+          { heading: 'US stocks', symbols: ['NVDA'] },
+        ],
+      },
+      flat('NISA 成長投資枠 · US stocks', ['VOO']),
     ])
+  })
+
+  it('tells a screen reader which account a market heading is in', async () => {
+    await renderAt('')
+    await screen.findByRole('table')
+    expect(marketHeadingNames()).toEqual([
+      '特定口座, JP stocks & funds',
+      '特定口座, US stocks',
+      'NISA 成長投資枠, JP stocks & funds',
+      'NISA 成長投資枠, US stocks',
+    ])
+    // Each market is a row group of its own, so its rows are read under it.
+    const usBody = screen
+      .getAllByRole('rowgroup')
+      .find((body) => body.querySelector('th[scope="rowgroup"]')?.textContent?.startsWith('特定口座, US stocks'))
+    const [heading, ...holdings] = within(usBody!).getAllByRole('row')
+    expect(heading?.querySelector('th')?.getAttribute('scope')).toBe('rowgroup')
+    expect(holdings.map((tr) => tr.querySelector('td')?.textContent)).toEqual([expect.stringMatching(/^NVDA/)])
   })
 
   it('cuts the phone card list into the same accounts and markets', async () => {
@@ -324,31 +382,6 @@ describe('Positions blocks', () => {
 })
 
 describe('coming back to Positions', () => {
-  beforeAll(() => {
-    vi.stubGlobal('matchMedia', () => ({
-      matches: false,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-    }))
-    vi.stubGlobal(
-      'IntersectionObserver',
-      class {
-        observe = () => undefined
-        disconnect = () => undefined
-      },
-    )
-  })
-
-  afterAll(() => {
-    vi.unstubAllGlobals()
-  })
-
-  beforeEach(() => {
-    getPositions.mockReset()
-    serving()
-    window.sessionStorage.clear()
-  })
-
   const link = (name: string) => screen.getByRole('link', { name })
 
   it('reopens on the market it was left on, from the sidebar', async () => {
@@ -376,17 +409,31 @@ describe('coming back to Positions', () => {
     expect(getPositions).toHaveBeenLastCalledWith({ data: { account: 'NISA', market: 'US' } })
   })
 
-  it('forgets the market once All is chosen again', async () => {
-    await renderAt('?market=US', { withNav: true })
+  it('is not overwritten by a visit that did not choose', async () => {
+    rememberMarket('US')
+    const router = await renderAt('?scope=SPECIFIC', { withNav: true })
     await screen.findByRole('table')
-    expect(link('Positions').getAttribute('href')).toBe('/positions?market=US')
+    // A plain link here shows both markets — and still offers US to return to.
+    expect(router.state.location.search).not.toHaveProperty('market')
+    expect(link('Positions').getAttribute('href')).toBe('/positions?scope=SPECIFIC&market=US')
+    // And the link is still the current one, though its search differs.
+    expect(link('Positions').getAttribute('aria-current')).toBe('page')
+  })
+
+  it('forgets the market once All is chosen again', async () => {
+    await renderAt('', { withNav: true })
+    await screen.findByRole('table')
+    fireEvent.click(screen.getByRole('radio', { name: 'US' }))
+    await waitFor(() => {
+      expect(link('Positions').getAttribute('href')).toBe('/positions?market=US')
+    })
     fireEvent.click(screen.getByRole('radio', { name: 'All', checked: false }))
     await waitFor(() => {
       expect(link('Positions').getAttribute('href')).toBe('/positions')
     })
   })
 
-  it('reopens on the market with the browser’s Back as well', async () => {
+  it('keeps the market on the browser’s Back through the URL alone', async () => {
     const router = await renderAt('', { withNav: true })
     await screen.findByRole('table')
     fireEvent.click(screen.getByRole('radio', { name: 'JP' }))
@@ -395,6 +442,8 @@ describe('coming back to Positions', () => {
     })
     fireEvent.click(link('Stats'))
     await screen.findByText('Screen /stats')
+    // Not the remembered choice: Back restores the URL the switch wrote.
+    rememberMarket('ALL')
 
     router.history.back()
     await waitFor(() => {

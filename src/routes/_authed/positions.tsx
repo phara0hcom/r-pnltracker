@@ -24,7 +24,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Fragment, useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import styles from './positions.module.scss'
 import { AccountDot } from '~/components/AccountDot'
 import {
@@ -56,6 +56,7 @@ import { useIsMobile } from '~/components/ui/useIsMobile'
 import { cx } from '~/lib/cx'
 import type { AccountFilter, AccountType, MarketFilter } from '~/lib/domain/types'
 import { positionsCsv, positionsCsvFilename } from '~/lib/export/positionsCsv'
+import { marketParam } from '~/lib/marketScope'
 import { inGroup, inMarket, type MarketTotal, type PositionTotal } from '~/lib/pnl/positionSummary'
 import { POSITION_SORTABLE, positionSearchSchema, type PositionSortKey } from '~/lib/positionSearch'
 import { nextSort, sortRows, type SortColumn } from '~/lib/sortRows'
@@ -315,11 +316,19 @@ export const Route = createFileRoute('/_authed/positions')({
 
 /** A heading over part of the table: an account, or a market. */
 interface Heading {
-  /** The name as text — also the section's accessible name. */
+  /** The visible name. */
   label: string
   total: PositionTotal
   /** Set for an account, whose name is led by its colour dot. */
   accountType?: AccountType
+  /**
+   * Said before the name to a screen reader only: the account a market's
+   * sub-heading sits in. Each market is a row group of its own, so its heading
+   * has to carry the account — nothing else ties its rows to it.
+   */
+  context?: string
+  /** Shown after the name: the one market an account holds, said in its heading. */
+  detail?: string
 }
 
 /** One market's rows inside a section, under its own sub-heading. */
@@ -336,21 +345,30 @@ interface Section {
   parts: Part[]
 }
 
-const accountHeading = (total: PositionTotal, accountType: AccountType): Heading => ({
+const accountHeading = (total: PositionTotal, accountType: AccountType, detail?: string): Heading => ({
   label: ACCOUNT_TITLE[accountType] ?? accountType,
   total,
   accountType,
+  detail,
 })
 
-const marketHeading = (total: MarketTotal): Heading => ({
+const marketHeading = (total: MarketTotal, context?: string): Heading => ({
   label: MARKET_TITLE[total.market] ?? total.market,
   total,
+  context,
 })
+
+/** A heading's whole name as text — a section's accessible name. */
+const headingText = (heading: Heading) =>
+  [heading.context, heading.label, heading.detail].filter((part) => part != null).join(', ')
 
 /**
  * The sorted rows cut into the server's blocks, in the server's order — an
  * account with its markets as parts, or, when the account is not split, each
  * market a section of its own. Structure only: every total is the server's.
+ *
+ * An account holding one market names it in its own heading rather than under
+ * it: a sub-heading there would repeat the account's figures exactly.
  */
 function sectionsOf(data: PositionsData, sorted: PositionRow[]): Section[] {
   return data.groups.flatMap((group): Section[] => {
@@ -358,14 +376,17 @@ function sectionsOf(data: PositionsData, sorted: PositionRow[]): Section[] {
     const byMarket = (total: MarketTotal): Part['rows'] => rows.filter((row) => inMarket(row, total.market))
 
     if (group.accountType != null) {
+      const [only, ...others] = group.markets
+      if (only == null || others.length === 0) {
+        const detail = only ? MARKET_TITLE[only.market] : undefined
+        return [{ key: group.accountType, head: accountHeading(group, group.accountType, detail), parts: [{ head: null, rows }] }]
+      }
+      const head = accountHeading(group, group.accountType)
       return [
         {
           key: group.accountType,
-          head: accountHeading(group, group.accountType),
-          parts:
-            group.markets.length > 0
-              ? group.markets.map((total) => ({ head: marketHeading(total), rows: byMarket(total) }))
-              : [{ head: null, rows }],
+          head,
+          parts: group.markets.map((total) => ({ head: marketHeading(total, head.label), rows: byMarket(total) })),
         },
       ]
     }
@@ -377,6 +398,32 @@ function sectionsOf(data: PositionsData, sorted: PositionRow[]): Section[] {
         }))
       : [{ key: 'all', head: null, parts: [{ head: null, rows }] }]
   })
+}
+
+/** One `tbody`: a heading — an account's, or a market's within one — and its rows. */
+interface Body {
+  key: string
+  head: Heading | null
+  /** A market inside an account, drawn quieter and set in under it. */
+  sub: boolean
+  rows: PositionRow[]
+}
+
+/**
+ * A section as the table's row groups. An account with markets inside is its
+ * heading in a group of its own, then one group per market: a row group has one
+ * heading that its rows are read under, so each market must be its own for a
+ * screen reader to say which market a holding is in, as the eye can.
+ */
+function bodiesOf(section: Section): Body[] {
+  const [first, ...more] = section.parts
+  if (first?.head == null || more.some((part) => part.head == null)) {
+    return [{ key: section.key, head: section.head, sub: false, rows: section.parts.flatMap((part) => part.rows) }]
+  }
+  return [
+    { key: section.key, head: section.head, sub: false, rows: [] },
+    ...section.parts.map((part) => ({ key: `${section.key}-${part.head?.label ?? ''}`, head: part.head, sub: true, rows: part.rows })),
+  ]
 }
 
 /**
@@ -391,9 +438,9 @@ const emptyMessage = (account: AccountFilter, market: MarketFilter) => {
 const positionsLabel = (count: number) => `${String(count)} position${count === 1 ? '' : 's'}`
 
 /**
- * A heading row — an account's, or a market's within it — or the book's total
- * at the foot: the label across the columns with no total, then each shown
- * column's own total beneath it.
+ * A heading row — an account's, or a market's — or the book's total at the
+ * foot: the label across the columns with no total, then each shown column's
+ * own total beneath it.
  */
 function TotalRow({
   total,
@@ -405,11 +452,7 @@ function TotalRow({
 }: {
   total: PositionTotal
   label: React.ReactNode
-  /**
-   * `rowgroup` for a section's heading, which labels the rows under it. A
-   * market's sub-heading inside an account is `row`: one `tbody` has one group
-   * heading, and the account is the one the rows belong to.
-   */
+  /** `rowgroup` for a heading, which labels the rows under it in its `tbody`. */
   scope: 'row' | 'rowgroup'
   leading: number
   totalled: readonly PositionSortKey[]
@@ -431,10 +474,21 @@ function TotalRow({
 
 /** A heading's name — an account's led by its dot — and its holding count. */
 function HeadingName({ heading }: { heading: Heading }) {
+  // The spaces between the parts are real text, not only margin: without them
+  // the name and the count run together for a screen reader and on copy.
   return (
     <span className={styles.groupName}>
+      {heading.context ? <span className="visually-hidden">{`${heading.context}, `}</span> : null}
       {heading.accountType ? <AccountDot accountType={heading.accountType} /> : null}
       {heading.label}
+      {heading.detail ? (
+        <>
+          {' '}
+          <span className={styles.groupDetail}>
+            <span aria-hidden="true">·</span> {heading.detail}
+          </span>
+        </>
+      ) : null}{' '}
       <span className={styles.groupCount}>{positionsLabel(heading.total.count)}</span>
     </span>
   )
@@ -533,10 +587,13 @@ function Positions() {
   const setMarket = useCallback(
     (next: MarketFilter) => {
       void navigate({
-        search: (prev) => ({ ...prev, market: next === 'ALL' ? undefined : next }),
+        search: (prev) => ({ ...prev, market: marketParam(next) }),
         replace: true,
         resetScroll: false,
       })
+      // Remembered for the sidebar's link back here, which otherwise drops the
+      // market. Only on a tap: a URL arriving without one is not a choice.
+      rememberMarket(next)
     },
     [navigate],
   )
@@ -578,12 +635,6 @@ function Positions() {
     .filter((part) => part != null)
     .join(' and ')
 
-  // Remembered for the links back here, which otherwise drop the market: the
-  // sidebar and the dashboard carry only the account switch, which every screen
-  // shares.
-  useEffect(() => {
-    rememberMarket(market)
-  }, [market])
 
   const meta = [
     `${String(total.count)} open`,
@@ -643,17 +694,13 @@ function Positions() {
                 <section
                   key={section.key}
                   className={styles.cardGroup}
-                  aria-label={section.head?.label ?? 'Positions'}
+                  aria-label={section.head ? headingText(section.head) : 'Positions'}
                 >
                   {section.head ? <CardHeading heading={section.head} className={styles.cardGroupHead} /> : null}
                   {section.parts.map((part) =>
                     part.head ? (
-                      <div
-                        key={part.head.label}
-                        role="group"
-                        aria-label={`${section.head ? `${section.head.label}, ` : ''}${part.head.label}`}
-                      >
-                        <CardHeading heading={part.head} className={styles.cardSubHead} />
+                      <div key={part.head.label} role="group" aria-label={headingText(part.head)}>
+                        <CardHeading heading={part.head} className={cx(styles.cardGroupHead, styles.cardSubHead)} />
                         <PositionCards rows={part.rows} />
                       </div>
                     ) : (
@@ -684,47 +731,33 @@ function Positions() {
                   ))}
                 </tr>
               </thead>
-              {sections.map((section) => (
-                <tbody key={section.key} className={styles.group}>
-                  {section.head ? (
+              {sections.flatMap(bodiesOf).map((body) => (
+                <tbody key={body.key} className={styles.group}>
+                  {body.head ? (
                     <TotalRow
-                      total={section.head.total}
-                      label={<HeadingName heading={section.head} />}
+                      total={body.head.total}
+                      label={<HeadingName heading={body.head} />}
                       scope="rowgroup"
                       leading={leading}
                       totalled={totalled}
-                      className={styles.groupRow}
+                      className={body.sub ? styles.subgroupRow : styles.groupRow}
                     />
                   ) : null}
-                  {section.parts.map((part) => (
-                    <Fragment key={part.head?.label ?? 'rows'}>
-                      {part.head ? (
-                        <TotalRow
-                          total={part.head.total}
-                          label={<HeadingName heading={part.head} />}
-                          scope="row"
-                          leading={leading}
-                          totalled={totalled}
-                          className={styles.subgroupRow}
-                        />
-                      ) : null}
-                      {part.rows.map((row) => (
-                        <tr key={`${row.symbol}-${row.accountType}`}>
-                          {shown.map((key) => {
-                            const column = COLUMNS[key]
-                            return (
-                              <td
-                                key={key}
-                                data-numeric={column.numeric ? '' : undefined}
-                                className={column.tint?.(row)}
-                              >
-                                {column.cell(row)}
-                              </td>
-                            )
-                          })}
-                        </tr>
-                      ))}
-                    </Fragment>
+                  {body.rows.map((row) => (
+                    <tr key={`${row.symbol}-${row.accountType}`}>
+                      {shown.map((key) => {
+                        const column = COLUMNS[key]
+                        return (
+                          <td
+                            key={key}
+                            data-numeric={column.numeric ? '' : undefined}
+                            className={column.tint?.(row)}
+                          >
+                            {column.cell(row)}
+                          </td>
+                        )
+                      })}
+                    </tr>
                   ))}
                 </tbody>
               ))}

@@ -164,7 +164,9 @@ export const inMarket = (row: Pick<SummaryInput, 'assetClass'>, market: Market):
  * Accounts split unless the switch is on 特定, the one taxable account. Markets
  * split only when the switch is on both *and* both are held: a book of Japanese
  * holdings alone would otherwise give every account one "JP stocks & funds"
- * sub-heading repeating the account's own total.
+ * sub-heading repeating the account's own total. An account that holds one
+ * market in a book that holds both still gets its one `markets` entry — the
+ * screen names that market in the account's heading rather than under it.
  */
 export function splitFor(
   rows: readonly Pick<SummaryInput, 'assetClass'>[],
@@ -195,21 +197,18 @@ function groupTotals(
   accounts: readonly AccountTotal[],
   split: GroupSplit,
 ): GroupTotal[] {
-  const blocks: { head: PositionTotal; accountType: AccountType | null }[] = split.account
-    ? accounts.map((entry) => ({ head: entry, accountType: entry.accountType }))
-    : rows.length > 0
-      ? [{ head: total, accountType: null }]
-      : []
-
-  return blocks.map(({ head, accountType }) => {
-    const members = rows.filter((row) => inGroup(row, { accountType }))
-    const markets = split.market
+  const marketsOf = (members: readonly SummaryInput[]): MarketTotal[] =>
+    split.market
       ? MARKETS.map((market) => ({ market, inside: members.filter((row) => inMarket(row, market)) }))
           .filter(({ inside }) => inside.length > 0)
           .map(({ market, inside }) => ({ market, ...totalOf(inside, bookValue) }))
       : []
-    return { ...head, accountType, markets }
-  })
+
+  if (!split.account) return rows.length > 0 ? [{ ...total, accountType: null, markets: marketsOf(rows) }] : []
+  return accounts.map((entry) => ({
+    ...entry,
+    markets: marketsOf(rows.filter((row) => row.accountType === entry.accountType)),
+  }))
 }
 
 export function summarizePositions(

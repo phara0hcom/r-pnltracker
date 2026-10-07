@@ -123,8 +123,9 @@ export interface PositionsData {
   /** One per account holding anything, largest value first. */
   accounts: AccountTotal[]
   /**
-   * The table's blocks: one per market, per account, or per market and account —
-   * see `splitFor`. A single block with neither when there is nothing to split.
+   * The table's blocks: one per account, each with its per-market totals inside
+   * (`markets`, JP before US) — or, when the account is not split, one block for
+   * the whole book, `accountType` null. See `splitFor` and `GroupTotal`.
    */
   groups: GroupTotal[]
   classes: ClassTotal[]

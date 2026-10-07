@@ -21,6 +21,13 @@ export const marketScopeSchema = z.object({
   market: z.enum(MARKET_FILTERS).optional().catch(undefined),
 })
 
+/**
+ * The `market` search param for a choice: absent for both markets. The one
+ * place `ALL` is kept out of the URL — the switch and every link use it.
+ */
+export const marketParam = (market: MarketFilter): Exclude<MarketFilter, 'ALL'> | undefined =>
+  market === 'ALL' ? undefined : market
+
 /** Narrow an untrusted search value to the three choices. */
 export function toMarketFilter(raw: unknown): MarketFilter {
   return MARKET_FILTERS.includes(raw as MarketFilter) ? (raw as MarketFilter) : 'ALL'
