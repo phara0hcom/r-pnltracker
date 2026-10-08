@@ -10,9 +10,8 @@
  * depends on — whether it covers every account, NISA, or 特定 — behind a badge
  * reading "1".
  */
-import styles from './AccountFilterControl.module.scss'
-import { ACCOUNT_SCOPE_HINT, AccountSwitch } from './AccountSwitch'
-import { useIsMobile } from './useIsMobile'
+import { ACCOUNT_OPTIONS, ACCOUNT_SCOPE_HINT } from './AccountSwitch'
+import { FilterSwitch } from './FilterSwitch'
 import type { AccountFilter } from '~/lib/domain/types'
 
 export function AccountFilterControl({
@@ -22,12 +21,13 @@ export function AccountFilterControl({
   value: AccountFilter
   onChange: (next: AccountFilter) => void
 }) {
-  const isMobile = useIsMobile()
-
   return (
-    <div className={styles.control}>
-      <AccountSwitch value={value} onChange={onChange} fill={isMobile} />
-      <span className={styles.hint}>{ACCOUNT_SCOPE_HINT[value]}</span>
-    </div>
+    <FilterSwitch
+      label="Filter by account"
+      options={ACCOUNT_OPTIONS}
+      hints={ACCOUNT_SCOPE_HINT}
+      value={value}
+      onChange={onChange}
+    />
   )
 }

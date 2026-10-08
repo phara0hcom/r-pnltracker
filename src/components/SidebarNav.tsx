@@ -15,15 +15,20 @@ import { NAV_ICONS, type NavRoute } from './icons/NavIcons'
 import styles from './SidebarNav.module.scss'
 import { clearSavedCopies } from '~/components/offline/offlineStore'
 import { useAccountFilter } from '~/components/ui/AccountSwitch'
+import { useRememberedMarketParam } from '~/components/ui/rememberedMarket'
 import { signOut } from '~/lib/auth-client'
 import { cx } from '~/lib/cx'
 import type { SessionUser } from '~/lib/session'
 
-/** Order down the sidebar. The icon comes from `NAV_ICONS`, keyed by the route. */
-const NAV: { to: NavRoute; label: string }[] = [
+/**
+ * Order down the sidebar. The icon comes from `NAV_ICONS`, keyed by the route.
+ * `remembersMarket` puts back the market last picked there — see
+ * `rememberedMarket`.
+ */
+const NAV: { to: NavRoute; label: string; remembersMarket?: true }[] = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/trades', label: 'Trades' },
-  { to: '/positions', label: 'Positions' },
+  { to: '/positions', label: 'Positions', remembersMarket: true },
   { to: '/exits', label: 'Exit Rules' },
   { to: '/dividends', label: 'Dividends' },
   { to: '/calendar', label: 'Calendar' },
@@ -72,6 +77,7 @@ export function SidebarNav({
   collapsed?: boolean
 }) {
   const [account] = useAccountFilter()
+  const market = useRememberedMarketParam()
 
   return (
     /*
@@ -98,7 +104,15 @@ export function SidebarNav({
                    * the switch, which is the whole reason it has its own key
                    * rather than sharing Trades' `account`.
                    */
-                  search={account !== 'ALL' ? { scope: account } : undefined}
+                  search={{
+                    scope: account !== 'ALL' ? account : undefined,
+                    ...(item.remembersMarket && market ? { market } : {}),
+                  }}
+                  // Active by path alone. The search a link carries is where it
+                  // would take you back to, not what the screen must show for
+                  // the link to be the current one — Positions on JP is still
+                  // Positions when the remembered market is US.
+                  activeOptions={{ includeSearch: false }}
                   className={cx(styles.navLink, collapsed && styles.navLinkRail)}
                   activeProps={{
                     className: cx(

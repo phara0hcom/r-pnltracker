@@ -40,6 +40,27 @@
   border-radius: var(--radius-sm);
 }
 
+/*
+ * The account and market switches, side by side on desktop, stacked on a phone.
+ * Wrapping between the two: each carries a hint that will not break, and side
+ * by side they are wider than the content column on a narrow desktop window.
+ */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+
+  @include m.mobile {
+    flex-direction: column;
+    gap: var(--space-2);
+    align-items: stretch;
+    width: 100%;
+  }
+}
+
 /* ── Account headings and the total ───────────────────────────────────────── */
 
 .groupName {
@@ -50,6 +71,13 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--color-text);
+}
+
+/* The one market an account holds, after its name. */
+.groupDetail {
+  margin-left: var(--space-2);
+  font-weight: var(--weight-normal);
+  color: var(--color-text-muted);
 }
 
 .groupCount {
@@ -74,6 +102,52 @@
   th {
     text-align: left;
   }
+}
+
+/*
+ * A market inside an account, in a row group of its own: quieter than the
+ * account above it, and set in, so the two levels read as a tree rather than
+ * as siblings. It draws the line above itself for the same reason the account
+ * heading does.
+ *
+ * The colour is on the label only. On the total cells it would outrank the
+ * profit and loss tint those cells carry, and every market would read flat.
+ */
+.subgroupRow {
+  th,
+  td {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    background-color: color-mix(in srgb, var(--color-surface-raised) 25%, var(--color-surface));
+    border-top: 1px solid var(--color-border);
+  }
+
+  /* `:first-child` for the specificity: the table's own `th` padding is as
+     specific as `.subgroupRow th` and lives in another stylesheet, so which won
+     would turn on the order the two happened to load in. */
+  th:first-child {
+    padding-left: var(--space-5);
+    text-align: left;
+  }
+}
+
+/* The quiet type of a market's heading, on the table and on the card list. */
+.subgroupRow .groupName,
+.cardSubHead .groupName,
+.cardSubHead .cardGroupFigures {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}
+
+/*
+ * An account heading whose markets follow in row groups of their own is the
+ * last row of its group, and the table drops the last row's line from its
+ * cells — though not from its `th` — leaving the line under the heading drawn
+ * under its first cell only. Specific enough to outrank that rule.
+ */
+.group > .groupRow:last-child > td {
+  border-bottom: 1px solid var(--color-border);
 }
 
 .group:first-of-type .groupRow {
@@ -132,6 +206,12 @@
   font-weight: var(--weight-semibold);
 
   @include m.tabular-nums;
+}
+
+/* A market inside an account on the card list: a `.cardGroupHead`, set in and
+   tighter. */
+.cardSubHead {
+  padding: var(--space-3) 0 var(--space-1) var(--space-3);
 }
 
 .cardList {

@@ -12,7 +12,15 @@
  * reads as a loss that is not there.
  */
 import Decimal from 'decimal.js'
-import type { AccountType, AssetClass } from '../domain/types'
+import {
+  marketOf,
+  MARKETS,
+  type AccountFilter,
+  type AccountType,
+  type AssetClass,
+  type Market,
+  type MarketFilter,
+} from '../domain/types'
 
 export interface SummaryInput {
   symbol: string
@@ -45,6 +53,32 @@ export interface AccountTotal extends PositionTotal {
   accountType: AccountType
 }
 
+/** One market's share of a block — JP stocks and funds, or US stocks. */
+export interface MarketTotal extends PositionTotal {
+  market: Market
+}
+
+/**
+ * One block of the table: an account, and within it each market it holds.
+ *
+ * Account first, because that is how the book is read — 特定 or NISA decides
+ * how a holding is taxed, which matters more than the currency it is priced in.
+ * `accountType` is null when the account is not split (under 特定, the one
+ * taxable account), and the block is then the whole book; `markets` is empty
+ * when the market is not split.
+ */
+export interface GroupTotal extends PositionTotal {
+  accountType: AccountType | null
+  /** JP before US. Only markets the block holds. */
+  markets: MarketTotal[]
+}
+
+/** Which axes the table is cut along. */
+export interface GroupSplit {
+  market: boolean
+  account: boolean
+}
+
 export interface ClassTotal {
   assetClass: AssetClass
   marketValueJpy: string
@@ -64,6 +98,8 @@ export interface PositionSummary {
   total: PositionTotal
   /** Largest value first. */
   accounts: AccountTotal[]
+  /** The table's blocks, in `accounts`' order, each holding something. */
+  groups: GroupTotal[]
   /** Largest value first; classes with nothing priced are left out. */
   classes: ClassTotal[]
   /** Each row's share of the book's value, by input index. */
@@ -110,7 +146,75 @@ function totalOf(rows: readonly SummaryInput[], bookValue: Decimal): PositionTot
   }
 }
 
-export function summarizePositions(rows: readonly SummaryInput[]): PositionSummary {
+/** Whether a row belongs to a block's account. */
+export function inGroup(
+  row: Pick<SummaryInput, 'accountType'>,
+  group: Pick<GroupTotal, 'accountType'>,
+): boolean {
+  return group.accountType == null || row.accountType === group.accountType
+}
+
+/** Whether a row belongs to one market's part of a block. */
+export const inMarket = (row: Pick<SummaryInput, 'assetClass'>, market: Market): boolean =>
+  marketOf(row.assetClass) === market
+
+/**
+ * Which axes the table is cut along, given the two filters and what they left.
+ *
+ * Accounts split unless the switch is on 特定, the one taxable account. Markets
+ * split only when the switch is on both *and* both are held: a book of Japanese
+ * holdings alone would otherwise give every account one "JP stocks & funds"
+ * sub-heading repeating the account's own total. An account that holds one
+ * market in a book that holds both still gets its one `markets` entry — the
+ * screen names that market in the account's heading rather than under it.
+ */
+export function splitFor(
+  rows: readonly Pick<SummaryInput, 'assetClass'>[],
+  filters: { account: AccountFilter; market: MarketFilter },
+): GroupSplit {
+  return {
+    market: filters.market === 'ALL' && new Set(rows.map((row) => marketOf(row.assetClass))).size > 1,
+    account: filters.account !== 'SPECIFIC',
+  }
+}
+
+/**
+ * Totals for each block of the table and each market within it.
+ *
+ * The blocks are the accounts, in `accounts`' order (largest across the book)
+ * and with `accounts`' own totals — or, when the account is not split, one
+ * block that is the book. Within each, JP before US, and only the markets that
+ * block holds.
+ *
+ * Summed here, not by the screen, for the reason the rest of this file exists:
+ * a heading carries a total, and adding it up in the browser is financial
+ * arithmetic in the UI. Weights stay shares of the whole book shown.
+ */
+function groupTotals(
+  rows: readonly SummaryInput[],
+  bookValue: Decimal,
+  total: PositionTotal,
+  accounts: readonly AccountTotal[],
+  split: GroupSplit,
+): GroupTotal[] {
+  const marketsOf = (members: readonly SummaryInput[]): MarketTotal[] =>
+    split.market
+      ? MARKETS.map((market) => ({ market, inside: members.filter((row) => inMarket(row, market)) }))
+          .filter(({ inside }) => inside.length > 0)
+          .map(({ market, inside }) => ({ market, ...totalOf(inside, bookValue) }))
+      : []
+
+  if (!split.account) return rows.length > 0 ? [{ ...total, accountType: null, markets: marketsOf(rows) }] : []
+  return accounts.map((entry) => ({
+    ...entry,
+    markets: marketsOf(rows.filter((row) => row.accountType === entry.accountType)),
+  }))
+}
+
+export function summarizePositions(
+  rows: readonly SummaryInput[],
+  split: GroupSplit = { market: false, account: true },
+): PositionSummary {
   const bookValue = rows.reduce((running, row) => (isPriced(row) ? running.add(row.marketValueJpy) : running), ZERO)
   const shareOf = (value: string | null) =>
     value == null || !bookValue.gt(0) ? null : new Decimal(value).div(bookValue).toNumber()
@@ -170,9 +274,11 @@ export function summarizePositions(rows: readonly SummaryInput[]): PositionSumma
     undefined,
   )
 
+  const total = totalOf(rows, bookValue)
   return {
-    total: totalOf(rows, bookValue),
+    total,
     accounts,
+    groups: groupTotals(rows, bookValue, total, accounts, split),
     classes,
     weights: rows.map((row) => (isPriced(row) ? shareOf(row.marketValueJpy) : null)),
     highlights: {
@@ -181,4 +287,22 @@ export function summarizePositions(rows: readonly SummaryInput[]): PositionSumma
       weakest: withReturn.length > 1 ? highlight(weakest) : null,
     },
   }
+}
+
+/** The screen's figures: every row with its weight, and the totals and blocks over them. */
+export type PositionsView<R> = Omit<PositionSummary, 'weights'> & { rows: (R & { weight: number | null })[] }
+
+/**
+ * Everything the Positions screen shows about the rows a pair of filters left,
+ * as `getPositions` returns it — the pure half of that handler, here so it is
+ * tested as written rather than through a copy. The filters only pick the
+ * blocks (`splitFor`); the rows must already be the filtered ones, which
+ * `engineFor` sees to before the engine runs.
+ */
+export function positionsView<R extends SummaryInput>(
+  rows: readonly R[],
+  filters: { account: AccountFilter; market: MarketFilter },
+): PositionsView<R> {
+  const { weights, ...summary } = summarizePositions(rows, splitFor(rows, filters))
+  return { ...summary, rows: rows.map((row, index) => ({ ...row, weight: weights[index] ?? null })) }
 }

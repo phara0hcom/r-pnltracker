@@ -32,6 +32,7 @@ import {
   type TradeSide,
 } from '~/lib/domain/types'
 import { todayLocal } from '~/lib/localDate'
+import { positionsInput } from '~/lib/marketScope'
 import { monthWeeks } from '~/lib/monthGrid'
 import { daysUntilYearEnd } from '~/lib/nisa/daysLeft'
 import {
@@ -46,9 +47,10 @@ import { attributeFx } from '~/lib/pnl/fxAttribution'
 import { holdingWindows, longestHoldBySymbol } from '~/lib/pnl/holdings'
 import { splitByDay, splitByMarket, toSplitView, type MarketSplitView } from '~/lib/pnl/markets'
 import {
-  summarizePositions,
+  positionsView,
   type AccountTotal,
   type ClassTotal,
+  type GroupTotal,
   type PositionSummary,
   type PositionTotal,
 } from '~/lib/pnl/positionSummary'
@@ -120,6 +122,12 @@ export interface PositionsData {
   total: PositionTotal
   /** One per account holding anything, largest value first. */
   accounts: AccountTotal[]
+  /**
+   * The table's blocks: one per account, each with its per-market totals inside
+   * (`markets`, JP before US) — or, when the account is not split, one block for
+   * the whole book, `accountType` null. See `splitFor` and `GroupTotal`.
+   */
+  groups: GroupTotal[]
   classes: ClassTotal[]
   highlights: PositionSummary['highlights']
   /** The rate a US holding's yen figures use, when one is held. */
@@ -128,9 +136,9 @@ export interface PositionsData {
 
 export const getPositions = createServerFn({ method: 'GET' })
   .middleware([authed])
-  .validator(accountFilterInput)
+  .validator(positionsInput)
   .handler(async ({ data, context }): Promise<PositionsData> => {
-    const { engine } = await engineFor(context.userId, data.account)
+    const { engine } = await engineFor(context.userId, data.account, data.market)
 
     const [priced, overrides, liveFx] = await Promise.all([
       db
@@ -138,10 +146,13 @@ export const getPositions = createServerFn({ method: 'GET' })
         .from(priceCache)
         .innerJoin(instruments, eq(priceCache.instrumentId, instruments.id)),
       overridesFor(context.userId),
-      usdJpyRate(),
+      // Only a US holding is valued in dollars; a JP-only view has none.
+      data.market === 'JP' ? null : usdJpyRate(),
     ])
     const priceBySymbol = new Map(priced.map((row) => [row.instrument.symbol, row.price]))
 
+    // Both filters were applied to the trades, so everything summed below —
+    // weights included — is of the holdings shown.
     const rows = engine.positions
       .map((position) => {
         const avgCost = position.costBasisJpy.div(position.quantity)
@@ -179,13 +190,8 @@ export const getPositions = createServerFn({ method: 'GET' })
           : new Decimal(right.marketValueJpy).cmp(left.marketValueJpy),
       )
 
-    const summary = summarizePositions(rows)
     return {
-      rows: rows.map((row, index) => ({ ...row, weight: summary.weights[index] ?? null })),
-      total: summary.total,
-      accounts: summary.accounts,
-      classes: summary.classes,
-      highlights: summary.highlights,
+      ...positionsView(rows, data),
       usdJpy: rows.find((row) => row.usdJpy != null)?.usdJpy ?? null,
     }
   })

@@ -19,7 +19,12 @@
  */
 import * as Sentry from '@sentry/tanstackstart-react'
 import { listTrades } from '~/db/trades.service'
-import { matchesAccountFilter, type AccountFilter } from '~/lib/domain/types'
+import {
+  matchesAccountFilter,
+  matchesMarketFilter,
+  type AccountFilter,
+  type MarketFilter,
+} from '~/lib/domain/types'
 import { reportWarning } from '~/lib/observability/report'
 import { runEngine, type EngineWarning } from '~/lib/pnl/engine'
 
@@ -81,6 +86,11 @@ function reportEngineWarnings(warnings: EngineWarning[]): void {
  * engine's *output* instead would be wrong — a 特定 sell would still have been
  * averaged against NISA units.
  *
+ * The market filter (Positions only) is applied at the same point. There it is
+ * exact either way — a symbol has one asset class, so a market is a set of
+ * whole pools — and doing it first spares the engine every trade on the other
+ * side.
+ *
  * ## Why the spans are here
  *
  * Seven of the eight GET screen functions funnel through this one call, and its
@@ -94,9 +104,13 @@ function reportEngineWarnings(warnings: EngineWarning[]): void {
  * inlines `pg` into the server bundle, so OpenTelemetry has no module load to
  * patch and emits no database spans at all. See `src/instrument.server.ts`.
  */
-export async function engineFor(userId: string, account: AccountFilter = 'ALL') {
+export async function engineFor(
+  userId: string,
+  account: AccountFilter = 'ALL',
+  market: MarketFilter = 'ALL',
+) {
   return Sentry.startSpan(
-    { name: 'engineFor', op: 'function', attributes: { account } },
+    { name: 'engineFor', op: 'function', attributes: { account, market } },
     async (span) => {
       const records = await Sentry.startSpan(
         { name: 'listTrades', op: 'db.query' },
@@ -104,8 +118,10 @@ export async function engineFor(userId: string, account: AccountFilter = 'ALL') 
       )
 
       const everyTrade = records.map((record) => record.trade)
-      const list = everyTrade.filter((trade) =>
-        matchesAccountFilter(trade.accountType, account),
+      const list = everyTrade.filter(
+        (trade) =>
+          matchesAccountFilter(trade.accountType, account) &&
+          matchesMarketFilter(trade.assetClass, market),
       )
 
       const engine = Sentry.startSpan({ name: 'runEngine', op: 'pnl.engine' }, () =>

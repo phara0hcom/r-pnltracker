@@ -3,14 +3,15 @@
  *
  * Pure and DB-free like the rest of `lib`: rows in, one string out. The caller
  * decides *which* rows and in *what* order, so the file always matches the
- * table it was exported from — account filter and sort column included.
+ * table it was exported from — account and market filters and sort column
+ * included.
  *
  * Values are written as the exact decimal strings the server sent, never as the
  * yen-formatted display strings. A cell reading "¥123,456" is a picture of a
  * number, not a number, and the whole point of a CSV is that a spreadsheet can
  * do arithmetic on it.
  */
-import type { AccountFilter } from '../domain/types'
+import type { AccountFilter, MarketFilter } from '../domain/types'
 import { todayLocal } from '../localDate'
 import { csvDocument } from './csv'
 
@@ -123,14 +124,21 @@ export function positionsCsv(
 }
 
 /**
- * `positions-2026-08-29.csv`, or `positions-nisa-2026-08-29.csv` when the
- * account switch is filtered — so two exports taken the same day for different
- * scopes do not overwrite each other in the downloads folder.
+ * `positions-2026-08-29.csv`, or `positions-nisa-us-2026-08-29.csv` when the
+ * account or market switch is filtered — so two exports taken the same day for
+ * different scopes do not overwrite each other in the downloads folder.
  *
  * Dated from `todayLocal`, never `toISOString`: the latter names the file with
  * yesterday's date every JST morning before 09:00.
  */
-export function positionsCsvFilename(account: AccountFilter, today = todayLocal()): string {
-  const scope = account === 'ALL' ? '' : `-${account.toLowerCase()}`
+export function positionsCsvFilename(
+  account: AccountFilter,
+  market: MarketFilter,
+  today = todayLocal(),
+): string {
+  const scope = [account, market]
+    .filter((choice) => choice !== 'ALL')
+    .map((choice) => `-${choice.toLowerCase()}`)
+    .join('')
   return `positions${scope}-${today}.csv`
 }

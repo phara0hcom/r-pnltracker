@@ -7,7 +7,12 @@
  * so it is asserted against the real trade history rather than a fixture.
  */
 import { describe, expect, it } from 'vitest'
-import { matchesAccountFilter, type AccountFilter } from '../domain/types'
+import {
+  matchesAccountFilter,
+  matchesMarketFilter,
+  type AccountFilter,
+  type NormalizedTrade,
+} from '../domain/types'
 import { loadAllTrades } from '../import/loadFixtures'
 import { runEngine } from './engine'
 
@@ -105,6 +110,20 @@ describe('filtering before the engine is exact', () => {
     expect(sum(nisa.realized).add(sum(specific.realized)).toFixed()).toBe(
       sum(full.realized).toFixed(),
     )
+  })
+
+  it('does the same for the market switch, alone and paired with an account', () => {
+    // Positions filters by market at the same point; a market is a set of whole
+    // pools, so the same must hold — and hold for every pairing of the two.
+    for (const account of ['ALL', 'NISA', 'SPECIFIC'] as const) {
+      for (const market of ['JP', 'US'] as const) {
+        const inScope = (point: Pick<NormalizedTrade, 'accountType' | 'assetClass'>) =>
+          matchesAccountFilter(point.accountType, account) && matchesMarketFilter(point.assetClass, market)
+        const run = runEngine(allTrades.filter(inScope))
+        expect(positionKeys(run.positions)).toEqual(positionKeys(full.positions.filter(inScope)))
+        expect(realizedKeys(run.realized)).toEqual(realizedKeys(full.realized.filter(inScope)))
+      }
+    }
   })
 
   it('introduces no warnings that the full run did not have', () => {

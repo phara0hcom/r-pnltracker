@@ -3,15 +3,15 @@
  * and the holdings worth naming.
  *
  * Every figure arrives summed from `getPositions` — this lays them out and
- * does no arithmetic. The split by account is left out under 特定, where there
- * is one account to split.
+ * does no arithmetic. What it shows follows what is held, not which filters are
+ * set: a split with one part is left out, and a highlight names whichever of
+ * account or class tells its holdings apart.
  */
 import { Link } from '@tanstack/react-router'
 import styles from './PositionsSummary.module.scss'
 import { ACCOUNT_LABEL, ACCOUNT_TITLE, ASSET_LABEL, pct, pctSigned, tone, yen, yenSigned } from '~/components/format'
 import { WarnIcon } from '~/components/icons/WarnIcon'
 import { cx } from '~/lib/cx'
-import type { AccountFilter } from '~/lib/domain/types'
 import type { Highlight } from '~/lib/pnl/positionSummary'
 import type { PositionRow, PositionsData } from '~/server/screens'
 
@@ -47,8 +47,12 @@ interface Split {
   parts: Part[]
 }
 
-/** By account, then by asset class — or by class alone when one account is shown. */
-function splitsOf(data: PositionsData, account: AccountFilter): Split[] {
+/**
+ * By account, then by asset class — each only when it has two parts or more.
+ * One part is one full bar, which says nothing: one account under 特定, one
+ * class under US, a NISA holding only 成長投資枠.
+ */
+function splitsOf(data: PositionsData): Split[] {
   const byClass: Split = {
     title: 'By asset class',
     parts: data.classes.map((entry) => ({
@@ -59,7 +63,6 @@ function splitsOf(data: PositionsData, account: AccountFilter): Split[] {
       value: entry.marketValueJpy,
     })),
   }
-  if (account === 'SPECIFIC') return [byClass]
   const byAccount: Split = {
     title: 'By account',
     parts: data.accounts
@@ -73,7 +76,7 @@ function splitsOf(data: PositionsData, account: AccountFilter): Split[] {
         value: entry.marketValueJpy,
       })),
   }
-  return [byAccount, byClass]
+  return [byAccount, byClass].filter((split) => split.parts.length > 1)
 }
 
 /**
@@ -113,15 +116,21 @@ function Allocation({ split }: { split: Split }) {
 const titleOf = (entry: { symbol: string; name: string }) =>
   entry.name === entry.symbol ? entry.name : `${entry.symbol} ${entry.name}`
 
-function Highlights({ data, account }: { data: PositionsData; account: AccountFilter }) {
+/**
+ * What tells a highlighted holding apart: its account when more than one is
+ * held, else its class when more than one is — and nothing when neither varies,
+ * as under 特定 and US, where either would repeat one word down the card.
+ */
+function whereOf(data: PositionsData): (entry: Highlight) => string | null {
+  if (data.accounts.length > 1) return (entry) => ACCOUNT_LABEL[entry.accountType] ?? entry.accountType
+  if (data.classes.length > 1) return (entry) => ASSET_LABEL[entry.assetClass] ?? entry.assetClass
+  return () => null
+}
+
+function Highlights({ data }: { data: PositionsData }) {
   const { largest, best, weakest } = data.highlights
   if (!largest) return null
-
-  // Under 特定 every holding is in the one account, so the class says more.
-  const where = (entry: Highlight) =>
-    account === 'SPECIFIC'
-      ? (ASSET_LABEL[entry.assetClass] ?? entry.assetClass)
-      : (ACCOUNT_LABEL[entry.accountType] ?? entry.accountType)
+  const where = whereOf(data)
 
   const lines: { label: string; entry: Highlight; figure: string; tint?: string }[] = [
     { label: 'Largest', entry: largest, figure: pct(largest.weight) },
@@ -136,20 +145,22 @@ function Highlights({ data, account }: { data: PositionsData; account: AccountFi
     })
   }
 
+  const placed = lines.map((line) => ({ ...line, where: where(line.entry) }))
+
   return (
     <section className={cx(styles.card, styles.highlights)} aria-labelledby="positions-highlights">
       <h2 id="positions-highlights" className={styles.label}>
         Highlights
       </h2>
       <dl className={styles.highlightList}>
-        {lines.map((line) => (
+        {placed.map((line) => (
           <div key={line.label} className={styles.highlight}>
             <dt className={styles.highlightLabel}>{line.label}</dt>
             <dd className={styles.highlightWho}>
               <span className={styles.highlightTitle} title={titleOf(line.entry)}>
                 {titleOf(line.entry)}
               </span>
-              <span className={styles.highlightWhere}>{where(line.entry)}</span>
+              {line.where == null ? null : <span className={styles.highlightWhere}>{line.where}</span>}
             </dd>
             <dd
               className={cx(
@@ -182,18 +193,10 @@ function Unrealized({ data }: { data: PositionsData }) {
  * PC: the value card, the allocation card and the highlights, in one row.
  * SP: the value card carries one allocation, with the highlights under it.
  */
-export function PositionsSummary({
-  data,
-  account,
-  compact,
-}: {
-  data: PositionsData
-  account: AccountFilter
-  compact: boolean
-}) {
+export function PositionsSummary({ data, compact }: { data: PositionsData; compact: boolean }) {
   const { total } = data
   const priced = total.count > total.unpriced
-  const splits = priced ? splitsOf(data, account) : []
+  const splits = priced ? splitsOf(data) : []
 
   if (compact) {
     const [first] = splits
@@ -210,7 +213,7 @@ export function PositionsSummary({
             </div>
           ) : null}
         </section>
-        <Highlights data={data} account={account} />
+        <Highlights data={data} />
       </div>
     )
   }
@@ -240,7 +243,7 @@ export function PositionsSummary({
           ))}
         </section>
       ) : null}
-      <Highlights data={data} account={account} />
+      <Highlights data={data} />
     </div>
   )
 }

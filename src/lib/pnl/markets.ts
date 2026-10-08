@@ -11,7 +11,7 @@
  * disagree about a day or a month.
  */
 import type Decimal from 'decimal.js'
-import { ZERO } from '../domain/types'
+import { marketOf, ZERO } from '../domain/types'
 import type { RealizedEvent } from './engine'
 import { usdGain } from './usdResult'
 
@@ -38,7 +38,7 @@ export interface MarketSplitView {
   totalJpy: string
 }
 
-export const isUsClose = (close: RealizedEvent): boolean => close.assetClass === 'US_EQUITY'
+export const isUsClose = (close: RealizedEvent): boolean => marketOf(close.assetClass) === 'US'
 
 export function splitByMarket(closes: readonly RealizedEvent[]): MarketSplit {
   let yenSide = ZERO
