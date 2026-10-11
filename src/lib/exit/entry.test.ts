@@ -87,6 +87,19 @@ describe('openEntryStreaks', () => {
     expect(streak?.totalShares.toString()).toBe('300')
     // The previous streak's sells must not carry over.
     expect(streak?.sharesSold.toString()).toBe('0')
+    // The close that ended it is what lets an older plan see it was outlived.
+    expect(streak?.priorCloseDate).toBe('2026-05-20')
+  })
+
+  it('has no prior close while the pool has never been flat', () => {
+    // A partial sell is not a close, and neither is the empty pool before the
+    // first buy — a plan over this streak cannot have been outlived.
+    const streak = only([
+      trade('2026-06-01', 'BUY', 500, 1000),
+      trade('2026-06-10', 'SELL', 200, 1100),
+      trade('2026-06-12', 'BUY', 300, 1150),
+    ])
+    expect(streak?.priorCloseDate).toBeNull()
   })
 
   it('omits a pool that is closed', () => {

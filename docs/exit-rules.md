@@ -431,10 +431,17 @@ missing, from the plan's own entry date.
 Shares remaining is read live from the pool, so buying the same name again before
 archiving the old plan would make it read as open — against entry facts that
 belong to the previous swing, with Target 1 still latched by the old winner and a
-trail carrying highs from months back. When the current holding streak began
-*after* the plan's entry date, the plan says so and asks to be archived, and it
-moves to *Plans to archive* rather than sitting among live positions. Archiving
-frees the position to be planned again.
+trail carrying highs from months back. When the pool went flat *after* the
+plan's entry date and has been bought since, the plan says so and asks to be
+archived, and it moves to *Plans to archive* rather than sitting among live
+positions. Archiving frees the position to be planned again.
+
+The test is the close, not the streak's start date. Rakuten re-dates a US fill
+a day later once it settles (the restatement in `lib/import/plan.ts`), while a
+plan keeps the date it was made against — so comparing start dates retired
+every US plan opened before settlement the next day, with nothing sold (SO,
+October 2026). For the same reason a US close dated on the plan's own entry day
+does not count: it may be the previous session's, moved onto that day.
 
 **An unknown ticker is discarded with a 404** and logged. An alert exists for
 something the account has never traded, so there is nothing to attach a bar to.

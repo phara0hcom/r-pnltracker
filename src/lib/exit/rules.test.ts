@@ -30,6 +30,7 @@ const position = (overrides: Partial<ExitRulePosition> = {}): ExitRulePosition =
   supportLevel: d(950),
   entryAtr: d(20),
   currentStreakEntryDate: '2026-06-01',
+  priorCloseDate: null,
   entryStopAtrMultiple: d('1.5'),
   entryTargetMultiple: d('1.5'),
   lotSize: 100,
@@ -345,10 +346,15 @@ describe('assess — suggested action', () => {
     // The pool holds shares again, so `sharesRemaining` alone reads as open —
     // but they are a different swing's, and every locked fact here describes the
     // old one. The old Target 1 would otherwise latch from bars months back.
-    const superseded = position({ sharesRemaining: d(500), currentStreakEntryDate: '2026-08-20' })
+    const superseded = position({
+      sharesRemaining: d(500),
+      priorCloseDate: '2026-08-14',
+      currentStreakEntryDate: '2026-08-20',
+    })
     const result = assess(superseded, [bar('2026-06-01', 1080)], settings(), '2026-08-25')
     expect(result.action.kind).toBe('PLAN_SUPERSEDED')
-    expect(result.action.message).toContain('2026-08-20')
+    expect(result.action.message).toContain('closed on 2026-08-14')
+    expect(result.action.message).toContain('re-opened on 2026-08-20')
   })
 
   it('leaves a plan alone when the streak began on or before its entry date', () => {
@@ -356,6 +362,76 @@ describe('assess — suggested action', () => {
     // be dated after it — only a *later* streak means the swing was re-entered.
     const dated = position({ currentStreakEntryDate: '2026-05-28' })
     expect(assess(dated, [bar('2026-06-01', 1020)], settings(), '2026-06-01').action.kind).toBe(
+      'HOLD',
+    )
+  })
+
+  it('leaves a plan alone when the last close was before its entry date', () => {
+    // A plan dated before the streak by hand: the swing it describes is still
+    // the one held, because nothing was sold in between.
+    const early = position({ currentStreakEntryDate: '2026-06-03', priorCloseDate: '2026-04-30' })
+    expect(assess(early, [bar('2026-06-03', 1020)], settings(), '2026-06-03').action.kind).toBe(
+      'HOLD',
+    )
+  })
+
+  describe('a US fill re-dated at settlement', () => {
+    const us = (overrides: Partial<ExitRulePosition>) =>
+      position({ symbol: 'SO', assetClass: 'US_EQUITY', lotSize: 1, ...overrides })
+
+    it('is not a re-entry when nothing was sold', () => {
+      // SO, October 2026: the plan was opened while the buys carried their US
+      // trading day, 10-05; the settled export moved them to the JST day,
+      // 10-06. The streak then started after the plan with no sell at all.
+      const restated = us({
+        entryDate: '2026-10-05',
+        currentStreakEntryDate: '2026-10-06',
+        priorCloseDate: null,
+      })
+      expect(
+        assess(restated, [bar('2026-10-09', 1020)], settings(), '2026-10-09').action.kind,
+      ).toBe('HOLD')
+    })
+
+    it('is not a re-entry when the previous swing’s close moved onto the entry date', () => {
+      // Sold on US 10-05, re-bought on US 10-06 and planned that day. Both fills
+      // settle a day later, so the old close now sits on the plan's own date.
+      const restated = us({
+        entryDate: '2026-10-06',
+        currentStreakEntryDate: '2026-10-07',
+        priorCloseDate: '2026-10-06',
+      })
+      expect(
+        assess(restated, [bar('2026-10-09', 1020)], settings(), '2026-10-09').action.kind,
+      ).toBe('HOLD')
+    })
+
+    it('still retires the plan once the position was closed after its entry', () => {
+      const reentered = us({
+        entryDate: '2026-10-05',
+        currentStreakEntryDate: '2026-10-09',
+        priorCloseDate: '2026-10-08',
+      })
+      expect(
+        assess(reentered, [bar('2026-10-05', 1020)], settings(), '2026-10-09').action.kind,
+      ).toBe('PLAN_SUPERSEDED')
+    })
+  })
+
+  it('retires a 東証 plan exited on its own entry day and re-bought later', () => {
+    // A 東証 date never moves, so a close on the entry date is the plan's own
+    // swing ending — unlike a US one, which may be the previous session's.
+    const sameDay = position({ priorCloseDate: '2026-06-01', currentStreakEntryDate: '2026-06-03' })
+    expect(assess(sameDay, [bar('2026-06-01', 1020)], settings(), '2026-06-03').action.kind).toBe(
+      'PLAN_SUPERSEDED',
+    )
+  })
+
+  it('leaves a 東証 plan alone when the old swing closed the day the new one opened', () => {
+    // Sold then re-bought on the entry date, in that order: the streak the plan
+    // was prefilled from is the one still held.
+    const turnover = position({ priorCloseDate: '2026-06-01', currentStreakEntryDate: '2026-06-01' })
+    expect(assess(turnover, [bar('2026-06-01', 1020)], settings(), '2026-06-01').action.kind).toBe(
       'HOLD',
     )
   })
