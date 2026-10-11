@@ -39,6 +39,15 @@ export interface EntryStreak {
    * which a later top-up silently falsifies.
    */
   sharesSold: Decimal
+  /**
+   * Trade date of the sell that last left the pool flat before this streak
+   * began, or null when it never has been.
+   *
+   * This, not `entryDate`, is what says a plan has been outlived. A US fill is
+   * re-dated a day later once it settles, so a streak's start can move past the
+   * date its plan was made against with nothing having been sold.
+   */
+  priorCloseDate: string | null
 }
 
 /**
@@ -61,6 +70,7 @@ export function openEntryStreaks(trades: NormalizedTrade[]): Map<string, EntrySt
   for (const [key, list] of pools) {
     let quantity = new Decimal(0)
     let streak: EntryStreak | null = null
+    let lastFlatDate: string | null = null
 
     for (const trade of list) {
       if (OPENING_SIDES.includes(trade.side)) {
@@ -74,6 +84,7 @@ export function openEntryStreaks(trades: NormalizedTrade[]): Map<string, EntrySt
             entryPrice: trade.unitPrice,
             totalShares: trade.quantity,
             sharesSold: new Decimal(0),
+            priorCloseDate: lastFlatDate,
           }
         } else if (streak !== null) {
           // Bound before the assignment: reading `streak` inside the object that
@@ -103,7 +114,10 @@ export function openEntryStreaks(trades: NormalizedTrade[]): Map<string, EntrySt
         // Fully closed — the next buy will start a fresh streak. A partial sell
         // deliberately does not reset it: that is the Target 1 exit, and the
         // remaining shares are still the same swing.
-        if (quantity.lte(0)) streak = null
+        if (quantity.lte(0)) {
+          streak = null
+          lastFlatDate = trade.tradeDate
+        }
       }
     }
 

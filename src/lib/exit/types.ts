@@ -104,9 +104,18 @@ export interface ExitRulePosition {
    * is the engine's live pool quantity, so a position that was closed in full
    * and then re-bought before the old plan was archived reads as open again —
    * and every locked fact above would then be applied to a swing it says nothing
-   * about. A streak that began *after* `entryDate` is exactly that case.
+   * about. A later streak is that case only if `priorCloseDate` agrees.
    */
   currentStreakEntryDate: string | null
+  /**
+   * Trade date of the sell that left the pool flat before the current streak
+   * began, or null when it never has been.
+   *
+   * The proof that the plan was outlived — a later streak start alone is not,
+   * because a settled US fill is re-dated a day later than the one the plan
+   * was made against.
+   */
+  priorCloseDate: string | null
   /** Board-lot size: 100 on 東証, 1 for US shares. */
   lotSize: number
   /** Per-position override; null defers to the global setting. */

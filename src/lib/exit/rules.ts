@@ -324,6 +324,29 @@ interface ActionInput {
 }
 
 /**
+ * When the pool went flat after this plan's entry and was bought again, or
+ * null if it has not.
+ *
+ * Decided by the close, not by comparing start dates. Rakuten re-dates a US
+ * fill a day later once it settles (the restatement pass in
+ * `lib/import/plan.ts`) while the plan keeps the date it was made against, so
+ * every US plan opened before settlement used to read as re-entered the next
+ * day with nothing sold — SO in October 2026.
+ *
+ * A close on the entry date itself is ambiguous for a US position: it may be
+ * the previous session's, moved onto that day by the same restatement, so it
+ * must fall strictly after. A 東証 date never moves, so there a same-day exit
+ * counts — provided the new streak began on a later day, since a sell then
+ * buy within the entry day is the plan's own swing being opened.
+ */
+function supersession(position: ExitRulePosition): { closed: string; reopened: string } | null {
+  const { priorCloseDate: closed, currentStreakEntryDate: reopened, entryDate } = position
+  if (closed === null || reopened === null || reopened <= entryDate) return null
+  const after = position.assetClass === 'US_EQUITY' ? closed > entryDate : closed >= entryDate
+  return after ? { closed, reopened } : null
+}
+
+/**
  * Picks the single recommendation, most urgent first.
  *
  * Order matters and is the point of the function: a stopped-out position must
@@ -353,13 +376,11 @@ function decideAction(input: ActionInput): ExitAction {
   // to zero so the partial reads as untaken, and the partial size is a fraction
   // of a position that no longer exists. None of that can be salvaged from the
   // stored facts, so the only honest recommendation is to re-plan.
-  if (
-    position.currentStreakEntryDate !== null &&
-    position.currentStreakEntryDate > position.entryDate
-  ) {
+  const superseded = supersession(position)
+  if (superseded !== null) {
     return {
       kind: 'PLAN_SUPERSEDED',
-      message: `Position was closed and re-opened on ${position.currentStreakEntryDate} — this plan describes the earlier swing entered ${position.entryDate}, so its stop, target and trail no longer apply. Archive it and open a new plan.`,
+      message: `Position was closed on ${superseded.closed} and re-opened on ${superseded.reopened} — this plan describes the earlier swing entered ${position.entryDate}, so its stop, target and trail no longer apply. Archive it and open a new plan.`,
       severity: 'attention',
     }
   }

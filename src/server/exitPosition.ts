@@ -38,6 +38,7 @@ export function buildExitRulePosition(
     sharesSold: streak?.sharesSold ?? new Decimal(0),
     supportLevel: rule.supportLevel,
     currentStreakEntryDate: streak?.entryDate ?? null,
+    priorCloseDate: streak?.priorCloseDate ?? null,
     entryAtr: rule.entryAtr,
     entryStopAtrMultiple: rule.entryStopAtrMultiple,
     entryTargetMultiple: rule.entryTargetMultiple,
