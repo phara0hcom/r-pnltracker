@@ -135,6 +135,7 @@ describe('redactTvSecret', () => {
     // not available — matching on the path segment is what keeps it from failing
     // open there.
     expect(redactTvSecret('/api/tv/any-value-at-all')).toBe('/api/tv/[redacted]')
+    expect(redactTvSecret('POST /api/candles/8f3a9c2b1d4e5f60')).toBe('POST /api/candles/[redacted]')
   })
 
   it('leaves other paths untouched', () => {

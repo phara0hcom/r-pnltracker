@@ -116,6 +116,14 @@ const Exits = ({ className }: IconProps) => (
   </svg>
 )
 
+/** An open book with a ribbon: the plays, written down. */
+const Playbook = ({ className }: IconProps) => (
+  <svg {...BASE} className={className}>
+    <path d="M8 4.2C6.6 3.2 4.6 2.8 2.2 3v9.6c2.4-.2 4.4.2 5.8 1.2 1.4-1 3.4-1.4 5.8-1.2V3c-2.4-.2-4.4.2-5.8 1.2Z" />
+    <path d="M8 4.2v9.6" />
+  </svg>
+)
+
 const Settings = ({ className }: IconProps) => (
   <svg {...BASE} className={className}>
     <circle cx="8" cy="8" r="3.1" />
@@ -129,6 +137,7 @@ export const NAV_ICONS = {
   '/trades': Trades,
   '/positions': Positions,
   '/exits': Exits,
+  '/playbook': Playbook,
   '/dividends': Dividends,
   '/calendar': Calendar,
   '/stats': Stats,

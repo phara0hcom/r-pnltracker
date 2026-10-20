@@ -1,0 +1,242 @@
+@use '../../styles/mixins' as m;
+
+.back {
+  color: var(--color-text-muted);
+
+  &:hover {
+    color: var(--color-accent);
+  }
+}
+
+.save {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-bg);
+  background-color: var(--color-profit);
+  border: 1px solid var(--color-profit);
+  border-radius: var(--radius-md);
+
+  @include m.focus-ring;
+
+  &:disabled {
+    color: var(--color-text-muted);
+    cursor: default;
+    background-color: transparent;
+    border-color: var(--color-border-strong);
+  }
+}
+
+.busy {
+  opacity: 0.7;
+}
+
+.textButton {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  border-radius: var(--radius-sm);
+
+  @include m.interactive-surface;
+}
+
+.inlineSelect {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.focus-ring;
+}
+
+.formError {
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-loss);
+  background-color: var(--color-loss-dim);
+  border: 1px solid var(--color-loss);
+  border-radius: var(--radius-md);
+}
+
+.scoreCard {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-4) var(--space-6);
+  align-items: center;
+  padding: var(--space-5);
+  margin-bottom: var(--space-5);
+
+  @include m.card;
+
+  @include m.mobile {
+    grid-template-columns: 1fr;
+  }
+}
+
+.overall {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.overallValue {
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-semibold);
+
+  @include m.tabular-nums;
+}
+
+.overallOf {
+  color: var(--color-text-muted);
+}
+
+.provisional {
+  padding: 1px var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+  border-radius: var(--radius-full);
+}
+
+.components {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+
+.missing {
+  opacity: 0.5;
+}
+
+.componentLabel,
+.label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.componentValue {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+
+  @include m.tabular-nums;
+}
+
+.componentWeight {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.figures {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+
+  dt {
+    font-size: var(--text-xs);
+    color: var(--color-text-subtle);
+  }
+
+  dd {
+    margin: 0;
+    font-size: var(--text-sm);
+
+    @include m.tabular-nums;
+  }
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+.flat {
+  color: var(--color-text);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.focus-ring;
+}
+
+.textarea {
+  min-height: 5rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.riskRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-4);
+}
+
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  margin: var(--space-4) 0 0;
+  border: none;
+}
+
+.check {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--text-sm);
+}
+
+.legs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.lessons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.muted {
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--color-text-subtle);
+
+  code {
+    font-family: var(--font-mono);
+  }
+}

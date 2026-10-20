@@ -23,7 +23,10 @@ import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedStatsRouteImport } from './routes/_authed/stats'
 import { Route as AuthedTaxRouteImport } from './routes/_authed/tax'
 import { Route as AuthedTradesRouteImport } from './routes/_authed/trades'
+import { Route as AuthedPlaybookIndexRouteImport } from './routes/_authed/playbook.index'
+import { Route as AuthedPlaybookReviewIdRouteImport } from './routes/_authed/playbook.$reviewId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiCandlesSecretRouteImport } from './routes/api/candles/$secret'
 import { Route as ApiTvSecretRouteImport } from './routes/api/tv/$secret'
 
 const IndexRoute = IndexRouteImport.update({
@@ -95,9 +98,24 @@ const AuthedTradesRoute = AuthedTradesRouteImport.update({
   path: '/trades',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedPlaybookIndexRoute = AuthedPlaybookIndexRouteImport.update({
+  id: '/playbook/',
+  path: '/playbook/',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedPlaybookReviewIdRoute = AuthedPlaybookReviewIdRouteImport.update({
+  id: '/playbook/$reviewId',
+  path: '/playbook/$reviewId',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCandlesSecretRoute = ApiCandlesSecretRouteImport.update({
+  id: '/api/candles/$secret',
+  path: '/api/candles/$secret',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTvSecretRoute = ApiTvSecretRouteImport.update({
@@ -120,8 +138,11 @@ export interface FileRoutesByFullPath {
   '/stats': typeof AuthedStatsRoute
   '/tax': typeof AuthedTaxRoute
   '/trades': typeof AuthedTradesRoute
+  '/playbook/$reviewId': typeof AuthedPlaybookReviewIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/candles/$secret': typeof ApiCandlesSecretRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
+  '/playbook/': typeof AuthedPlaybookIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -137,8 +158,11 @@ export interface FileRoutesByTo {
   '/stats': typeof AuthedStatsRoute
   '/tax': typeof AuthedTaxRoute
   '/trades': typeof AuthedTradesRoute
+  '/playbook/$reviewId': typeof AuthedPlaybookReviewIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/candles/$secret': typeof ApiCandlesSecretRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
+  '/playbook': typeof AuthedPlaybookIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -156,8 +180,11 @@ export interface FileRoutesById {
   '/_authed/stats': typeof AuthedStatsRoute
   '/_authed/tax': typeof AuthedTaxRoute
   '/_authed/trades': typeof AuthedTradesRoute
+  '/_authed/playbook/$reviewId': typeof AuthedPlaybookReviewIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/candles/$secret': typeof ApiCandlesSecretRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
+  '/_authed/playbook/': typeof AuthedPlaybookIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -175,8 +202,11 @@ export interface FileRouteTypes {
     | '/stats'
     | '/tax'
     | '/trades'
+    | '/playbook/$reviewId'
     | '/api/auth/$'
+    | '/api/candles/$secret'
     | '/api/tv/$secret'
+    | '/playbook/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -192,8 +222,11 @@ export interface FileRouteTypes {
     | '/stats'
     | '/tax'
     | '/trades'
+    | '/playbook/$reviewId'
     | '/api/auth/$'
+    | '/api/candles/$secret'
     | '/api/tv/$secret'
+    | '/playbook'
   id:
     | '__root__'
     | '/'
@@ -210,8 +243,11 @@ export interface FileRouteTypes {
     | '/_authed/stats'
     | '/_authed/tax'
     | '/_authed/trades'
+    | '/_authed/playbook/$reviewId'
     | '/api/auth/$'
+    | '/api/candles/$secret'
     | '/api/tv/$secret'
+    | '/_authed/playbook/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -219,6 +255,7 @@ export interface RootRouteChildren {
   AuthedRoute: typeof AuthedRouteWithChildren
   SigninRoute: typeof SigninRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiCandlesSecretRoute: typeof ApiCandlesSecretRoute
   ApiTvSecretRoute: typeof ApiTvSecretRoute
 }
 
@@ -322,11 +359,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedTradesRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/playbook/': {
+      id: '/_authed/playbook/'
+      path: '/playbook'
+      fullPath: '/playbook/'
+      preLoaderRoute: typeof AuthedPlaybookIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/playbook/$reviewId': {
+      id: '/_authed/playbook/$reviewId'
+      path: '/playbook/$reviewId'
+      fullPath: '/playbook/$reviewId'
+      preLoaderRoute: typeof AuthedPlaybookReviewIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
       fullPath: '/api/auth/$'
       preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/candles/$secret': {
+      id: '/api/candles/$secret'
+      path: '/api/candles/$secret'
+      fullPath: '/api/candles/$secret'
+      preLoaderRoute: typeof ApiCandlesSecretRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/tv/$secret': {
@@ -351,6 +409,8 @@ interface AuthedRouteChildren {
   AuthedStatsRoute: typeof AuthedStatsRoute
   AuthedTaxRoute: typeof AuthedTaxRoute
   AuthedTradesRoute: typeof AuthedTradesRoute
+  AuthedPlaybookReviewIdRoute: typeof AuthedPlaybookReviewIdRoute
+  AuthedPlaybookIndexRoute: typeof AuthedPlaybookIndexRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
@@ -365,6 +425,8 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedStatsRoute: AuthedStatsRoute,
   AuthedTaxRoute: AuthedTaxRoute,
   AuthedTradesRoute: AuthedTradesRoute,
+  AuthedPlaybookReviewIdRoute: AuthedPlaybookReviewIdRoute,
+  AuthedPlaybookIndexRoute: AuthedPlaybookIndexRoute,
 }
 
 const AuthedRouteWithChildren =
@@ -375,6 +437,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthedRoute: AuthedRouteWithChildren,
   SigninRoute: SigninRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiCandlesSecretRoute: ApiCandlesSecretRoute,
   ApiTvSecretRoute: ApiTvSecretRoute,
 }
 export const routeTree = rootRouteImport

@@ -72,7 +72,8 @@ export function stripQuery<E extends { url: string }>(event: E): E {
  * `TRADINGVIEW_WEBHOOK_SECRET` is unset — which includes the browser.
  */
 export function redactTvSecret(value: string): string {
-  return value.replace(/\/api\/tv\/[^/?#\s]+/g, '/api/tv/[redacted]')
+  // `/api/candles/<secret>` is the playbook's candle feed, on the same secret.
+  return value.replace(/\/api\/(tv|candles)\/[^/?#\s]+/g, '/api/$1/[redacted]')
 }
 
 /** Query gone, webhook secret redacted — the two rules, applied to one string. */

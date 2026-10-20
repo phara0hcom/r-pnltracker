@@ -1,0 +1,116 @@
+@use '../../styles/mixins' as m;
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: pan-y;
+}
+
+.grid {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+}
+
+.axis {
+  font-size: 10px;
+  fill: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}
+
+.up {
+  line {
+    stroke: var(--chart-profit);
+  }
+
+  rect {
+    fill: var(--chart-profit);
+  }
+}
+
+.down {
+  line {
+    stroke: var(--chart-loss);
+  }
+
+  rect {
+    fill: var(--chart-loss);
+  }
+}
+
+/* Under the candles' own colours, so a heavy bar does not read as a signal. */
+.up .volume,
+.down .volume {
+  fill: var(--color-neutral);
+  opacity: 0.45;
+}
+
+.stop,
+.target,
+.entry {
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.stop {
+  stroke: var(--chart-loss);
+}
+
+.target {
+  stroke: var(--chart-profit);
+}
+
+.entry {
+  stroke: var(--chart-1);
+}
+
+.levelLabel {
+  font-size: 10px;
+  fill: var(--color-text-muted);
+}
+
+.markerEntry {
+  fill: var(--chart-1);
+  stroke: var(--chart-1);
+}
+
+.markerExit {
+  fill: var(--chart-4);
+  stroke: var(--chart-4);
+}
+
+/* A fill whose day is known but not its bar — see `placeFill`. */
+.spanEntry {
+  fill: var(--color-accent-dim);
+}
+
+.spanExit {
+  fill: var(--color-warn-dim);
+}
+
+.cursor {
+  stroke: var(--color-border-strong);
+  stroke-width: 1;
+}
+
+.hit {
+  fill: transparent;
+}
