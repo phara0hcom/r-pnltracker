@@ -92,9 +92,7 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/server/engine.ts` | `engineFor` — trades + engine, kept out of client-reachable modules |
 | `src/lib/exit/rules.ts` | swing-trade exit framework — stops, targets, trail, recommendation |
 | `src/lib/exit/calendar.ts` | JP/US trading-day calendars, derived from the statutory rules |
-| `src/routes/api/tv/$secret.ts` | TradingView exit-rules webhook — unauthenticated, path secret |
-| `src/routes/api/candles/$secret.ts` | TradingView candle webhook for the playbook — same secret, stores OHLC only |
-| `src/lib/playbook/score.ts` | playbook review figures and the 1–10 overall score — see `docs/playbook.md` |
+| `src/routes/api/tv/$secret.ts` | TradingView webhook — the only unauthenticated route |
 | `src/server/middleware.ts` | `authed` (composes `sameOrigin`) — supplies typed `context.userId` |
 | `src/start.ts` | global request/function middleware — **holds CSRF**, plus tracing and the slow-call alarm |
 | `src/lib/observability/scrub.ts` | the single gate for everything reported to Sentry — pure, unit-tested |
@@ -169,11 +167,6 @@ derivation and sources.
   stored bars rather than mutated — a poisoned high-water mark on a one-way ratchet is
   uncorrectable. Trading-day maths compares exchange-local dates on both sides. See
   `docs/exit-rules.md`.
-- **A playbook review's score is never stored.** It is recomputed from the legs'
-  ratings, the risk and the result on every read, and a REAL review's result is
-  the engine's realized P&L over its linked sells — never typed in. Every leg of
-  a REAL review is one of its pool's trades; paper reviews stay out of every
-  figure outside the playbook. Captured charts are frozen copies of the candles.
 - **`exit_action_state` is a comparison memo, not framework state.** It holds only the
   action kind a plan was last evaluated at, so a push notification can fire on a real
   change. Nothing in `assess()`'s input path may ever read it — that is what keeps it

@@ -26,7 +26,6 @@ import {
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core'
-import type { Candle } from '../lib/playbook/types'
 
 // ── Enums ───────────────────────────────────────────────────────────────────
 export const accountTypeEnum = pgEnum('account_type', [
@@ -71,12 +70,6 @@ export const exitActionKindEnum = pgEnum('exit_action_kind', [
   'POSITION_CLOSED',
   'PLAN_SUPERSEDED',
 ])
-
-/** A playbook review of trades actually made, or of a paper trade that only exists here. */
-export const reviewKindEnum = pgEnum('review_kind', ['REAL', 'PAPER'])
-export const reviewLegKindEnum = pgEnum('review_leg_kind', ['ENTRY', 'EXIT'])
-/** Where a stored candle came from — see `lib/playbook/candles.ts`. */
-export const candleSourceEnum = pgEnum('candle_source', ['TRADINGVIEW', 'YAHOO'])
 
 /** Monetary/quantity precision: 24 digits total, 8 decimal places. */
 const money = (name: string) => numeric(name, { precision: 24, scale: 8 })
@@ -718,173 +711,6 @@ export const exitActionState = pgTable('exit_action_state', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
 
-// ── Playbook ────────────────────────────────────────────────────────────────
-
-/**
- * Candles pushed by the playbook alert, any timeframe.
- *
- * Unscoped by user for the same reason `exit_feed_bars` is: an OHLC bar is
- * market data, and the webhook carries a shared secret rather than a session.
- * Unlike that table it is keyed by TradingView's own ticker rather than an
- * instrument, because a paper trade can be in something never bought — the
- * secret is what keeps a stranger from filling it, and each delivery is capped.
- *
- * Every delivery resends the last few dozen bars, so a missed alert heals on
- * the next one and the primary key turns the overlap into an update.
- */
-export const candleBars = pgTable(
-  'candle_bars',
-  {
-    /** `syminfo.ticker` — `7203`, `AAPL`, `BRK.B`. No exchange prefix. */
-    ticker: varchar('ticker', { length: 64 }).notNull(),
-    /** Canonical form from `normalizeInterval` — `5m`, `1h`, `1D`, `1W`. */
-    interval: varchar('interval', { length: 8 }).notNull(),
-    /** Bar *open*, as TradingView and Yahoo both report it. */
-    barTime: timestamp('bar_time', { withTimezone: true }).notNull(),
-    exchange: varchar('exchange', { length: 32 }),
-    open: money('open').notNull(),
-    high: money('high').notNull(),
-    low: money('low').notNull(),
-    close: money('close').notNull(),
-    volume: money('volume'),
-    receivedAt: timestamp('received_at').notNull().defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.ticker, table.interval, table.barTime] })],
-)
-
-/** A type of play — the setup a trade was taken on. */
-export const playbooks = pgTable(
-  'playbooks',
-  {
-    id: text('id').primaryKey(),
-    userId: text('user_id')
-      .notNull()
-      .references(() => user.id, { onDelete: 'cascade' }),
-    name: varchar('name', { length: 80 }).notNull(),
-    description: text('description').notNull().default(''),
-    /** What has to be true to take the trade; a review ticks off the ones that were. */
-    criteria: jsonb('criteria').$type<string[]>().notNull().default([]),
-    archivedAt: timestamp('archived_at'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [uniqueIndex('playbooks_user_name_uq').on(table.userId, table.name)],
-)
-
-/**
- * One trade looked back on: which play it was, how it was entered and left,
- * and how much was risked doing it.
- *
- * A REAL review links imported trades through its legs, and its P&L is the
- * engine's — never retyped. A PAPER review carries its own legs and is kept
- * out of every figure outside this screen.
- *
- * The overall score is not stored. It is computed from the legs' ratings, the
- * risk taken and the result on every read (`lib/playbook/score.ts`), so editing
- * a trade or re-rating an entry can never leave a stale number behind.
- */
-export const tradeReviews = pgTable(
-  'trade_reviews',
-  {
-    id: text('id').primaryKey(),
-    userId: text('user_id')
-      .notNull()
-      .references(() => user.id, { onDelete: 'cascade' }),
-    playbookId: text('playbook_id').references(() => playbooks.id, { onDelete: 'set null' }),
-    kind: reviewKindEnum('kind').notNull(),
-    symbol: varchar('symbol', { length: 128 }).notNull(),
-    name: text('name').notNull().default(''),
-    assetClass: assetClassEnum('asset_class').notNull(),
-    currency: currencyEnum('currency').notNull(),
-    /** The pool a REAL review's trades come from; null on paper. */
-    accountType: accountTypeEnum('account_type'),
-    /** Initial stop — what one R is measured from. */
-    stopPrice: money('stop_price'),
-    targetPrice: money('target_price'),
-    /** Account size when the trade was opened, in the trade's currency. */
-    accountEquity: money('account_equity'),
-    /** 1–10, set by hand over the computed one when the numbers miss something. */
-    riskRatingOverride: smallint('risk_rating_override'),
-    /** Playbook criteria that held at entry — a subset of `playbooks.criteria`. */
-    criteriaMet: jsonb('criteria_met').$type<string[]>().notNull().default([]),
-    mistakes: jsonb('mistakes').$type<string[]>().notNull().default([]),
-    lessons: text('lessons').notNull().default(''),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [index('trade_reviews_user_idx').on(table.userId, table.playbookId)],
-)
-
-/**
- * One entry or exit of a review — a scale-in or a partial is its own leg.
- *
- * A linked leg's date, price and size are read from its trade on every load;
- * the copies here are what a paper leg *is*, and what a linked one falls back
- * to if its trade is deleted.
- */
-export const reviewLegs = pgTable(
-  'review_legs',
-  {
-    id: text('id').primaryKey(),
-    reviewId: text('review_id')
-      .notNull()
-      .references(() => tradeReviews.id, { onDelete: 'cascade' }),
-    userId: text('user_id')
-      .notNull()
-      .references(() => user.id, { onDelete: 'cascade' }),
-    kind: reviewLegKindEnum('kind').notNull(),
-    tradeId: text('trade_id').references(() => trades.id, { onDelete: 'set null' }),
-    date: date('date').notNull(),
-    /**
-     * HH:MM, exchange-local. No export carries an execution time, so this is
-     * the only way an intraday chart can mark the fill rather than the day.
-     */
-    time: varchar('time', { length: 5 }),
-    price: money('price').notNull(),
-    quantity: money('quantity').notNull(),
-    fee: money('fee').notNull().default('0'),
-    /** 1–10: the quality of the setup at this entry or exit, not its result. */
-    rating: smallint('rating'),
-    explanation: text('explanation').notNull().default(''),
-    position: integer('position').notNull().default(0),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-  },
-  (table) => [
-    index('review_legs_review_idx').on(table.reviewId),
-    // A trade belongs to one review, or the playbook statistics count it twice.
-    uniqueIndex('review_legs_trade_uq')
-      .on(table.userId, table.tradeId)
-      .where(sql`trade_id is not null`),
-  ],
-)
-
-/**
- * The candles around one leg, on one timeframe, frozen when captured.
- *
- * A copy rather than a query over `candle_bars`: Yahoo drops intraday history
- * after weeks, and a review should keep showing the chart that was judged.
- * "Refresh" recaptures it deliberately.
- */
-export const reviewCharts = pgTable(
-  'review_charts',
-  {
-    id: text('id').primaryKey(),
-    legId: text('leg_id')
-      .notNull()
-      .references(() => reviewLegs.id, { onDelete: 'cascade' }),
-    userId: text('user_id')
-      .notNull()
-      .references(() => user.id, { onDelete: 'cascade' }),
-    interval: varchar('interval', { length: 8 }).notNull(),
-    source: candleSourceEnum('source').notNull(),
-    /** `Candle[]` from `lib/playbook/types.ts`, oldest first. */
-    bars: jsonb('bars').$type<Candle[]>().notNull(),
-    capturedAt: timestamp('captured_at').notNull().defaultNow(),
-  },
-  // One chart per timeframe per leg: capturing it again is a refresh.
-  (table) => [uniqueIndex('review_charts_leg_interval_uq').on(table.legId, table.interval)],
-)
-
 // ── Relations ───────────────────────────────────────────────────────────────
 
 export const userRelations = relations(user, ({ many }) => ({
@@ -937,8 +763,3 @@ export type DbExitFeedDelivery = typeof exitFeedDeliveries.$inferSelect
 export type DbExitSettings = typeof exitSettings.$inferSelect
 export type DbPushSubscription = typeof pushSubscriptions.$inferSelect
 export type DbExitActionState = typeof exitActionState.$inferSelect
-export type DbCandleBar = typeof candleBars.$inferSelect
-export type DbPlaybook = typeof playbooks.$inferSelect
-export type DbTradeReview = typeof tradeReviews.$inferSelect
-export type DbReviewLeg = typeof reviewLegs.$inferSelect
-export type DbReviewChart = typeof reviewCharts.$inferSelect
