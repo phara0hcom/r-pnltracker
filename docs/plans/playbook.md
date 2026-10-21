@@ -293,6 +293,10 @@ recomputed on every read.
 
 ## Execution time on import
 
+This is a change to the **existing CSV import flow** on the Import screen, the one used today for
+the Rakuten trade-history exports. It is not a new or separate import. It does not depend on the
+Playbook, so it can ship first, as its own small PR.
+
 - **Import preview** (`src/routes/_authed/import.tsx`, `previewImport` / `commitImport` in
   `src/db/import.service.ts`):
   - Add an optional **Time (JST)** input per new trade, hidden for funds.
