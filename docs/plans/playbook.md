@@ -35,7 +35,7 @@ fed by the TradingView daily feed at `/api/tv/$secret`. This plan:
 | Image hosting | **Vercel Blob, private store.**<br>- The app already deploys to Vercel Hobby; Blob is free within Hobby limits.<br>- Private means images are only served through the app after sign-in.<br>- Expected volume is about 4 images per trade at 150–300 KB each, a few hundred MB a year.<br>- Going over the Hobby limit cuts Blob off for 30 days rather than billing. Cloudflare R2 (10 GB free, free egress) is the fallback if that ever matters. |
 | Opening a position | **Both ways:**<br>- from an existing holding that is not yet in the Playbook;<br>- from scratch, at buy time, before the CSV export exists. The real trades are linked when they are imported later. |
 | Exit Rules page | **Removed.** Its plan editing, recommendation and settings move into the Playbook and Settings. |
-| Execution time | **Optional, in JST, per trade, entered during import.**<br>- Not asked for funds (`assetClass === 'FUND'`, 投資信託).<br>- Confirm with the owner whether exchange-listed ETFs such as 1306 (stored as `JP_EQUITY`) should also skip it; default is to *ask* for them. |
+| Execution time | **Optional, in JST, per trade, entered during import.**<br>- Not asked for funds (`assetClass === 'FUND'`, 投資信託).<br>- Exchange-listed ETFs bought as stock (e.g. 1306, stored as `JP_EQUITY` or `US_EQUITY`) **do** get a time, like any stock. The rule is `assetClass !== 'FUND'`, not anything ETF-specific. |
 | Ratings | 1–10 for each entry and each exit (setup quality, not outcome).<br>- A computed 1–10 risk rating with a manual override.<br>- A computed 1–10 overall score. |
 
 ## Step 0 — mock design before any app code
@@ -299,7 +299,7 @@ Playbook, so it can ship first, as its own small PR.
 
 - **Import preview** (`src/routes/_authed/import.tsx`, `previewImport` / `commitImport` in
   `src/db/import.service.ts`):
-  - Add an optional **Time (JST)** input per new trade, hidden for funds.
+  - Add an optional **Time (JST)** input per new trade. It is hidden only for funds (`assetClass === 'FUND'`); stocks and exchange-listed ETFs get it.
   - Default the date part to the trade date, with a "+1 day" toggle for US fills that crossed
     midnight JST.
   - `commitImport` accepts a `sourceRowHash → executedAt` map.
