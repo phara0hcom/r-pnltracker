@@ -200,10 +200,12 @@ Best 5                                       Worst 5
 - **Lightbox:** clicking an image opens it at full size.
   - Arrow keys or a swipe (`useSwipe`) move between that trade's images.
   - Escape or Back closes it (`useDialogHistory`).
+  - It is a layer on the page that opened it, not a page of its own, so closing it returns to that page: the position page, or the setup page when opened from a setup's thumbnails.
 
 ### 4. `/playbook/$journalId` — one position
 
 - **Header:** symbol, account, setup, status, Edit and Archive/Delete.
+  - **The back link is fixed.** “← Playbook” always goes to `/playbook`, whichever page opened the position (the list, a setup's best and worst, the calendar). It does not remember where you came from, and the URL carries no `from` value. The browser's Back button is the way to return to the previous page.
   - **Edit position** changes the setup. On a linked real position, symbol, account and each leg's date, price and quantity are read-only, because they come from the trades. Only a leg's time can be set, and it writes through to that leg's fills that have no time yet. A position awaiting import, and a paper position, edit their typed legs here.
   - **Archive** sets `archivedAt` and archives the live exit plan with it. The trades stay in Trades.
   - **Edit plan** changes the exit plan only (support, stop multiple, targets, trail), through the typo-correction path.
