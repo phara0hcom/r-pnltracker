@@ -168,12 +168,13 @@ AAPL Apple  Breakout         Closed           09/12   09/30   +$412 (¥61,020)  
 
 ### 2. `/playbook/setups` — the setups, and how each performs
 
-- **Contents:** one card per setup that has at least one position.
+- **Contents:** one card per active setup, including one that has no positions yet.
   - Name and description.
   - Stats: closed trades, win rate, average R, average overall score. Average R covers only
     positions that have a stop, and shows its own count.
   - Real and paper are shown separately. Past trades count as real.
 - **Actions:** create, edit and archive setups.
+  - A setup has only a name, description and criteria (see *Data model*). Real and paper are a property of the position, never of the setup, so a setup that is used both ways shows two cards.
 
 ### 3. `/playbook/setups/$setupId` — one setup's best and worst trades
 
@@ -203,6 +204,9 @@ Best 5                                       Worst 5
 ### 4. `/playbook/$journalId` — one position
 
 - **Header:** symbol, account, setup, status, Edit and Archive/Delete.
+  - **Edit position** changes the setup. On a linked real position, symbol, account and each leg's date, price and quantity are read-only, because they come from the trades. Only a leg's time can be set, and it writes through to that leg's fills that have no time yet. A position awaiting import, and a paper position, edit their typed legs here.
+  - **Archive** sets `archivedAt` and archives the live exit plan with it. The trades stay in Trades.
+  - **Edit plan** changes the exit plan only (support, stop multiple, targets, trail), through the typo-correction path.
 - **Exit plan panel:**
   - **Live plan** — a real position with an `exit_rules` row. Moved from the old Exit Rules card:
     - entry, support, initial stop, R, Target 1 (auto or manual), extra targets, trail method and
@@ -387,6 +391,8 @@ tests see the new tables.
 
 ## Linking a position awaiting import
 
+- **The owner links, the import never does.** The import result only reports that matching trades were found. Linking happens from "Trades found — link" on the Playbook.
+- **The owner picks a streak, not trades.** The dialog lists the candidate streaks with their fills, one selectable. Membership is derived from the streak, so individual trades are never ticked.
 - **Candidates:** streaks of the same pool whose first opening trade is dated on or after
   `entryDate − 1`, and that no other position resolves to. The −1 is there because Rakuten dates a
   US fill by its US day before settlement and by the JST day after (`CLAUDE.md`, *Import pipeline*).
