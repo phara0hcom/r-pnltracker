@@ -195,6 +195,16 @@
   color: var(--color-text-muted);
 }
 
+.orderConflict {
+  color: var(--color-warn);
+}
+
+.orderNote {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 .orderButton {
   flex: none;
   height: 30px;

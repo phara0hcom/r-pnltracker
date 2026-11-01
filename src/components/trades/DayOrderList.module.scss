@@ -110,6 +110,16 @@
   border-radius: var(--radius-sm);
 }
 
+/* Its own line under the row, from the symbol column on. */
+.extra {
+  grid-column: 2 / -1;
+  min-width: 0;
+
+  &:empty {
+    display: none;
+  }
+}
+
 .moves {
   display: flex;
   gap: var(--space-1);

@@ -150,6 +150,12 @@ derivation and sources.
   of units than before is refused before writing. Rakuten itself counts a day's
   buys first (SOXL and 5713 in September 2026 both show it), so a hand-set order
   moves a day's figures away from the broker's.
+- **`trades.executed_at` is an optional instant the owner types in JST** on the
+  import preview or the Trades edit row (`lib/import/executionTime.ts`) — never
+  for funds. It only *suggests* a day's order: the order is still confirmed by
+  hand and stored in `day_sequence`, which the engine alone reads. It survives
+  restatement and settlement because those updates name their columns; a day
+  regrouped at settlement carries it over only when every replaced fill shared it.
 - **A US close is shown in dollars as Rakuten shows it**: the sale (約定代金) less
   the cost of those shares *including* buy commission, sell commission not taken
   off (`lib/pnl/usdResult.ts`) — all nine September 2026 US closes match to the

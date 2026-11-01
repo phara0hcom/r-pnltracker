@@ -9,8 +9,15 @@
 import { useMutation } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { ACCOUNT_LABEL } from './accountLabel'
+import { ExecutionTimeInput } from './ExecutionTimeInput'
 import styles from './TradesTable.module.scss'
 import { cx } from '~/lib/cx'
+import {
+  resolveExecutedAt,
+  timedMarket,
+  toTimeInput,
+  type TimeInput,
+} from '~/lib/import/executionTime'
 import { saveTrade, type TradeRow } from '~/server/trades'
 
 /** The editable form fields. Strings throughout — never `number`, to keep precision. */
@@ -49,6 +56,11 @@ export function TradeEditRow({
     fxRate: row.fxRate,
     memo: row.memo ?? '',
   })
+  const [initial] = useState<Draft>(draft)
+  const market = timedMarket(row.assetClass)
+  const [time, setTime] = useState<TimeInput>(() =>
+    toTimeInput(row.tradeDate, row.executedAt ? new Date(row.executedAt) : null),
+  )
   const [errors, setErrors] = useState<Record<string, string>>({})
   const firstField = useRef<HTMLInputElement>(null)
 
@@ -59,11 +71,15 @@ export function TradeEditRow({
   }, [])
 
   const save = useMutation({
-    mutationFn: () =>
-      saveTrade({
+    mutationFn: () => {
+      // Read against the date being saved, so moving the date keeps the time.
+      const at = market ? (resolveExecutedAt(draft.tradeDate, time)?.toISOString() ?? null) : null
+      const changed = (Object.keys(draft) as (keyof Draft)[]).some((key) => draft[key] !== initial[key])
+      return saveTrade({
         data: {
           id: row.id,
-          patch: {
+          executedAt: market && at !== row.executedAt ? at : undefined,
+          patch: changed ? {
             symbol: draft.symbol,
             name: row.name,
             assetClass: row.assetClass,
@@ -77,9 +93,10 @@ export function TradeEditRow({
             feeTax: draft.feeTax || undefined,
             fxRate: row.currency === 'USD' ? draft.fxRate : undefined,
             memo: draft.memo || undefined,
-          },
+          } : undefined,
         },
-      }),
+      })
+    },
     onSuccess: (result) => {
       if (result.ok) {
         setErrors({})
@@ -255,6 +272,19 @@ export function TradeEditRow({
                 placeholder="Rationale, thesis, mistake…"
               />
             </label>
+
+            {market ? (
+              <span className={styles.memoField}>
+                <span className={styles.memoLabel}>Time</span>
+                <ExecutionTimeInput
+                  tradeDate={draft.tradeDate}
+                  market={market}
+                  value={time}
+                  label={`${row.side} ${row.symbol}`}
+                  onChange={setTime}
+                />
+              </span>
+            ) : null}
 
             {row.assetClass === 'FUND' ? (
               <span className={styles.note}>

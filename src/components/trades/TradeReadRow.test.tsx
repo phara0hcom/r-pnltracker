@@ -40,6 +40,7 @@ const soxlSell: TradeRow = {
   origin: 'IMPORT',
   isEdited: false,
   memo: null,
+  executedAt: null,
 }
 
 function renderRow(row: TradeRow) {

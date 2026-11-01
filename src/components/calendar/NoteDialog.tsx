@@ -37,6 +37,7 @@ import { useDialogHistory } from '~/components/ui/useDialogHistory'
 import { useIsMobile } from '~/components/ui/useIsMobile'
 import { cx } from '~/lib/cx'
 import type { AccountFilter } from '~/lib/domain/types'
+import { formatJstTime, orderByTime } from '~/lib/import/executionTime'
 import type { CalendarDay } from '~/server/screens'
 import { reorderDay } from '~/server/trades'
 
@@ -49,15 +50,37 @@ export interface NotePayload {
   tags?: string[]
 }
 
+type OrderItem = DayOrderItem & { executedAt: Date | null }
+
 /** A calendar trade as the reorder list shows it. Fund prices are per 10,000 口. */
-const orderItem = (trade: CalendarDay['trades'][number]): DayOrderItem => ({
+const orderItem = (trade: CalendarDay['trades'][number]): OrderItem => ({
   id: trade.id,
   symbol: trade.symbol,
   accountType: trade.accountType,
   side: trade.side,
   quantity: trade.quantity,
   price: unitPrice(trade.unitPrice, trade.currency, trade.assetClass),
+  executedAt: trade.executedAt ? new Date(trade.executedAt) : null,
 })
+
+/**
+ * Where "Set order" starts: the stored order if there is one, otherwise time
+ * order for every pool whose trades all have a time. Still only a starting
+ * point — nothing is written until Save order.
+ */
+function startingOrder(day: CalendarDay): OrderItem[] {
+  const items = day.trades.map(orderItem)
+  if (day.ordered) return items
+  return (
+    orderByTime(
+      items,
+      (item) => `${item.symbol}\0${item.accountType}`,
+      (item) => item.executedAt,
+    ) ?? items
+  )
+}
+
+const timeLine = (item: OrderItem) => (item.executedAt ? `${formatJstTime(item.executedAt)} JST` : null)
 
 const plural = (count: number, word: string) => `${String(count)} ${word}${count === 1 ? '' : 's'}`
 
@@ -128,7 +151,7 @@ export function NoteDialog({
   const [tagDraft, setTagDraft] = useState('')
 
   /** The order being edited, or null when the list is showing normally. */
-  const [ordering, setOrdering] = useState<DayOrderItem[] | null>(null)
+  const [ordering, setOrdering] = useState<OrderItem[] | null>(null)
   const [orderError, setOrderError] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const saveOrder = useMutation({
@@ -164,9 +187,11 @@ export function NoteDialog({
 
   const orderHint = ordering
     ? 'First trade of the day at the top'
-    : day.ordered
-      ? 'In the order you set'
-      : 'Grouped by instrument — exports carry no execution time'
+    : day.orderContradictsTimes
+      ? 'The order you set disagrees with the execution times'
+      : day.ordered
+        ? 'In the order you set'
+        : 'Grouped by instrument — exports carry no execution time'
 
   const trades =
     day.trades.length === 0 ? null : (
@@ -176,14 +201,18 @@ export function NoteDialog({
             <h3 id="day-trades" className={styles.sectionTitle}>
               Trades
             </h3>
-            <span className={styles.sectionHint}>{orderHint}</span>
+            <span
+              className={cx(styles.sectionHint, !ordering && day.orderContradictsTimes && styles.orderConflict)}
+            >
+              {orderHint}
+            </span>
           </div>
           {ordering || day.trades.length < 2 ? null : (
             <button
               type="button"
               className={styles.orderButton}
               onClick={() => {
-                setOrdering(day.trades.map(orderItem))
+                setOrdering(startingOrder(day))
               }}
             >
               Set order
@@ -198,7 +227,14 @@ export function NoteDialog({
               onChange={setOrdering}
               label={`Order of trades on ${weekdayDayMonth(day.date)}`}
               showAccount={showAccount}
+              extra={timeLine}
             />
+            {!day.ordered && day.trades.some((trade) => trade.executedAt) ? (
+              <p className={styles.orderNote}>
+                Stocks whose trades all have a time start in time order. Saving moves the
+                day&apos;s figures away from Rakuten&apos;s, which counts a day&apos;s buys first.
+              </p>
+            ) : null}
             <div className={styles.orderActions}>
               <button
                 type="button"

@@ -2,10 +2,19 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import styles from './import.module.scss'
+import { qty } from '~/components/format'
 import { PageHeader, Section, Table } from '~/components/screen'
 import { DayOrderList } from '~/components/trades/DayOrderList'
+import { ExecutionTimeInput } from '~/components/trades/ExecutionTimeInput'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
+import {
+  EMPTY_TIME,
+  orderByTime,
+  resolveExecutedAt,
+  toTimeInput,
+  type TimeInput,
+} from '~/lib/import/executionTime'
 import { reportError } from '~/lib/observability/report'
 import {
   commitFiles,
@@ -49,6 +58,33 @@ interface Staged {
 
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`
 
+const poolOf = (trade: PreviewOrderTrade) => `${trade.symbol}\0${trade.accountType}`
+const describe = (trade: PreviewOrderTrade) => `${trade.side} ${qty(trade.quantity)} ${trade.symbol}`
+
+/** The times a preview starts with: whatever is already stored. */
+function storedTimes(preview: PreviewResult): Record<string, TimeInput> {
+  const out: Record<string, TimeInput> = {}
+  for (const trade of [...preview.days.flatMap((day) => day.trades), ...preview.trades]) {
+    if (trade.market) out[trade.id] = toTimeInput(trade.tradeDate, trade.executedAt ? new Date(trade.executedAt) : null)
+  }
+  return out
+}
+
+/** Only the times changed in the preview, as ISO instants — null where one was cleared. */
+function changedTimes(
+  preview: PreviewResult,
+  times: Record<string, TimeInput>,
+): Record<string, string | null> {
+  const out: Record<string, string | null> = {}
+  for (const trade of [...preview.days.flatMap((day) => day.trades), ...preview.trades]) {
+    const entry = times[trade.id]
+    if (!trade.market || !entry) continue
+    const at = resolveExecutedAt(trade.tradeDate, entry)?.toISOString() ?? null
+    if (at !== trade.executedAt) out[trade.id] = at
+  }
+  return out
+}
+
 function Import() {
   const queryClient = useQueryClient()
   /** Chosen but not yet sent. Nothing leaves the browser until Upload is clicked. */
@@ -61,6 +97,8 @@ function Import() {
    * a day left alone keeps the engine's default rather than being frozen in it.
    */
   const [dayOrders, setDayOrders] = useState<Record<string, PreviewOrderTrade[]>>({})
+  /** Execution times as typed, keyed by row id. Only changed ones are sent. */
+  const [times, setTimes] = useState<Record<string, TimeInput>>({})
   const [dragging, setDragging] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
 
@@ -69,6 +107,7 @@ function Import() {
     onSuccess: (result) => {
       setPreview(result)
       setDayOrders({})
+      setTimes(storedTimes(result))
       setResult(null)
       setFailure(null)
     },
@@ -91,6 +130,7 @@ function Import() {
             date,
             ids: trades.map((trade) => trade.id),
           })),
+          executedAt: preview ? changedTimes(preview, times) : {},
         },
       }),
     onSuccess: (result) => {
@@ -151,6 +191,21 @@ function Import() {
   // settlement re-dates fills it already holds and corrects their FX.
   const totalChanges = totalNew + totalRestated
   const busy = doPreview.isPending || doCommit.isPending
+
+  const timeOf = (trade: PreviewOrderTrade) =>
+    resolveExecutedAt(trade.tradeDate, times[trade.id] ?? EMPTY_TIME)
+  const timeInput = (trade: PreviewOrderTrade) =>
+    trade.market ? (
+      <ExecutionTimeInput
+        tradeDate={trade.tradeDate}
+        market={trade.market}
+        value={times[trade.id] ?? EMPTY_TIME}
+        label={describe(trade)}
+        onChange={(next) => {
+          setTimes((prev) => ({ ...prev, [trade.id]: next }))
+        }}
+      />
+    ) : null
 
   return (
     <>
@@ -329,34 +384,83 @@ function Import() {
                 Rakuten exports carry no execution time, so trades on the same day are taken buys
                 first. Where a sale came between two buys that changes the average it is measured
                 against. Move each day into the order it happened — first trade at the top — or
-                leave it as it is.
+                leave it as it is. Once every trade of a stock that day has a time, its rows start
+                in time order.
               </p>
-              {preview.days.map((day) => (
-                <div key={day.date} className={styles.dayOrder}>
-                  <h4 className={styles.dayOrderDate}>
-                    {day.date}
-                    {dayOrders[day.date] ? (
-                      <button
-                        type="button"
-                        className={styles.secondary}
-                        onClick={() => {
-                          setDayOrders(({ [day.date]: _reset, ...rest }) => rest)
-                        }}
-                      >
-                        Reset
-                      </button>
+              {preview.days.map((day) => {
+                const chosen = dayOrders[day.date]
+                const byTime = chosen ? null : orderByTime(day.trades, poolOf, timeOf)
+                const suggested =
+                  byTime?.some((trade, index) => trade.id !== day.trades[index]?.id) ? byTime : null
+                return (
+                  <div key={day.date} className={styles.dayOrder}>
+                    <h4 className={styles.dayOrderDate}>
+                      {day.date}
+                      {chosen ? (
+                        <button
+                          type="button"
+                          className={styles.secondary}
+                          onClick={() => {
+                            setDayOrders(({ [day.date]: _reset, ...rest }) => rest)
+                          }}
+                        >
+                          Reset
+                        </button>
+                      ) : null}
+                      {suggested ? (
+                        <button
+                          type="button"
+                          className={styles.secondary}
+                          onClick={() => {
+                            setDayOrders((prev) => ({ ...prev, [day.date]: suggested }))
+                          }}
+                        >
+                          Confirm order
+                        </button>
+                      ) : null}
+                    </h4>
+                    {suggested ? (
+                      <p className={styles.timeHint}>
+                        In time order, not yet applied. Confirming moves this day&apos;s figures
+                        away from Rakuten&apos;s, which counts a day&apos;s buys first.
+                      </p>
                     ) : null}
-                  </h4>
-                  <DayOrderList
-                    items={dayOrders[day.date] ?? day.trades}
-                    label={`Order of trades on ${day.date}`}
-                    onChange={(next) => {
-                      setDayOrders((prev) => ({ ...prev, [day.date]: next }))
-                    }}
-                  />
-                </div>
-              ))}
+                    <DayOrderList
+                      items={chosen ?? suggested ?? day.trades}
+                      label={`Order of trades on ${day.date}`}
+                      extra={timeInput}
+                      onChange={(next) => {
+                        setDayOrders((prev) => ({ ...prev, [day.date]: next }))
+                      }}
+                    />
+                  </div>
+                )
+              })}
             </div>
+          ) : null}
+
+          {preview.trades.length > 0 ? (
+            <details className={styles.times}>
+              <summary className={styles.timesSummary}>
+                Execution times (optional) · {preview.trades.length} trade
+                {preview.trades.length === 1 ? '' : 's'}
+              </summary>
+              <p className={styles.dropHint}>
+                In JST, as the order screen showed it. A US fill after midnight JST may need +1
+                day — check it against the New York time beside it.
+              </p>
+              <ul className={styles.timesList}>
+                {preview.trades.map((trade) => (
+                  <li key={trade.id} className={styles.timesRow}>
+                    <span className={styles.timesDate}>{trade.tradeDate}</span>
+                    <span className={styles.timesWhat}>
+                      {trade.side} {trade.symbol} {qty(trade.quantity)} @ {trade.price}
+                    </span>
+                    {timeInput(trade)}
+                  </li>
+                ))}
+              </ul>
+            </details>
           ) : null}
 
           <div className={styles.actions}>

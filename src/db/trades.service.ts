@@ -26,6 +26,8 @@ export interface TradeRecord {
   memo: string | null
   /** 1–5, recorded per trade rather than per day. */
   motivation: number | null
+  /** When it filled, if the owner entered it. See `trades.executedAt`. */
+  executedAt: Date | null
 }
 
 /** Every live trade, chronologically — the engine's input. */
@@ -48,6 +50,7 @@ export async function listTrades(userId: string): Promise<TradeRecord[]> {
     isEdited: row.trade.isEdited,
     memo: row.trade.memo,
     motivation: row.trade.motivation,
+    executedAt: row.trade.executedAt,
   }))
 }
 
@@ -120,6 +123,7 @@ export async function createManualTrade(
     isEdited: false,
     memo: row.memo,
     motivation: row.motivation,
+    executedAt: row.executedAt,
   }
 }
 
@@ -188,6 +192,7 @@ export async function updateTrade(
     isEdited: true,
     memo: saved.memo,
     motivation: saved.motivation,
+    executedAt: saved.executedAt,
   }
 }
 
@@ -210,6 +215,7 @@ export async function getTrade(userId: string, tradeId: string): Promise<TradeRe
     isEdited: row.trade.isEdited,
     memo: row.trade.memo,
     motivation: row.trade.motivation,
+    executedAt: row.trade.executedAt,
   }
 }
 
@@ -254,6 +260,28 @@ export async function setTradeJournal(
       updatedAt: new Date(),
     })
     .where(and(eq(trades.userId, userId), eq(trades.id, tradeId)))
+}
+
+/**
+ * Set or clear execution times, keyed by row id.
+ *
+ * Separate from `updateTrade` for the reason `setTradeJournal` is: a time is
+ * the owner's record of when, not a correction of Rakuten's figures, so it
+ * never marks a row `isEdited`. An id that is not this user's matches nothing.
+ */
+export async function setExecutionTimes(
+  userId: string,
+  times: ReadonlyMap<string, Date | null>,
+): Promise<void> {
+  if (times.size === 0) return
+  await db.transaction(async (tx) => {
+    for (const [id, executedAt] of times) {
+      await tx
+        .update(trades)
+        .set({ executedAt, updatedAt: new Date() })
+        .where(and(eq(trades.userId, userId), eq(trades.id, id)))
+    }
+  })
 }
 
 export type DayOrderResult = { ok: true } | { ok: false; message: string }

@@ -31,6 +31,7 @@ import {
   type NormalizedTrade,
   type TradeSide,
 } from '~/lib/domain/types'
+import { orderContradictsTimes } from '~/lib/import/executionTime'
 import { todayLocal } from '~/lib/localDate'
 import { positionsInput } from '~/lib/marketScope'
 import { monthWeeks } from '~/lib/monthGrid'
@@ -801,6 +802,8 @@ export interface CalendarTrade {
   motivation: number | null
   /** Its place in the day's hand-set order, or null while the day has none. */
   daySequence: number | null
+  /** ISO instant the owner entered, or null — see `lib/import/executionTime.ts`. */
+  executedAt: string | null
 }
 
 export interface CalendarDay {
@@ -822,6 +825,8 @@ export interface CalendarDay {
   receivedJpy: string
   /** True when every trade shown is in an order set by hand, and listed in it. */
   ordered: boolean
+  /** A hand-set order puts a later execution time before an earlier one. */
+  orderContradictsTimes: boolean
   trades: CalendarTrade[]
   note: {
     title: string
@@ -929,6 +934,7 @@ export const getCalendar = createServerFn({ method: 'GET' })
         memo: record.memo,
         motivation: record.motivation,
         daySequence: trade.daySequence ?? null,
+        executedAt: record.executedAt?.toISOString() ?? null,
       })
       byDate.set(trade.tradeDate, dayTrades)
     }
@@ -986,6 +992,13 @@ export const getCalendar = createServerFn({ method: 'GET' })
         paidJpy: cashOf(dayTrades, true),
         receivedJpy: cashOf(dayTrades, false),
         ordered: dayTrades.length > 0 && dayTrades.every((trade) => placed(trade, date)),
+        // Only pools the owner ordered are compared: elsewhere the list is the
+        // engine's grouping, which says nothing about time.
+        orderContradictsTimes: orderContradictsTimes(
+          dayTrades.filter((trade) => placed(trade, date)),
+          (trade) => poolKey(trade.symbol, trade.accountType as AccountType),
+          (trade) => (trade.executedAt ? new Date(trade.executedAt) : null),
+        ),
         trades: dayTrades,
         note: note
           ? {

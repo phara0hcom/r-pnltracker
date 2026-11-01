@@ -14,6 +14,7 @@ import * as Sentry from '@sentry/tanstackstart-react'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { emptyParseResult, type ParseResult } from '../lib/domain/types'
 import { decodeShiftJis } from '../lib/import/decode'
+import { carriedTimes } from '../lib/import/executionTime'
 import {
   describePlan,
   figuresOf,
@@ -396,6 +397,32 @@ export async function commitImport(
             isNull(trades.deletedAt),
           ),
         )
+
+      // Their replacements are new rows, so a time entered on the intraday
+      // fills would otherwise be lost — see `carriedTimes` for when it carries.
+      const timeById = new Map(
+        (
+          await tx
+            .select({ id: trades.id, executedAt: trades.executedAt })
+            .from(trades)
+            .where(and(eq(trades.userId, userId), inArray(trades.id, supersededIds)))
+        ).map((row) => [row.id, row.executedAt]),
+      )
+      if ([...timeById.values()].some(Boolean)) {
+        const carried = carriedTimes(
+          plan.supersededTrades.map((row) => ({ ...row, executedAt: timeById.get(row.id) ?? null })),
+          plan.newTrades.map((trade) => ({
+            ...trade,
+            id: idFor('trade', userId, trade.sourceRowHash),
+          })),
+        )
+        for (const [id, executedAt] of carried) {
+          await tx
+            .update(trades)
+            .set({ executedAt })
+            .where(and(eq(trades.userId, userId), eq(trades.id, id), isNull(trades.executedAt)))
+        }
+      }
     }
 
     /*

@@ -9,6 +9,7 @@
  * Up/down buttons rather than drag: they work by keyboard and on a phone, and
  * a day rarely holds more than a handful of trades.
  */
+import type { ReactNode } from 'react'
 import styles from './DayOrderList.module.scss'
 import { ACCOUNT_LABEL, qty } from '~/components/format'
 import { cx } from '~/lib/cx'
@@ -30,6 +31,7 @@ export function DayOrderList<T extends DayOrderItem>({
   onChange,
   label,
   showAccount = true,
+  extra,
 }: {
   items: T[]
   onChange: (next: T[]) => void
@@ -37,6 +39,8 @@ export function DayOrderList<T extends DayOrderItem>({
   label: string
   /** Off when every row is in one account, where the column repeats itself. */
   showAccount?: boolean
+  /** A second line under a row — the import preview's time input, the calendar's time. */
+  extra?: (item: T) => ReactNode
 }) {
   const move = (from: number, to: number) => {
     const next = [...items]
@@ -93,6 +97,7 @@ export function DayOrderList<T extends DayOrderItem>({
                 ↓
               </button>
             </span>
+            {extra ? <span className={styles.extra}>{extra(item)}</span> : null}
           </li>
         )
       })}

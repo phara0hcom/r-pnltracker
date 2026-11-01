@@ -24,6 +24,7 @@ const record = (trade: ReturnType<typeof makeTrade>): TradeRecord => ({
   isEdited: false,
   memo: null,
   motivation: null,
+  executedAt: null,
 })
 
 const TRADES = [

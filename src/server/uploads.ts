@@ -9,9 +9,10 @@ import { createServerFn } from '@tanstack/react-start'
 import { authed } from './middleware'
 import { commitImport, previewImport } from '~/db/import.service'
 import { idFor } from '~/db/mappers'
-import { listTrades, setDayOrder } from '~/db/trades.service'
+import { listTrades, setDayOrder, setExecutionTimes } from '~/db/trades.service'
 import type { NormalizedTrade } from '~/lib/domain/types'
 import { daysToOrder, type OrderCandidate } from '~/lib/import/dayOrder'
+import { timedMarket } from '~/lib/import/executionTime'
 import { figuresOf, orderFilesForImport, type StoredTrade } from '~/lib/import/plan'
 import { quotedPrice } from '~/lib/prices/quoteUnit'
 
@@ -79,7 +80,7 @@ export interface PreviewSummary {
   errors: { line: number; message: string }[]
 }
 
-/** One trade in a day the preview offers for ordering. */
+/** One trade in a day the preview offers for ordering, or in its list of times. */
 export interface PreviewOrderTrade {
   id: string
   symbol: string
@@ -90,6 +91,12 @@ export interface PreviewOrderTrade {
   price: string
   /** Added or re-dated by this import, rather than already stored. */
   isNew: boolean
+  /** 約定日 — what a JST time is read against. */
+  tradeDate: string
+  /** Whose session the time is checked against; null for a fund, which gets no time. */
+  market: 'JP' | 'US' | null
+  /** ISO instant, when already stored. A restated row keeps its time. */
+  executedAt: string | null
 }
 
 export interface PreviewResult {
@@ -100,6 +107,11 @@ export interface PreviewResult {
    * user is shown them to put right before anything is written.
    */
   days: { date: string; trades: PreviewOrderTrade[] }[]
+  /**
+   * Equity trades the import adds or restates on days not offered for
+   * ordering, for their optional execution time. Funds are left out.
+   */
+  trades: PreviewOrderTrade[]
 }
 
 export const previewFiles = createServerFn({ method: 'POST' })
@@ -193,22 +205,37 @@ export const previewFiles = createServerFn({ method: 'POST' })
       })
     }
 
-    const stored = (await listTrades(context.userId))
-      .filter((record) => !removed.has(record.id))
-      .map((record): OrderCandidate => ({ id: record.id, trade: record.trade, incoming: false }))
+    const records = (await listTrades(context.userId)).filter((record) => !removed.has(record.id))
+    const storedTime = new Map(records.map((record) => [record.id, record.executedAt]))
+    const stored = records.map(
+      (record): OrderCandidate => ({ id: record.id, trade: record.trade, incoming: false }),
+    )
+    const toPreview = ({ id, trade, incoming: isNew }: OrderCandidate): PreviewOrderTrade => ({
+      id,
+      symbol: trade.symbol,
+      accountType: trade.accountType,
+      side: trade.side,
+      quantity: trade.quantity.toFixed(),
+      price: `${trade.currency === 'USD' ? '$' : '¥'}${quotedPrice(trade.unitPrice, trade.assetClass).toFixed()}`,
+      isNew,
+      tradeDate: trade.tradeDate,
+      market: timedMarket(trade.assetClass),
+      executedAt: storedTime.get(id)?.toISOString() ?? null,
+    })
     const days = daysToOrder(stored, [...incoming.values()]).map((day) => ({
       date: day.date,
-      trades: day.trades.map(({ id, trade, incoming: isNew }) => ({
-        id,
-        symbol: trade.symbol,
-        accountType: trade.accountType,
-        side: trade.side,
-        quantity: trade.quantity.toFixed(),
-        price: `${trade.currency === 'USD' ? '$' : '¥'}${quotedPrice(trade.unitPrice, trade.assetClass).toFixed()}`,
-        isNew,
-      })),
+      trades: day.trades.map(toPreview),
     }))
-    return { files: out, days }
+    const onDays = new Set(days.flatMap((day) => day.trades.map((trade) => trade.id)))
+    const timed = [...incoming.values()]
+      .filter((candidate) => !onDays.has(candidate.id) && timedMarket(candidate.trade.assetClass))
+      .sort(
+        (left, right) =>
+          left.trade.tradeDate.localeCompare(right.trade.tradeDate) ||
+          left.trade.symbol.localeCompare(right.trade.symbol),
+      )
+      .map(toPreview)
+    return { files: out, days, trades: timed }
   })
 
 export interface CommitSummary {
@@ -230,7 +257,12 @@ export interface CommitResult {
 export const commitFiles = createServerFn({ method: 'POST' })
   .middleware([authed])
   .validator(
-    (data: { files: UploadPayload[]; order?: { date: string; ids: string[] }[] }) => data,
+    (data: {
+      files: UploadPayload[]
+      order?: { date: string; ids: string[] }[]
+      /** ISO instants keyed by row id; null clears a stored time. */
+      executedAt?: Record<string, string | null>
+    }) => data,
   )
   .handler(async ({ data, context }): Promise<CommitResult> => {
     const out: CommitSummary[] = []
@@ -250,6 +282,16 @@ export const commitFiles = createServerFn({ method: 'POST' })
         errors: result.errors,
       })
     }
+
+    // After every file, so a row added by any of them has its time — and after
+    // the carry-over a regrouping makes, so a time typed here wins over it.
+    const times = new Map<string, Date | null>()
+    for (const [id, iso] of Object.entries(data.executedAt ?? {})) {
+      const at = iso === null ? null : new Date(iso)
+      if (at && Number.isNaN(at.getTime())) throw new Error(`Unreadable execution time for ${id}.`)
+      times.set(id, at)
+    }
+    await setExecutionTimes(context.userId, times)
 
     // After every file, because an order can span rows from several of them.
     // Each day is its own write: one refused order must not undo the import.

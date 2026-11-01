@@ -320,4 +320,71 @@ describe.skipIf(!containerAvailable)('a JP day regrouped at settlement', () => {
     expect(again.tradesRestated).toBe(0)
     expect((await sells()).map((row) => row.quantity)).toEqual(['1800', '2600'])
   })
+
+  async function timedSells() {
+    const { rows } = await sql!.query<{ id: string; quantity: string; executed_at: Date | null }>(
+      `select id, quantity::float::text as quantity, executed_at
+         from trades where side = 'SELL' and deleted_at is null order by trades.quantity`,
+    )
+    return rows
+  }
+
+  async function timeIntraday(times: string[]) {
+    const intradaySells = await timedSells()
+    await tradesService!.setExecutionTimes(
+      USER,
+      new Map(intradaySells.map((row, index) => [row.id, new Date(times[index]!)])),
+    )
+  }
+
+  it('carries a time all the regrouped fills shared to their replacement, and keeps the settled one', async () => {
+    await imports!.commitImport(USER, 'tradehistory(JP)_20260915.csv', intraday())
+    const at = '2026-09-15T01:05:00.000Z'
+    await timeIntraday([at, at, at])
+    await imports!.commitImport(USER, 'tradehistory(JP)_20260918.csv', settled())
+
+    expect((await timedSells()).map((row) => [row.quantity, row.executed_at?.toISOString()])).toEqual([
+      ['1800', at],
+      ['2600', at],
+    ])
+  })
+
+  it('carries nothing when the regrouped fills had different times', async () => {
+    await imports!.commitImport(USER, 'tradehistory(JP)_20260915.csv', intraday())
+    // In quantity order: the 800, the 1,000, the 2,600.
+    await timeIntraday(['2026-09-15T01:05:00.000Z', '2026-09-15T02:30:00.000Z', '2026-09-15T05:00:00.000Z'])
+    await imports!.commitImport(USER, 'tradehistory(JP)_20260918.csv', settled())
+
+    expect((await timedSells()).map((row) => [row.quantity, row.executed_at?.toISOString() ?? null])).toEqual([
+      ['1800', null],
+      // Settled in place, so its own time stays.
+      ['2600', '2026-09-15T05:00:00.000Z'],
+    ])
+  })
+})
+
+describe.skipIf(!containerAvailable)('an execution time across a US restatement', () => {
+  it('survives the re-dating and re-rating of the fill it was entered on', async () => {
+    await imports!.commitImport(USER, BEFORE, beforeSettlement())
+    const [before] = await storedSells()
+    const at = new Date('2026-09-03T14:45:00.000Z')
+    await tradesService!.setExecutionTimes(USER, new Map([[before!.id, at]]))
+
+    await imports!.commitImport(USER, AFTER, afterSettlement())
+    const { rows } = await sql!.query<{ id: string; trade_date: string; executed_at: Date | null }>(
+      `select id, to_char(trade_date, 'YYYY-MM-DD') as trade_date, executed_at
+         from trades where side = 'SELL' and deleted_at is null`,
+    )
+    expect(rows).toEqual([{ id: before!.id, trade_date: '2026-09-04', executed_at: at }])
+  })
+
+  it('is not marked edited by setting a time, so the restatement still applies', async () => {
+    await imports!.commitImport(USER, BEFORE, beforeSettlement())
+    const [before] = await storedSells()
+    await tradesService!.setExecutionTimes(USER, new Map([[before!.id, new Date('2026-09-03T14:45:00.000Z')]]))
+    const { rows } = await sql!.query<{ is_edited: boolean }>('select is_edited from trades where id = $1', [
+      before!.id,
+    ])
+    expect(rows[0]!.is_edited).toBe(false)
+  })
 })

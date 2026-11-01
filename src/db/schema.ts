@@ -230,6 +230,15 @@ export const trades = pgTable(
      * `NormalizedTrade.daySequence`.
      */
     daySequence: integer('day_sequence'),
+    /**
+     * When it filled, as the owner entered it in JST — no export carries a time.
+     *
+     * An instant, not a time of day: a US fill viewed in JST falls after
+     * midnight, so its JST date can be 約定日 + 1. The restatement and
+     * settlement updates in `commitImport` name their columns explicitly and
+     * leave this one out, which is how it survives them.
+     */
+    executedAt: timestamp('executed_at', { withTimezone: true }),
 
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),

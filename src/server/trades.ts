@@ -16,6 +16,7 @@ import {
   listTrades,
   restoreTrade,
   setDayOrder,
+  setExecutionTimes,
   updateTrade,
   type DayOrderResult,
 } from '~/db/trades.service'
@@ -76,6 +77,8 @@ export interface TradeRow {
   origin: 'IMPORT' | 'MANUAL'
   isEdited: boolean
   memo: string | null
+  /** ISO instant the owner entered, or null. Funds never have one. */
+  executedAt: string | null
 }
 
 /** The part of a row that comes from the engine's closing event rather than the trade. */
@@ -116,7 +119,7 @@ export const listTradeRows = createServerFn({ method: 'GET' })
       })
     }
 
-    return records.map(({ id, trade, origin, isEdited, memo }) => {
+    return records.map(({ id, trade, origin, isEdited, memo, executedAt }) => {
       // A fund's per 10,000 口, the number Rakuten shows; the edit form takes it
       // back in that unit (`buildManualTrade`), so an edit round-trips it.
       const displayPrice = quotedPrice(trade.unitPrice, trade.assetClass).toFixed()
@@ -150,6 +153,7 @@ export const listTradeRows = createServerFn({ method: 'GET' })
         origin,
         isEdited,
         memo,
+        executedAt: executedAt?.toISOString() ?? null,
       }
     })
   })
@@ -161,15 +165,33 @@ export interface MutationResult {
   id?: string
 }
 
+/**
+ * Save an edited row.
+ *
+ * `patch` is left out when only the time changed: an execution time is not a
+ * correction of Rakuten's figures, and going through `updateTrade` would mark
+ * the row edited for it.
+ */
 export const saveTrade = createServerFn({ method: 'POST' })
   .middleware([authed])
-  .validator((data: { id: string; patch: ManualTradeInput }) => data)
+  .validator(
+    (data: { id: string; patch?: ManualTradeInput; executedAt?: string | null }) => data,
+  )
   .handler(async ({ data, context }): Promise<MutationResult> => {
-    const parsed = validateManualTrade(data.patch)
-    if (!parsed.ok) return { ok: false, errors: parsed.errors }
-
-    const saved = await updateTrade(context.userId, data.id, parsed.value)
-    return { ok: true, id: saved.id }
+    let at: Date | null | undefined
+    if (data.executedAt !== undefined) {
+      at = data.executedAt === null ? null : new Date(data.executedAt)
+      if (at && Number.isNaN(at.getTime())) {
+        return { ok: false, errors: { executedAt: 'Not a time.' } }
+      }
+    }
+    if (data.patch) {
+      const parsed = validateManualTrade(data.patch)
+      if (!parsed.ok) return { ok: false, errors: parsed.errors }
+      await updateTrade(context.userId, data.id, parsed.value)
+    }
+    if (at !== undefined) await setExecutionTimes(context.userId, new Map([[data.id, at]]))
+    return { ok: true, id: data.id }
   })
 
 export const addTrade = createServerFn({ method: 'POST' })
