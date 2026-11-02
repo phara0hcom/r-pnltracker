@@ -86,6 +86,20 @@ export function initialStopFor(
   return { stop: Decimal.min(position.supportLevel, volatilityStop), fromSupportOnly: false }
 }
 
+/**
+ * Target 1, fixed at entry: the manual override when there is one, otherwise
+ * entry + the plan's own target multiple × R. Shared with static plans, which
+ * have a stop but no feed.
+ */
+export function target1For(
+  position: Pick<ExitRulePosition, 'entryPrice' | 'entryTargetMultiple' | 'target1Override'>,
+  riskPerShare: Decimal,
+): Decimal {
+  if (position.target1Override !== null) return position.target1Override
+  // Locked multiple, so changing the global setting reprices new plans only.
+  return position.entryPrice.add(riskPerShare.mul(position.entryTargetMultiple))
+}
+
 /** Which SMA a trailing method reads, or null for the ATR chandelier. */
 const smaOf = (bar: FeedBar, method: TrailingMethod): Decimal | null =>
   method === 'SMA10' ? bar.sma10 : method === 'SMA20' ? bar.sma20 : null
@@ -212,8 +226,7 @@ export function assess(
 
   const { stop: initialStop, fromSupportOnly } = initialStopFor(position)
   const riskPerShare = position.entryPrice.sub(initialStop)
-  // Locked multiples, so changing the global setting reprices new plans only.
-  const target1 = position.entryPrice.add(riskPerShare.mul(position.entryTargetMultiple))
+  const target1 = target1For(position, riskPerShare)
   const partialExitShares = roundDownToLot(
     position.totalShares.mul(settings.partialExitFraction),
     position.lotSize,

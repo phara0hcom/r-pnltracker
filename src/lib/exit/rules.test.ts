@@ -33,6 +33,7 @@ const position = (overrides: Partial<ExitRulePosition> = {}): ExitRulePosition =
   priorCloseDate: null,
   entryStopAtrMultiple: d('1.5'),
   entryTargetMultiple: d('1.5'),
+  target1Override: null,
   lotSize: 100,
   trailingMethod: null,
   ...overrides,
@@ -104,6 +105,18 @@ describe('assess — targets and sizing', () => {
       '2026-06-01',
     )
     expect(result.target1.toString()).toBe('1100')
+  })
+
+  it('uses a manual Target 1 in place of the computed one', () => {
+    const result = assess(
+      position({ target1Override: d(1250) }),
+      [bar('2026-06-01', 1000)],
+      settings(),
+      '2026-06-01',
+    )
+    expect(result.target1.toString()).toBe('1250')
+    // R is still the stop's: the override moves the target, not the risk.
+    expect(result.riskPerShare.toString()).toBe('50')
   })
 
   it('sizes the partial exit off the entry size, rounded to lots', () => {

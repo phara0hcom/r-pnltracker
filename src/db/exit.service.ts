@@ -34,6 +34,10 @@ export interface ExitRuleRecord {
   entryAtr: Decimal | null
   entryStopAtrMultiple: Decimal
   entryTargetMultiple: Decimal
+  /** A manual Target 1, locked; null for the computed one. */
+  target1Override: Decimal | null
+  /** The Playbook position this plan belongs to; null for plans that predate it. */
+  journalId: string | null
   lotSize: number
   trailingMethod: TrailingMethod | null
   note: string | null
@@ -82,6 +86,8 @@ function toRecord(row: {
     entryAtr: row.rule.entryAtr === null ? null : new Decimal(row.rule.entryAtr),
     entryStopAtrMultiple: new Decimal(row.rule.entryStopAtrMultiple),
     entryTargetMultiple: new Decimal(row.rule.entryTargetMultiple),
+    target1Override: row.rule.target1Override === null ? null : new Decimal(row.rule.target1Override),
+    journalId: row.rule.journalId,
     lotSize: row.rule.lotSize,
     trailingMethod: row.rule.trailingMethod,
     note: row.rule.note,

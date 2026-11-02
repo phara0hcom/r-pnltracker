@@ -12,9 +12,10 @@
  * is only ever used to *prefill* the form — the value is then locked into the
  * exit rule, where a later top-up cannot shift it.
  */
-import Decimal from 'decimal.js'
-import { CLOSING_SIDES, OPENING_SIDES, type AccountType, type NormalizedTrade } from '../domain/types'
-import { poolKey, sortTradesForEngine } from '../pnl/engine'
+import type Decimal from 'decimal.js'
+import type { AccountType, NormalizedTrade } from '../domain/types'
+import { holdingStreaks, isOpen } from '../playbook/streaks'
+import { poolKey } from '../pnl/engine'
 
 export interface EntryStreak {
   symbol: string
@@ -53,77 +54,25 @@ export interface EntryStreak {
 /**
  * The open streak for every pool that currently holds units, keyed
  * `symbol\0accountType`. Closed pools are absent.
+ *
+ * Read off `holdingStreaks`, so "flat" has one definition across the exit
+ * framework and the Playbook.
  */
 export function openEntryStreaks(trades: NormalizedTrade[]): Map<string, EntryStreak> {
-  const pools = new Map<string, NormalizedTrade[]>()
-  // Engine ordering, so a same-day round trip cannot look like it closed before
-  // it opened — which would strand the streak on the wrong side of the flat.
-  for (const trade of sortTradesForEngine(trades)) {
-    const key = poolKey(trade.symbol, trade.accountType)
-    const bucket = pools.get(key)
-    if (bucket) bucket.push(trade)
-    else pools.set(key, [trade])
-  }
-
   const out = new Map<string, EntryStreak>()
-
-  for (const [key, list] of pools) {
-    let quantity = new Decimal(0)
-    let streak: EntryStreak | null = null
-    let lastFlatDate: string | null = null
-
-    for (const trade of list) {
-      if (OPENING_SIDES.includes(trade.side)) {
-        if (quantity.lte(0)) {
-          // Flat, so this buy starts a new streak. Anything recorded for a
-          // previous streak is discarded — only the live one matters.
-          streak = {
-            symbol: trade.symbol,
-            accountType: trade.accountType,
-            entryDate: trade.tradeDate,
-            entryPrice: trade.unitPrice,
-            totalShares: trade.quantity,
-            sharesSold: new Decimal(0),
-            priorCloseDate: lastFlatDate,
-          }
-        } else if (streak !== null) {
-          // Bound before the assignment: reading `streak` inside the object that
-          // replaces it makes its own type circular.
-          const open: EntryStreak = streak
-          const combined = open.totalShares.add(trade.quantity)
-          streak = {
-            ...open,
-            entryPrice: combined.gt(0)
-              ? open.entryPrice
-                  .mul(open.totalShares)
-                  .add(trade.unitPrice.mul(trade.quantity))
-                  .div(combined)
-              : open.entryPrice,
-            totalShares: combined,
-          }
-        }
-        quantity = quantity.add(trade.quantity)
-        continue
-      }
-
-      if (CLOSING_SIDES.includes(trade.side)) {
-        quantity = quantity.sub(trade.quantity)
-        if (streak !== null) {
-          streak = { ...streak, sharesSold: streak.sharesSold.add(trade.quantity) }
-        }
-        // Fully closed — the next buy will start a fresh streak. A partial sell
-        // deliberately does not reset it: that is the Target 1 exit, and the
-        // remaining shares are still the same swing.
-        if (quantity.lte(0)) {
-          streak = null
-          lastFlatDate = trade.tradeDate
-        }
-      }
-    }
-
-    if (streak && quantity.gt(0)) out.set(key, streak)
+  // Ids are irrelevant here; only the streaks' figures are read.
+  for (const streak of holdingStreaks(trades.map((trade, index) => ({ id: String(index), trade })))) {
+    if (!isOpen(streak)) continue
+    out.set(poolKey(streak.symbol, streak.accountType), {
+      symbol: streak.symbol,
+      accountType: streak.accountType,
+      entryDate: streak.entryDate,
+      entryPrice: streak.entryPrice,
+      totalShares: streak.sharesBought,
+      sharesSold: streak.sharesSold,
+      priorCloseDate: streak.priorCloseDate,
+    })
   }
-
   return out
 }
 

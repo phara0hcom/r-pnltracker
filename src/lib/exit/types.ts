@@ -88,6 +88,12 @@ export interface ExitRulePosition {
   /** The R multiple Target 1 was set at, locked at entry for the same reason. */
   entryTargetMultiple: Decimal
   /**
+   * A Target 1 typed in by hand, locked like the other entry facts; null for
+   * the computed one. Always above `entryPrice` — below it the framework would
+   * invert, as it would with support at or above entry.
+   */
+  target1Override: Decimal | null
+  /**
    * ATR(14) from the entry-date bar, or null when no payload covered that day.
    *
    * Null is not an error: an alert set up after the fact never delivers the

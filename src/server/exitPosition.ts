@@ -42,6 +42,7 @@ export function buildExitRulePosition(
     entryAtr: rule.entryAtr,
     entryStopAtrMultiple: rule.entryStopAtrMultiple,
     entryTargetMultiple: rule.entryTargetMultiple,
+    target1Override: rule.target1Override,
     lotSize: rule.lotSize,
     trailingMethod: rule.trailingMethod,
   }

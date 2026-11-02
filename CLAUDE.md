@@ -100,6 +100,9 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/sw/sw.ts` | the service worker's event glue; bundled by the `serviceWorker()` plugin |
 | `src/lib/notifications/exitActionNotice.ts` | pure change detection + push payload shaping for exit-rule alerts |
 | `src/server/exitNotifications.ts` | re-evaluates and pushes on a webhook delivery — no `createServerFn` export |
+| `src/lib/playbook/streaks.ts` | holding streaks — what a Playbook position *is*; anchors, legs, linking |
+| `src/lib/playbook/score.ts` / `stats.ts` / `paper.ts` | position score, setup statistics, paper results — never stored |
+| `src/db/playbook.service.ts` | setups, positions and leg annotations; only anchors and annotations are stored |
 
 Every server function touching user data must `.middleware([authed])`. The typed
 `context.userId` means a handler that forgets the check does not compile.
@@ -156,6 +159,11 @@ derivation and sources.
   hand and stored in `day_sequence`, which the engine alone reads. It survives
   restatement and settlement because those updates name their columns; a day
   regrouped at settlement carries it over only when every replaced fill shared it.
+- **A Playbook position is one holding streak; its trades, status and result are derived on
+  read, never stored.** Only the anchor (the streak's first opening trade id) and the owner's
+  annotations are. A regrouped-away anchor falls back to the pool's streak starting on the stored
+  `entryDate` (or the day after, for US); failing both the position says so rather than guessing.
+  `openEntryStreaks` reads off the same `holdingStreaks`, so "flat" has one definition.
 - **A US close is shown in dollars as Rakuten shows it**: the sale (約定代金) less
   the cost of those shares *including* buy commission, sell commission not taken
   off (`lib/pnl/usdResult.ts`) — all nine September 2026 US closes match to the

@@ -71,6 +71,11 @@ export const exitActionKindEnum = pgEnum('exit_action_kind', [
   'PLAN_SUPERSEDED',
 ])
 
+/** Mirror `JournalKind`, `LegSide` and `ImagePhase` in `lib/playbook/types.ts`, by hand. */
+export const journalKindEnum = pgEnum('journal_kind', ['REAL', 'PAPER'])
+export const journalLegSideEnum = pgEnum('journal_leg_side', ['ENTRY', 'EXIT'])
+export const journalImagePhaseEnum = pgEnum('journal_image_phase', ['PLAN', 'ENTRY', 'DURING', 'EXIT'])
+
 /** Monetary/quantity precision: 24 digits total, 8 decimal places. */
 const money = (name: string) => numeric(name, { precision: 24, scale: 8 })
 
@@ -514,6 +519,13 @@ export const exitRules = pgTable(
      */
     entryStopAtrMultiple: money('entry_stop_atr_multiple').notNull().default('1.5'),
     entryTargetMultiple: money('entry_target_multiple').notNull().default('1.5'),
+    /**
+     * A Target 1 typed in by hand, locked like the entry facts above; null for
+     * the computed one. Kept above `entry_price` by the service.
+     */
+    target1Override: money('target1_override'),
+    /** The Playbook position this plan belongs to; null for plans that predate it. */
+    journalId: text('journal_id').references(() => journalEntries.id, { onDelete: 'set null' }),
 
     /** 100 on 東証, 1 for US shares — no suggestion is ever a fractional lot. */
     lotSize: integer('lot_size').notNull().default(100),
@@ -532,6 +544,9 @@ export const exitRules = pgTable(
     uniqueIndex('exit_rules_active_uq')
       .on(table.userId, table.instrumentId, table.accountType)
       .where(sql`archived_at is null`),
+    // One plan per position, archived ones included: a position's plan is
+    // archived with it, never replaced.
+    uniqueIndex('exit_rules_journal_uq').on(table.journalId),
     index('exit_rules_user_idx').on(table.userId, table.archivedAt),
   ],
 )
@@ -665,8 +680,154 @@ export const exitSettings = pgTable('exit_settings', {
   trailingMethod: trailingMethodEnum('trailing_method').notNull().default('ATR'),
   /** Trading days without a payload before the feed is called stale. */
   staleTradingDays: integer('stale_trading_days').notNull().default(3),
+  /** Account size that prefills the Open Position dialog; null means it asks. */
+  accountEquity: money('account_equity'),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
+
+// ── Playbook ────────────────────────────────────────────────────────────────
+//
+// A position is one holding streak of one pool. Its trades, status and result
+// are derived from the trade history on read, never stored — only the anchor
+// (which streak) and the owner's annotations are. See `lib/playbook/streaks.ts`.
+
+export const setups = pgTable(
+  'setups',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    /** Ids survive a rename, so ticks recorded against a criterion survive too. */
+    criteria: jsonb('criteria').$type<{ id: string; text: string }[]>().notNull().default([]),
+    archivedAt: timestamp('archived_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    // Partial, like `exit_rules_active_uq`, so archiving a setup frees its name.
+    uniqueIndex('setups_active_name_uq').on(table.userId, table.name).where(sql`archived_at is null`),
+  ],
+)
+
+/** One row per position. No stored status: a real position with no anchor is awaiting import. */
+export const journalEntries = pgTable(
+  'journal_entries',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    setupId: text('setup_id').references(() => setups.id, { onDelete: 'set null' }),
+    kind: journalKindEnum('kind').notNull(),
+    /** Symbol, name, class and currency come from the join — no copies to drift. */
+    instrumentId: text('instrument_id')
+      .notNull()
+      .references(() => instruments.id),
+    /** Null for paper. */
+    accountType: accountTypeEnum('account_type'),
+    /** The streak's start as known when filed — and the anchor's fallback. */
+    entryDate: date('entry_date').notNull(),
+    /**
+     * The streak's first opening trade. Null while awaiting import, and for
+     * paper. Trades are soft-deleted, so this outlives a regrouped anchor and
+     * the fallback on `entry_date` takes over.
+     */
+    anchorTradeId: text('anchor_trade_id').references(() => trades.id, { onDelete: 'set null' }),
+    /** A static plan — paper positions and past trades; null where a live plan exists. */
+    stopPrice: money('stop_price'),
+    target1Price: money('target1_price'),
+    /** Display-only targets beyond Target 1; never fed to `assess()`. */
+    extraTargets: jsonb('extra_targets').$type<{ price: string; fraction: string }[]>().notNull().default([]),
+    /** Locked when filed, so the risk rating rates the trade as it was sized. */
+    accountEquity: money('account_equity'),
+    riskRatingOverride: smallint('risk_rating_override'),
+    /** Criterion ids from the setup that held at entry. */
+    criteriaMet: jsonb('criteria_met').$type<string[]>().notNull().default([]),
+    mistakes: jsonb('mistakes').$type<string[]>().notNull().default([]),
+    lessons: text('lessons').notNull().default(''),
+    archivedAt: timestamp('archived_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    // One position per streak, or setup statistics count it twice. The
+    // fallback case is invisible to an index; the service checks it.
+    uniqueIndex('journal_entries_anchor_uq')
+      .on(table.userId, table.anchorTradeId)
+      .where(sql`anchor_trade_id is not null and archived_at is null`),
+    index('journal_entries_user_idx').on(table.userId, table.archivedAt),
+    index('journal_entries_setup_idx').on(table.setupId),
+  ],
+)
+
+/**
+ * The owner's annotations on a position's legs, plus the typed-in fills of
+ * paper positions and of positions awaiting import. A linked leg's figures
+ * always come from its trades; only its rating and note live here.
+ */
+export const journalLegs = pgTable(
+  'journal_legs',
+  {
+    id: text('id').primaryKey(),
+    journalId: text('journal_id')
+      .notNull()
+      .references(() => journalEntries.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    side: journalLegSideEnum('side').notNull(),
+    date: date('date').notNull(),
+    /** With `date`, keys the annotation to its derived leg on a linked position. */
+    firstTradeId: text('first_trade_id').references(() => trades.id, { onDelete: 'set null' }),
+    /** Typed-in legs only; a linked leg's time is its fills' `executed_at`. */
+    executedAt: timestamp('executed_at', { withTimezone: true }),
+    price: money('price'),
+    quantity: money('quantity'),
+    fee: money('fee'),
+    /** 1–10: the execution, not the outcome. */
+    rating: smallint('rating'),
+    note: text('note'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('journal_legs_first_trade_uq')
+      .on(table.journalId, table.firstTradeId)
+      .where(sql`first_trade_id is not null`),
+    index('journal_legs_journal_idx').on(table.journalId),
+  ],
+)
+
+/** Chart screenshots, stored in a private Blob store and served only after sign-in. */
+export const journalImages = pgTable(
+  'journal_images',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    journalId: text('journal_id')
+      .notNull()
+      .references(() => journalEntries.id, { onDelete: 'cascade' }),
+    legId: text('leg_id').references(() => journalLegs.id, { onDelete: 'set null' }),
+    phase: journalImagePhaseEnum('phase').notNull(),
+    /** 1D, 1h, 5m… */
+    timeframe: varchar('timeframe', { length: 8 }),
+    caption: text('caption').notNull().default(''),
+    pathname: text('pathname').notNull(),
+    thumbPathname: text('thumb_pathname'),
+    contentType: text('content_type').notNull(),
+    width: integer('width'),
+    height: integer('height'),
+    bytes: integer('bytes').notNull(),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [index('journal_images_journal_idx').on(table.journalId, table.phase, table.position)],
+)
 
 // ── Push notifications ──────────────────────────────────────────────────────
 
