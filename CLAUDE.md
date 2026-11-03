@@ -156,7 +156,9 @@ derivation and sources.
 - **`trades.executed_at` is an optional instant the owner types in JST** on the
   import preview or the Trades edit row (`lib/import/executionTime.ts`) — never
   for funds. It only *suggests* a day's order: the order is still confirmed by
-  hand and stored in `day_sequence`, which the engine alone reads. It survives
+  hand and stored in `day_sequence`, which the engine alone reads. An input is
+  written only if the owner changed it (`timeEdit`), and a restated time before
+  midnight JST reads as −1 day against its new 約定日. It survives
   restatement and settlement because those updates name their columns; a day
   regrouped at settlement carries it over only when every replaced fill shared it.
 - **A Playbook position is one holding streak; its trades, status and result are derived on

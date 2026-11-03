@@ -7,7 +7,9 @@
  * `lib/playbook/streaks.ts`; this module only hands that function its inputs.
  *
  * Every query is scoped by `userId`, child tables included, so an id straight
- * from a request body that belongs to someone else matches nothing.
+ * from a request body that belongs to someone else matches nothing. An id
+ * stored as a value matches no `where`, and the foreign keys do not know the
+ * owner, so those are checked with `ownsSetup` and `ownsTrade` before writing.
  */
 import { randomUUID } from 'node:crypto'
 import Decimal from 'decimal.js'
@@ -32,6 +34,23 @@ import { extraTargetsProblem, ratingProblem } from '~/lib/playbook/validate'
 export type PlaybookResult<T = string> = { ok: true; value: T } | { ok: false; message: string }
 
 const fail = (message: string): { ok: false; message: string } => ({ ok: false, message })
+
+async function ownsSetup(userId: string, id: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: setups.id })
+    .from(setups)
+    .where(and(eq(setups.userId, userId), eq(setups.id, id)))
+  return row !== undefined
+}
+
+/** Soft-deleted rows count: a regrouped fill is still the owner's to refer to. */
+async function ownsTrade(userId: string, id: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: trades.id })
+    .from(trades)
+    .where(and(eq(trades.userId, userId), eq(trades.id, id)))
+  return row !== undefined
+}
 
 // ── Setups ──────────────────────────────────────────────────────────────────
 
@@ -330,7 +349,9 @@ export async function createJournalEntry(userId: string, input: JournalEntryInpu
     null
   if (problem) return fail(problem)
   if (input.kind === 'PAPER' && input.accountType !== null) return fail('A paper position has no account.')
+  if (input.kind === 'PAPER' && input.anchorTradeId !== null) return fail('A paper position has no trades.')
   if (input.kind === 'REAL' && input.accountType === null) return fail('Choose the account it was traded in.')
+  if (input.setupId !== null && !(await ownsSetup(userId, input.setupId))) return fail('That setup no longer exists.')
   if (input.anchorTradeId === null && !input.legs.some((leg) => leg.side === 'ENTRY')) {
     return fail('Enter the buy, or file it from a holding.')
   }
@@ -412,6 +433,7 @@ export async function updateJournalEntry(userId: string, id: string, patch: Jour
     (patch.extraTargets ? extraTargetsProblem(patch.extraTargets) : null) ??
     (patch.riskRatingOverride !== undefined ? ratingProblem(patch.riskRatingOverride) : null)
   if (problem) return fail(problem)
+  if (patch.setupId && !(await ownsSetup(userId, patch.setupId))) return fail('That setup no longer exists.')
   // Built explicitly: spreading the patch would pass any extra field through.
   const [row] = await db
     .update(journalEntries)
@@ -494,6 +516,9 @@ export async function setLegAnnotation(
     if (row) return { ok: true, value: row.id }
     if (input.legId) return fail('That leg no longer exists.')
   }
+  if (input.firstTradeId !== null && !(await ownsTrade(userId, input.firstTradeId))) {
+    return fail('Those trades are no longer a position — reload and try again.')
+  }
   const id = newId('leg')
   await db.insert(journalLegs).values({
     id,
@@ -513,11 +538,16 @@ export async function reattachAnnotation(
   userId: string,
   legId: string,
   leg: { firstTradeId: string; side: LegSide; date: string },
-): Promise<void> {
-  await db
+): Promise<PlaybookResult> {
+  if (!(await ownsTrade(userId, leg.firstTradeId))) {
+    return fail('Those trades are no longer a position — reload and try again.')
+  }
+  const [row] = await db
     .update(journalLegs)
     .set({ firstTradeId: leg.firstTradeId, side: leg.side, date: leg.date, updatedAt: new Date() })
     .where(and(eq(journalLegs.userId, userId), eq(journalLegs.id, legId)))
+    .returning({ id: journalLegs.id })
+  return row ? { ok: true, value: row.id } : fail('That leg no longer exists.')
 }
 
 // ── Linking ─────────────────────────────────────────────────────────────────

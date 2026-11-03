@@ -4,8 +4,9 @@
  * Which streak a position is, and everything derived from it, is pure and
  * tested in `lib/playbook/streaks.test.ts`. What needs a server is what the
  * schema promises: the partial unique indexes on a position's anchor and a
- * setup's name, the cascades and `set null`s, and that a position whose anchor
- * trade was soft-deleted still finds its streak.
+ * setup's name, the cascades and `set null`s, that a position whose anchor
+ * trade was soft-deleted still finds its streak, and that an id stored as a
+ * value has to be the caller's own.
  *
  * Not part of `npm test` — run with `npm run test:db`; it skips itself when no
  * container runtime is present.
@@ -52,10 +53,12 @@ beforeEach(async () => {
 })
 
 /** Stores trades as an import would, returning their row ids in order. */
-async function store(...list: NormalizedTrade[]): Promise<string[]> {
+const store = (...list: NormalizedTrade[]) => storeFor(USER, ...list)
+
+async function storeFor(userId: string, ...list: NormalizedTrade[]): Promise<string[]> {
   const { db } = database!
   const { instruments, trades } = schema!
-  const rows = list.map((trade) => mappers!.toTradeRow({ userId: USER, trade }))
+  const rows = list.map((trade) => mappers!.toTradeRow({ userId, trade }))
   await db
     .insert(instruments)
     .values(mappers!.toInstrumentRow({ symbol: '8411', name: 'みずほ', assetClass: 'JP_EQUITY', currency: 'JPY' }))
@@ -240,5 +243,64 @@ describe.skipIf(!containerAvailable)('linking a position awaiting import', () =>
     value(await playbook!.setLegAnnotation(USER, id, { ...leg, rating: 9 }))
     expect((await playbook!.getJournalEntry(USER, id))!.legs.map((row) => row.rating)).toEqual([9])
     expect((await playbook!.setLegAnnotation(USER, id, { ...leg, rating: 11 })).ok).toBe(false)
+  })
+})
+
+describe.skipIf(!containerAvailable)('an id stored as a value', () => {
+  const OTHER = 'u-test-2'
+
+  beforeEach(async () => {
+    await sql!.query(
+      `insert into "user" (id, name, email, email_verified, created_at, updated_at)
+       values ($1, 'other', 'other@example.com', true, now(), now())
+       on conflict do nothing`,
+      [OTHER],
+    )
+  })
+
+  const theirSetup = async () => value(await playbook!.createSetup(OTHER, { name: 'S', description: '', criteria: [] }))
+  const theirTrade = async () => (await storeFor(OTHER, buy('2026-09-01')))[0]!
+
+  it("refuses someone else's setup when filing a position", async () => {
+    const setupId = await theirSetup()
+    expect(await playbook!.createJournalEntry(USER, position({ setupId, legs: [typedBuy] }))).toEqual({
+      ok: false,
+      message: 'That setup no longer exists.',
+    })
+  })
+
+  it("refuses someone else's setup on an update, and still allows clearing it", async () => {
+    const setupId = await theirSetup()
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    expect((await playbook!.updateJournalEntry(USER, id, { setupId })).ok).toBe(false)
+    expect((await playbook!.getJournalEntry(USER, id))?.setupId).toBeNull()
+    expect((await playbook!.updateJournalEntry(USER, id, { setupId: null })).ok).toBe(true)
+  })
+
+  it('refuses any anchor on a paper position', async () => {
+    const paper = { kind: 'PAPER' as const, accountType: null, legs: [typedBuy] }
+    const [mine] = await store(buy('2026-09-01'))
+    expect((await playbook!.createJournalEntry(USER, position({ ...paper, anchorTradeId: mine! }))).ok).toBe(false)
+    expect((await playbook!.createJournalEntry(USER, position({ ...paper, anchorTradeId: await theirTrade() }))).ok).toBe(false)
+    expect((await playbook!.createJournalEntry(USER, position(paper))).ok).toBe(true)
+  })
+
+  it("refuses someone else's trade on a leg annotation", async () => {
+    const firstTradeId = await theirTrade()
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    const annotation = { side: 'ENTRY' as const, date: '2026-09-01', firstTradeId, rating: 6, note: null }
+    expect((await playbook!.setLegAnnotation(USER, id, annotation)).ok).toBe(false)
+    expect((await playbook!.getJournalEntry(USER, id))!.legs).toHaveLength(1)
+  })
+
+  it("refuses someone else's trade when reattaching, and accepts one's own", async () => {
+    const firstTradeId = await theirTrade()
+    const [mine] = await store(buy('2026-09-01'))
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    const legId = (await playbook!.getJournalEntry(USER, id))!.legs[0]!.id
+    const leg = { side: 'ENTRY' as const, date: '2026-09-01' }
+    expect((await playbook!.reattachAnnotation(USER, legId, { ...leg, firstTradeId })).ok).toBe(false)
+    expect((await playbook!.getJournalEntry(USER, id))!.legs[0]!.firstTradeId).toBeNull()
+    expect((await playbook!.reattachAnnotation(USER, legId, { ...leg, firstTradeId: mine! })).ok).toBe(true)
   })
 })

@@ -12,6 +12,7 @@ import {
   EMPTY_TIME,
   orderByTime,
   resolveExecutedAt,
+  timeEdit,
   toTimeInput,
   type TimeInput,
 } from '~/lib/import/executionTime'
@@ -79,8 +80,8 @@ function changedTimes(
   for (const trade of [...preview.days.flatMap((day) => day.trades), ...preview.trades]) {
     const entry = times[trade.id]
     if (!trade.market || !entry) continue
-    const at = resolveExecutedAt(trade.tradeDate, entry)?.toISOString() ?? null
-    if (at !== trade.executedAt) out[trade.id] = at
+    const at = timeEdit(trade, trade.tradeDate, entry)
+    if (at !== undefined) out[trade.id] = at
   }
   return out
 }

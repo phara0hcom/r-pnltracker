@@ -13,8 +13,8 @@ import { ExecutionTimeInput } from './ExecutionTimeInput'
 import styles from './TradesTable.module.scss'
 import { cx } from '~/lib/cx'
 import {
-  resolveExecutedAt,
   timedMarket,
+  timeEdit,
   toTimeInput,
   type TimeInput,
 } from '~/lib/import/executionTime'
@@ -72,13 +72,12 @@ export function TradeEditRow({
 
   const save = useMutation({
     mutationFn: () => {
-      // Read against the date being saved, so moving the date keeps the time.
-      const at = market ? (resolveExecutedAt(draft.tradeDate, time)?.toISOString() ?? null) : null
       const changed = (Object.keys(draft) as (keyof Draft)[]).some((key) => draft[key] !== initial[key])
       return saveTrade({
         data: {
           id: row.id,
-          executedAt: market && at !== row.executedAt ? at : undefined,
+          // Read against the date being saved, so moving the date keeps the time.
+          executedAt: market ? timeEdit(row, draft.tradeDate, time) : undefined,
           patch: changed ? {
             symbol: draft.symbol,
             name: row.name,

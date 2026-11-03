@@ -580,10 +580,11 @@ Playbook, so it ships first, as its own PR.
   - Days offered for ordering show the input inline in their `DayOrderList`.
   - All other trades go in a collapsible "Execution times (optional)" list.
 - **US fills:**
-  - The date part defaults to the stored 約定日, with a "+1 day" toggle for fills after midnight
-    JST.
-  - The stored 約定日 is the US day before settlement and the JST day after, so the correct toggle
-    setting differs between the two cases.
+  - The date part defaults to the stored 約定日, with a day selector (−1 day, same day, +1 day) for
+    fills on the other side of midnight JST.
+  - The stored 約定日 is the US day before settlement and the JST day after, so the correct
+    selector setting differs between the two cases. A time entered before midnight reads as −1 day
+    once a restatement has moved 約定日.
   - Show the resolved instant in both JST and New York time, for example "= 10/20 11:30 ET", so the
     owner can see which session it lands in.
   - Warn, without blocking, when the instant falls outside the exchange's session hours, extended

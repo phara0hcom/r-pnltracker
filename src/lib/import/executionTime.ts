@@ -3,10 +3,11 @@
  *
  * No Rakuten export carries a time, so the owner types one in on the import
  * screen. It is an instant rather than a time of day because a US fill falls
- * after midnight JST: its JST date can be the stored 約定日 or the day after —
- * the day before settlement Rakuten dates it by the US session, after it by
- * the JST one (see the restatement note in `CLAUDE.md`) — so a bare "02:30"
- * would be ambiguous. The "+1 day" toggle settles which.
+ * after midnight JST: before settlement Rakuten dates it by the US session,
+ * after it by the JST one (see the restatement note in `CLAUDE.md`). So its JST
+ * date can be the stored 約定日 or the day after — or, once a restatement moves
+ * 約定日 past a time entered before midnight, the day before — and a bare "02:30"
+ * would be ambiguous. The day offset settles which.
  *
  * Funds (投資信託) get no time: they fill at the day's 基準価額, not at a
  * moment. Exchange-listed ETFs bought as stock are equities and do.
@@ -16,13 +17,15 @@
 import type { AssetClass, Market } from '../domain/types'
 import { marketOf } from '../domain/types'
 
-/** What the time input holds: `HH:MM` in JST, and whether it is the day after 約定日. */
+export type DayOffset = -1 | 0 | 1
+
+/** What the time input holds: `HH:MM` in JST, and its day relative to 約定日. */
 export interface TimeInput {
   time: string
-  nextDay: boolean
+  dayOffset: DayOffset
 }
 
-export const EMPTY_TIME: TimeInput = { time: '', nextDay: false }
+export const EMPTY_TIME: TimeInput = { time: '', dayOffset: 0 }
 
 /** Null for funds — the one class that is never asked for a time. */
 export const timedMarket = (assetClass: AssetClass): Market | null =>
@@ -36,10 +39,10 @@ function addDays(date: string, days: number): string {
   return at.toISOString().slice(0, 10)
 }
 
-/** The instant a JST time on (or the day after) `tradeDate` names, or null when it is blank or malformed. */
+/** The instant a JST time on (or a day either side of) `tradeDate` names, or null when it is blank or malformed. */
 export function resolveExecutedAt(tradeDate: string, input: TimeInput): Date | null {
   if (!TIME.test(input.time)) return null
-  const date = input.nextDay ? addDays(tradeDate, 1) : tradeDate
+  const date = addDays(tradeDate, input.dayOffset)
   // JST has no daylight saving, so the offset is fixed.
   return new Date(`${date}T${input.time}:00+09:00`)
 }
@@ -79,12 +82,36 @@ const md = (date: string) => `${String(Number(date.slice(5, 7)))}/${String(Numbe
 export function toTimeInput(tradeDate: string, at: Date | null): TimeInput {
   if (!at) return EMPTY_TIME
   const jst = localParts(at, 'Asia/Tokyo')
+  const offsets: DayOffset[] = [-1, 1]
   return {
     time: `${pad(jst.hour)}:${pad(jst.minute)}`,
     // A trade re-dated by hand may sit further away; the time is kept and the
     // owner sees it against the new date.
-    nextDay: jst.date === addDays(tradeDate, 1),
+    dayOffset: offsets.find((offset) => jst.date === addDays(tradeDate, offset)) ?? 0,
   }
+}
+
+/**
+ * What an input means for the stored time: an ISO instant to write, null to
+ * clear it, or undefined to leave it alone.
+ *
+ * An input the owner did not touch never writes, even if it would resolve to
+ * something else. An instant further than a day from 約定日 cannot be shown
+ * exactly, and comparing the resolved instant with the stored one would write
+ * that difference as if it had been typed — a restatement once moved times a
+ * day that way. Moving `date` by hand counts as an edit: the time goes with it.
+ */
+export function timeEdit(
+  stored: { tradeDate: string; executedAt: string | null },
+  date: string,
+  input: TimeInput,
+): string | null | undefined {
+  const shown = toTimeInput(stored.tradeDate, stored.executedAt ? new Date(stored.executedAt) : null)
+  if (date === stored.tradeDate && input.time === shown.time && input.dayOffset === shown.dayOffset) {
+    return undefined
+  }
+  const at = resolveExecutedAt(date, input)?.toISOString() ?? null
+  return at === stored.executedAt ? undefined : at
 }
 
 /** `10/21 00:30 JST`. */
@@ -138,7 +165,7 @@ export function sessionWarning(at: Date, market: Market): string | null {
   const session = SESSIONS[market]
   const local = localParts(at, session.zone)
   if (local.weekday === 'Sat' || local.weekday === 'Sun') {
-    return `That is a ${local.weekday === 'Sat' ? 'Saturday' : 'Sunday'} on the exchange — check the time and the +1 day.`
+    return `That is a ${local.weekday === 'Sat' ? 'Saturday' : 'Sunday'} on the exchange — check the time and its day.`
   }
   const minutes = local.hour * 60 + local.minute
   if (session.windows.some(([from, to]) => minutes >= from && minutes < to)) return null

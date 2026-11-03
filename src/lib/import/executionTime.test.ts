@@ -8,32 +8,74 @@ import {
   resolveExecutedAt,
   sessionWarning,
   timedMarket,
+  timeEdit,
   toTimeInput,
+  type DayOffset,
+  type TimeInput,
 } from './executionTime'
 
 describe('resolveExecutedAt', () => {
   it('reads the time as JST on the trade date', () => {
-    expect(resolveExecutedAt('2026-10-20', { time: '09:05', nextDay: false })?.toISOString()).toBe(
+    expect(resolveExecutedAt('2026-10-20', { time: '09:05', dayOffset: 0 })?.toISOString()).toBe(
       '2026-10-20T00:05:00.000Z',
     )
   })
 
   it('moves to the next day for a fill after midnight JST', () => {
-    expect(resolveExecutedAt('2026-10-31', { time: '00:30', nextDay: true })?.toISOString()).toBe(
+    expect(resolveExecutedAt('2026-10-31', { time: '00:30', dayOffset: 1 })?.toISOString()).toBe(
       '2026-10-31T15:30:00.000Z',
     )
   })
 
   it('is null for a blank or malformed time', () => {
-    expect(resolveExecutedAt('2026-10-20', { time: '', nextDay: false })).toBeNull()
-    expect(resolveExecutedAt('2026-10-20', { time: '24:00', nextDay: false })).toBeNull()
-    expect(resolveExecutedAt('2026-10-20', { time: '9:05', nextDay: false })).toBeNull()
+    expect(resolveExecutedAt('2026-10-20', { time: '', dayOffset: 0 })).toBeNull()
+    expect(resolveExecutedAt('2026-10-20', { time: '24:00', dayOffset: 0 })).toBeNull()
+    expect(resolveExecutedAt('2026-10-20', { time: '9:05', dayOffset: 0 })).toBeNull()
   })
 
-  it('round-trips through toTimeInput', () => {
-    const input = { time: '01:15', nextDay: true }
-    expect(toTimeInput('2026-10-20', resolveExecutedAt('2026-10-20', input))).toEqual(input)
-    expect(toTimeInput('2026-10-20', null)).toEqual({ time: '', nextDay: false })
+  it('round-trips through toTimeInput on either side of the trade date', () => {
+    for (const dayOffset of [-1, 0, 1] as const) {
+      const input = { time: '01:15', dayOffset }
+      expect(toTimeInput('2026-10-20', resolveExecutedAt('2026-10-20', input))).toEqual(input)
+    }
+    expect(toTimeInput('2026-10-20', null)).toEqual({ time: '', dayOffset: 0 })
+  })
+
+  it('keeps the instant of a pre-midnight fill that a restatement re-dated', () => {
+    // Entered as 09-03 23:45 JST, then restated from 09-03 to 09-04.
+    const input = toTimeInput('2026-09-04', new Date('2026-09-03T14:45:00Z'))
+    expect(input).toEqual({ time: '23:45', dayOffset: -1 })
+    expect(resolveExecutedAt('2026-09-04', input)?.toISOString()).toBe('2026-09-03T14:45:00.000Z')
+  })
+})
+
+describe('timeEdit', () => {
+  const restated = { tradeDate: '2026-09-04', executedAt: '2026-09-03T14:45:00.000Z' }
+  const shown = (stored: typeof restated): TimeInput => toTimeInput(stored.tradeDate, new Date(stored.executedAt))
+
+  it('leaves a restated time alone when the owner touched nothing', () => {
+    expect(timeEdit(restated, restated.tradeDate, shown(restated))).toBeUndefined()
+  })
+
+  it('leaves alone a time too far from the trade date to show exactly', () => {
+    const far = { tradeDate: '2026-09-10', executedAt: '2026-09-03T14:45:00.000Z' }
+    expect(timeEdit(far, far.tradeDate, shown(far))).toBeUndefined()
+  })
+
+  it('writes a time the owner changed, and clears one they emptied', () => {
+    expect(timeEdit(restated, restated.tradeDate, { time: '23:50', dayOffset: -1 })).toBe('2026-09-03T14:50:00.000Z')
+    expect(timeEdit(restated, restated.tradeDate, { time: '', dayOffset: 0 })).toBeNull()
+  })
+
+  it('writes a first time, and nothing for a row that stays blank', () => {
+    const blank = { tradeDate: '2026-09-04', executedAt: null }
+    expect(timeEdit(blank, blank.tradeDate, { time: '09:05', dayOffset: 0 })).toBe('2026-09-04T00:05:00.000Z')
+    expect(timeEdit(blank, blank.tradeDate, { time: '', dayOffset: 0 })).toBeUndefined()
+  })
+
+  it('moves the time with a date changed by hand', () => {
+    const stored = { tradeDate: '2026-10-20', executedAt: '2026-10-20T00:05:00.000Z' }
+    expect(timeEdit(stored, '2026-10-21', shown(stored))).toBe('2026-10-21T00:05:00.000Z')
   })
 })
 
@@ -48,17 +90,17 @@ describe('timedMarket', () => {
 describe('formatting', () => {
   it('shows a US fill in both zones, daylight saving included', () => {
     // 2026-10-21 00:30 JST is 10/20 11:30 EDT.
-    const summer = resolveExecutedAt('2026-10-20', { time: '00:30', nextDay: true })!
+    const summer = resolveExecutedAt('2026-10-20', { time: '00:30', dayOffset: 1 })!
     expect(formatJst(summer)).toBe('10/21 00:30 JST')
     expect(formatEt(summer)).toBe('10/20 11:30 ET')
     // After 1 November New York is on EST, an hour further behind.
-    const winter = resolveExecutedAt('2026-11-10', { time: '00:30', nextDay: true })!
+    const winter = resolveExecutedAt('2026-11-10', { time: '00:30', dayOffset: 1 })!
     expect(formatEt(winter)).toBe('11/10 10:30 ET')
   })
 })
 
 describe('sessionWarning', () => {
-  const at = (date: string, time: string, nextDay = false) => resolveExecutedAt(date, { time, nextDay })!
+  const at = (date: string, time: string, dayOffset: DayOffset = 0) => resolveExecutedAt(date, { time, dayOffset })!
 
   it('accepts the TSE session and PTS night trading', () => {
     expect(sessionWarning(at('2026-10-20', '09:00'), 'JP')).toBeNull()
@@ -79,7 +121,7 @@ describe('sessionWarning', () => {
 
   it('warns when the +1 day lands a fill on the weekend', () => {
     // Friday 10/23, 23:00 JST + 1 day is Saturday 10:00 EDT.
-    expect(sessionWarning(at('2026-10-23', '23:00', true), 'US')).toMatch(/Saturday/)
+    expect(sessionWarning(at('2026-10-23', '23:00', 1), 'US')).toMatch(/Saturday/)
   })
 })
 
@@ -91,7 +133,7 @@ interface Item {
 const item = (id: string, pool: string, time: string | null): Item => ({
   id,
   pool,
-  at: time ? resolveExecutedAt('2026-10-20', { time, nextDay: false }) : null,
+  at: time ? resolveExecutedAt('2026-10-20', { time, dayOffset: 0 }) : null,
 })
 const ids = (items: Item[] | null) => items?.map((entry) => entry.id) ?? null
 const pool = (entry: Item) => entry.pool
@@ -136,7 +178,7 @@ describe('orderContradictsTimes', () => {
 
 describe('carriedTimes', () => {
   const fill = { symbol: '8729', accountType: 'SPECIFIC', side: 'BUY', tradeDate: '2026-09-15' }
-  const at = resolveExecutedAt('2026-09-15', { time: '09:01', nextDay: false })!
+  const at = resolveExecutedAt('2026-09-15', { time: '09:01', dayOffset: 0 })!
 
   it('carries a time every regrouped fill shared to the replacements', () => {
     const out = carriedTimes(
@@ -154,7 +196,7 @@ describe('carriedTimes', () => {
   })
 
   it('carries nothing when the fills differed or one had no time', () => {
-    const later = resolveExecutedAt('2026-09-15', { time: '10:30', nextDay: false })!
+    const later = resolveExecutedAt('2026-09-15', { time: '10:30', dayOffset: 0 })!
     expect(
       carriedTimes(
         [
