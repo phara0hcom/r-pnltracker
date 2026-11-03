@@ -35,6 +35,16 @@ export function extraTargetsProblem(targets: readonly ExtraTarget[]): string | n
 }
 
 /**
+ * A symbol typed from scratch, in the form an import will use: a 東証 code, four
+ * characters and digit-led (`7203`, `130A`), or a US ticker. Anything else would
+ * create an instrument no later export can ever match.
+ */
+export function symbolProblem(symbol: string, market: 'JP' | 'US'): string | null {
+  if (market === 'JP') return /^\d[0-9A-Z]{3}$/.test(symbol) ? null : 'A Japanese stock code is four characters, like 7203.'
+  return /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol) ? null : 'A US ticker is letters, like AAPL.'
+}
+
+/**
  * A static plan's stop below entry and Target 1 above it — the other way round
  * the framework would invert, as `createExitRule` refuses support at or above
  * entry for the same reason.

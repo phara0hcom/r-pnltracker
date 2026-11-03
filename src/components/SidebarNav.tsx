@@ -29,6 +29,7 @@ const NAV: { to: NavRoute; label: string; remembersMarket?: true }[] = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/trades', label: 'Trades' },
   { to: '/positions', label: 'Positions', remembersMarket: true },
+  { to: '/playbook', label: 'Playbook' },
   { to: '/exits', label: 'Exit Rules' },
   { to: '/dividends', label: 'Dividends' },
   { to: '/calendar', label: 'Calendar' },

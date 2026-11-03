@@ -7,9 +7,8 @@
  * is the only caller, and it already runs after the response has gone out, so
  * every failure here has to report itself rather than propagate.
  */
-import type Decimal from 'decimal.js'
 import { engineFor } from './engine'
-import { evaluateExitRule, positionsByPool } from './exitPosition'
+import { evaluateExitRule, holdingContext, type HoldingContext } from './exitPosition'
 import { barsFor, getExitSettings, listExitRulesForInstrument, type ExitRuleRecord } from '~/db/exit.service'
 import {
   getExitActionState,
@@ -18,11 +17,12 @@ import {
   recordExitActionState,
   type PushSubscriptionRecord,
 } from '~/db/notifications.service'
-import { openEntryStreaks, type EntryStreak } from '~/lib/exit/entry'
+import { listJournalEntries } from '~/db/playbook.service'
 import type { ExitSettings, FeedBar } from '~/lib/exit/types'
 import { actionChanged, exitActionPushPayload } from '~/lib/notifications/exitActionNotice'
 import { isGoneSubscription, sendWebPush, serverPushConfigured } from '~/lib/notifications/webpush'
 import { reportError } from '~/lib/observability/report'
+import { holdingStreaks } from '~/lib/playbook/streaks'
 
 /**
  * Re-evaluates every live plan against one instrument and pushes a
@@ -62,15 +62,22 @@ async function notifyForUser(
 ): Promise<void> {
   const sendingEnabled = serverPushConfigured()
 
-  const [{ trades, engine }, settings, subscriptions, bars] = await Promise.all([
+  const [{ records, trades, engine }, entries, settings, subscriptions, bars] = await Promise.all([
     engineFor(userId),
+    listJournalEntries(userId, { includeArchived: true }),
     getExitSettings(userId),
     sendingEnabled ? listPushSubscriptions(userId) : Promise.resolve([]),
     barsFor([instrumentId]),
   ])
 
-  const heldBy = positionsByPool(engine.positions)
-  const streaks = openEntryStreaks(trades)
+  // The same facts as the Playbook's loader, so a position opened from scratch
+  // cannot read closed here and open there.
+  const holdings = holdingContext(
+    engine.positions,
+    trades,
+    entries,
+    holdingStreaks(records.map((record) => ({ id: record.id, trade: record.trade }))),
+  )
   const instrumentBars = bars.get(instrumentId) ?? []
   const now = new Date()
 
@@ -80,7 +87,7 @@ async function notifyForUser(
     // notifying one must not skip every rule after it in this same delivery —
     // that would silently defer a change, possibly a stop-out, to tomorrow.
     try {
-      await notifyForRule(rule, userId, { heldBy, streaks, instrumentBars, settings, now, subscriptions })
+      await notifyForRule(rule, userId, { holdings, instrumentBars, settings, now, subscriptions })
     } catch (error) {
       reportError(error, { ruleId: rule.id, instrumentId, phase: 'notify-rule' })
     }
@@ -88,8 +95,7 @@ async function notifyForUser(
 }
 
 interface RuleContext {
-  heldBy: Map<string, Decimal>
-  streaks: Map<string, EntryStreak>
+  holdings: HoldingContext
   instrumentBars: FeedBar[]
   settings: ExitSettings
   now: Date
@@ -99,9 +105,9 @@ interface RuleContext {
 async function notifyForRule(
   rule: ExitRuleRecord,
   userId: string,
-  { heldBy, streaks, instrumentBars, settings, now, subscriptions }: RuleContext,
+  { holdings, instrumentBars, settings, now, subscriptions }: RuleContext,
 ): Promise<void> {
-  const { result } = evaluateExitRule(rule, heldBy, streaks, instrumentBars, settings, now)
+  const { result } = evaluateExitRule(rule, holdings, instrumentBars, settings, now)
 
   const previous = await getExitActionState(rule.id)
   if (!actionChanged(previous, result.action.kind)) {

@@ -31,6 +31,7 @@ const trade = (id: string): CalendarDay['trades'][number] => ({
   memo: null,
   motivation: null,
   daySequence: null,
+  journalId: null,
   executedAt: null,
 })
 

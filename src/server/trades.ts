@@ -9,6 +9,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { eq } from 'drizzle-orm'
 import { authed } from './middleware'
 import { db } from '~/db'
+import { saveTradeNote, sharedNotesFor } from '~/db/playbook.service'
 import { cashMovements, dividends, instruments } from '~/db/schema'
 import {
   createManualTrade,
@@ -76,7 +77,10 @@ export interface TradeRow {
   isSettled: boolean
   origin: 'IMPORT' | 'MANUAL'
   isEdited: boolean
+  /** Its leg's note when it belongs to a Playbook position, else its own memo. */
   memo: string | null
+  /** The Playbook position it belongs to, if any. */
+  journalId: string | null
   /** ISO instant the owner entered, or null. Funds never have one. */
   executedAt: string | null
 }
@@ -97,6 +101,7 @@ export const listTradeRows = createServerFn({ method: 'GET' })
   .handler(async ({ context }): Promise<TradeRow[]> => {
     const records = await listTrades(context.userId)
     const engine = runEngine(records.map((r) => r.trade))
+    const shared = await sharedNotesFor(context.userId, records)
 
     // Realized P&L belongs to a closing event, not a trade row. Each event
     // carries the trade that closed it, so a row finds its own close even when
@@ -152,7 +157,8 @@ export const listTradeRows = createServerFn({ method: 'GET' })
         isSettled: trade.isSettled,
         origin,
         isEdited,
-        memo,
+        memo: shared.has(id) ? shared.get(id)!.note || null : memo,
+        journalId: shared.get(id)?.journalId ?? null,
         executedAt: executedAt?.toISOString() ?? null,
       }
     })
@@ -170,14 +176,16 @@ export interface MutationResult {
  *
  * `patch` is left out when only the time changed: an execution time is not a
  * correction of Rakuten's figures, and going through `updateTrade` would mark
- * the row edited for it.
+ * the row edited for it. `note` goes the same way, to the trade's memo or its
+ * Playbook leg: writing a note never marks a trade edited either.
  */
 export const saveTrade = createServerFn({ method: 'POST' })
   .middleware([authed])
   .validator(
-    (data: { id: string; patch?: ManualTradeInput; executedAt?: string | null }) => data,
+    (data: { id: string; patch?: ManualTradeInput; executedAt?: string | null; note?: string | null }) => data,
   )
   .handler(async ({ data, context }): Promise<MutationResult> => {
+    if (data.note && data.note.length > 2000) return { ok: false, errors: { memo: 'Too long.' } }
     let at: Date | null | undefined
     if (data.executedAt !== undefined) {
       at = data.executedAt === null ? null : new Date(data.executedAt)
@@ -191,6 +199,7 @@ export const saveTrade = createServerFn({ method: 'POST' })
       await updateTrade(context.userId, data.id, parsed.value)
     }
     if (at !== undefined) await setExecutionTimes(context.userId, new Map([[data.id, at]]))
+    if (data.note !== undefined) await saveTradeNote(context.userId, data.id, data.note)
     return { ok: true, id: data.id }
   })
 

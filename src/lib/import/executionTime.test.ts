@@ -228,3 +228,11 @@ describe('carriedTimes', () => {
     expect(out.size).toBe(0)
   })
 })
+
+describe('resolveExecutedAt with a date still being typed', () => {
+  it('reads as blank rather than as an Invalid Date', () => {
+    for (const dayOffset of [-1, 0, 1] as const) {
+      expect(resolveExecutedAt('', { time: '10:30', dayOffset })).toBeNull()
+    }
+  })
+})

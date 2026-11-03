@@ -8,19 +8,17 @@
  * six levels were being paid for eight times over on a screen whose question is
  * "is there anything I have to do?", so they moved here, one plan at a time.
  *
- * Not `ExitRuleDialog`: that one is the create/edit form. Nothing here is an
- * input, and nothing here computes — every level, flag and the recommendation
- * itself arrive already decided from `lib/exit/rules.ts`.
+ * Nothing here is an input, and nothing here computes — every level, flag and
+ * the recommendation itself arrive already decided from `lib/exit/rules.ts`.
+ * Plans are changed in the Playbook.
  */
 import * as Dialog from '@radix-ui/react-dialog'
-import { useRef } from 'react'
 import { ExitFlags } from './ExitFlags'
 import { ExitLadder } from './ExitLadder'
 import styles from './ExitPlanDialog.module.scss'
 import { AccountDot } from '~/components/AccountDot'
 import { ACCOUNT_LABEL, ASSET_LABEL, money, moneySigned, qty, tone } from '~/components/format'
 import { ExternalIcon } from '~/components/icons/ExternalIcon'
-import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { useDialogHistory } from '~/components/ui/useDialogHistory'
 import { cx } from '~/lib/cx'
 import { tradingViewUrl } from '~/lib/tradingview'
@@ -58,24 +56,11 @@ function Level({
 export function ExitPlanDialog({
   row,
   onClose,
-  onArchive,
-  onEdit,
 }: {
   /** The plan to show; `null` closes the dialog. */
   row: ExitRuleRow | null
   onClose: () => void
-  onArchive: (id: string) => void
-  onEdit: (row: ExitRuleRow) => void
 }) {
-  /*
-   * Set while Edit is handing this dialog over to `ExitRuleDialog`.
-   *
-   * Radix returns focus to whatever opened a dialog when it closes, which is
-   * right for every close but this one: the form opens in the same commit, and
-   * the two would race for focus with the card that was clicked liable to win.
-   * Suppressing the restore leaves the form's own focus management unopposed.
-   */
-  const handingOff = useRef(false)
   useDialogHistory(row !== null, onClose)
 
   /** `null` for funds, which carry no ticker in any export. */
@@ -90,14 +75,7 @@ export function ExitPlanDialog({
     >
       <Dialog.Portal>
         <Dialog.Overlay className={styles.overlay} />
-        <Dialog.Content
-          className={styles.content}
-          onCloseAutoFocus={(event) => {
-            if (!handingOff.current) return
-            handingOff.current = false
-            event.preventDefault()
-          }}
-        >
+        <Dialog.Content className={styles.content}>
           {row === null ? null : (
             <>
               <header className={styles.head}>
@@ -231,33 +209,6 @@ export function ExitPlanDialog({
                   )}
                 </dl>
 
-                {/*
-                  Both actions live here rather than on the card or the row.
-                  Nesting them inside a click target that itself opens this
-                  dialog is the nested-button problem, and moving them is what
-                  lets the list be clickable at all.
-                */}
-                <div className={styles.actions}>
-                  <ConfirmButton
-                    size="small"
-                    onConfirm={() => {
-                      onArchive(row.id)
-                    }}
-                    title="Retire this exit plan"
-                  >
-                    Archive
-                  </ConfirmButton>
-                  <button
-                    type="button"
-                    className={styles.editButton}
-                    onClick={() => {
-                      handingOff.current = true
-                      onEdit(row)
-                    }}
-                  >
-                    Edit plan
-                  </button>
-                </div>
               </footer>
 
               {row.note ? <p className={styles.note}>{row.note}</p> : null}

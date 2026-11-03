@@ -39,8 +39,7 @@ instrument's current price. `price_cache` has no `userId`: a quote is market dat
 and one row serves everyone, which is what lets an unauthenticated route write it
 at all. So a leaked secret no longer only distorts the Exit Rules screen; it
 moves the market value and unrealized P&L shown on Positions, the Dashboard and
-Stats. It still cannot read anything, reach an instrument that was never traded,
-or touch a hand-entered override, which wins over the cache everywhere. Rotate it
+Stats. It still cannot read anything or touch a hand-entered override, which wins over the cache everywhere. Rotate it
 if it is ever exposed, and re-run *Refresh prices* afterwards to overwrite
 anything a bogus bar published.
 
@@ -124,9 +123,13 @@ group — the flag is the only thing distinguishing it there.
 
 ## 2. Opening a plan
 
-**Exit Rules → New plan.** Pick an open holding; entry date, entry price and
-size prefill from the current holding streak. Only the support level is yours to
-enter.
+**Playbook → Open position.** A live plan is opened with its position, in one
+transaction, from a holding or from scratch; the Exit Rules screen is read-only.
+From a holding, entry date, entry price and size prefill from the current holding
+streak. The stop and Target 1 multiples default from settings and can be changed
+for this plan, and Target 1 can be typed by hand. Opening a position on a pool
+whose old plan's position is over archives that plan in the same transaction; a
+plan still describing an open position refuses the new one.
 
 "Holding streak" means the run since the position was last flat — see
 `src/lib/exit/entry.ts`. It is not the engine's moving-average cost basis, which
@@ -137,8 +140,9 @@ position scaled into over three days was entered at that blend.
 Prefilled values stay editable and are **frozen into the plan on save**. Nothing
 recalculates them afterwards.
 
-**Shares remaining is not stored.** It is read live from the engine's pool
-quantity, so importing the Target 1 sell is what moves a plan from "take partial"
+**Shares remaining is not stored.** It is read live: from the position's own
+streak, its typed legs while it awaits import, or the engine's pool quantity for a
+plan with no position (`holdingFacts`). So importing the Target 1 sell is what moves a plan from "take partial"
 to "trail" — there is no second flag to keep in step, and no way for the two to
 disagree.
 
@@ -443,8 +447,10 @@ every US plan opened before settlement the next day, with nothing sold (SO,
 October 2026). For the same reason a US close dated on the plan's own entry day
 does not count: it may be the previous session's, moved onto that day.
 
-**An unknown ticker is discarded with a 404** and logged. An alert exists for
-something the account has never traded, so there is nothing to attach a bar to.
+**An unknown ticker is discarded with a 404** and logged: nothing has ever traded
+or filed it, so there is nothing to attach a bar to. A position opened from scratch
+or on paper creates its instrument, so the feed stores and publishes closes for it
+from the start.
 
 **Suggested-action precedence** runs most urgent first, so a stopped-out position
 is never also told to "hold". A stop-out outranks staleness — knowing the last
@@ -476,7 +482,7 @@ a zero-share sale.
 | `src/components/exits/ExitCard.tsx` | The slim card, for plans rated `urgent` or `attention` |
 | `src/components/exits/ExitPlanRow.tsx` | The table row, for plans rated `neutral` |
 | `src/components/exits/ExitPlanDialog.tsx` | One plan in full, read-only — opened from either |
-| `src/components/exits/ExitRuleDialog.tsx` | The create/edit form (not the read dialog) |
+| `src/components/playbook/OpenPositionDialog.tsx`, `PositionDialogs.tsx` | Opening a plan with its position, and correcting one |
 | `src/lib/notifications/exitActionNotice.ts` | Change detection and push payload shaping — pure |
 | `src/lib/notifications/webpush.ts` | The only module that imports `web-push` |
 | `src/db/notifications.service.ts` | Push subscriptions and `exit_action_state` storage |

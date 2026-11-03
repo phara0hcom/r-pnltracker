@@ -33,6 +33,8 @@ export interface StreakTrade {
   trade: NormalizedTrade
   /** When it filled, if the owner entered it. */
   executedAt?: Date | null
+  /** The trade's own memo, read as its leg's note until the owner writes one. */
+  memo?: string | null
 }
 
 export interface HoldingStreak {
@@ -185,6 +187,33 @@ export function resolvePosition(position: PositionAnchor, streaks: readonly Hold
     if (byDate) return { kind: 'FOUND', streak: byDate, via: 'FALLBACK' }
   }
   return { kind: 'MISSING' }
+}
+
+/**
+ * The streak an exit plan was made over — for a plan with no position yet, which
+ * has only its dates to go on.
+ *
+ * The streak starting on the plan's entry date (or the day after, for a US pool,
+ * as the anchor falls back); otherwise the one running across that date, since a
+ * plan's entry date can be typed in anywhere inside the swing. Null when the pool
+ * held nothing then.
+ */
+export function streakOfPlan(
+  plan: Pick<PositionAnchor, 'symbol' | 'accountType' | 'assetClass' | 'entryDate'>,
+  streaks: readonly HoldingStreak[],
+): HoldingStreak | null {
+  const pool = streaks.filter((streak) => streak.symbol === plan.symbol && streak.accountType === plan.accountType)
+  const dates = plan.assetClass === 'US_EQUITY' ? [plan.entryDate, addDays(plan.entryDate, 1)] : [plan.entryDate]
+  for (const date of dates) {
+    const exact = pool.find((streak) => streak.entryDate === date)
+    if (exact) return exact
+  }
+  return (
+    pool.find(
+      (streak) =>
+        streak.entryDate <= plan.entryDate && (streak.closeDate === null || streak.closeDate >= plan.entryDate),
+    ) ?? null
+  )
 }
 
 /** A real position's status. Paper positions use `paperStatus` in `paper.ts`. */

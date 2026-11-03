@@ -54,7 +54,20 @@ export interface ExitRuleInput {
   lotSize: number
   trailingMethod: TrailingMethod | null
   note: string | null
+  /** The Playbook position it is opened from. */
+  journalId?: string | null
+  /** A manual Target 1, locked like the other entry facts. */
+  target1Override?: string | null
 }
+
+/**
+ * Where `createExitRule` writes: the pool, or a transaction opening a position,
+ * so that a plan and the position it belongs to land together or not at all.
+ */
+type Executor = Pick<typeof db, 'select' | 'insert'>
+
+/** Refused rather than failed, so a caller can show the message as it stands. */
+export class ExitPlanRefused extends Error {}
 
 /**
  * A fresh id per plan.
@@ -159,8 +172,9 @@ export async function createExitRule(
   userId: string,
   input: ExitRuleInput,
   multiples: { stopAtr: string; target: string },
+  executor: Executor = db,
 ): Promise<string> {
-  const [instrument] = await db
+  const [instrument] = await executor
     .select()
     .from(instruments)
     .where(eq(instruments.symbol, input.symbol))
@@ -173,7 +187,7 @@ export async function createExitRule(
   // pool on a different entry date slipped past the upsert and died as a raw
   // 23505, while re-creating one for the same date silently resurrected and
   // overwrote the archived record.
-  const [live] = await db
+  const [live] = await executor
     .select({ id: exitRules.id })
     .from(exitRules)
     .where(
@@ -185,12 +199,12 @@ export async function createExitRule(
       ),
     )
   if (live) {
-    throw new Error(
+    throw new ExitPlanRefused(
       `${input.symbol} already has an active exit plan. Archive it before opening another.`,
     )
   }
 
-  const [entryBar] = await db
+  const [entryBar] = await executor
     .select({ atr14: exitFeedBars.atr14 })
     .from(exitFeedBars)
     .where(
@@ -202,7 +216,7 @@ export async function createExitRule(
 
   const id = newExitRuleId()
 
-  await db.insert(exitRules).values({
+  await executor.insert(exitRules).values({
     id,
     userId,
     instrumentId: instrument.id,
@@ -215,6 +229,8 @@ export async function createExitRule(
     // Frozen here, from the settings in force at creation.
     entryStopAtrMultiple: multiples.stopAtr,
     entryTargetMultiple: multiples.target,
+    target1Override: input.target1Override ?? null,
+    journalId: input.journalId ?? null,
     lotSize: input.lotSize,
     trailingMethod: input.trailingMethod,
     note: input.note,
@@ -234,12 +250,29 @@ export async function createExitRule(
 export async function updateExitRule(
   userId: string,
   id: string,
-  patch: Partial<Pick<ExitRuleInput, 'entryPrice' | 'supportLevel' | 'totalShares' | 'trailingMethod' | 'note'>>,
+  patch: Partial<
+    Pick<ExitRuleInput, 'entryPrice' | 'supportLevel' | 'totalShares' | 'trailingMethod' | 'note' | 'target1Override'> & {
+      entryStopAtrMultiple: string
+      entryTargetMultiple: string
+    }
+  >,
 ): Promise<void> {
   await db
     .update(exitRules)
     .set({ ...patch, updatedAt: new Date() })
     .where(and(eq(exitRules.userId, userId), eq(exitRules.id, id)))
+}
+
+/** The ATR of a symbol's entry-date bar, if one has arrived. */
+export async function entryAtrFor(symbol: string, entryDate: string): Promise<Decimal | null> {
+  // The preview asks as the owner types, and Postgres would throw on a partial date.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) return null
+  const [bar] = await db
+    .select({ atr14: exitFeedBars.atr14 })
+    .from(exitFeedBars)
+    .innerJoin(instruments, eq(exitFeedBars.instrumentId, instruments.id))
+    .where(and(eq(instruments.symbol, symbol), eq(exitFeedBars.tradingDay, entryDate)))
+  return bar ? new Decimal(bar.atr14) : null
 }
 
 /** Retires a plan. Kept rather than deleted so the record of the trade survives. */
@@ -486,6 +519,15 @@ export async function getExitSettings(userId: string): Promise<ExitSettings> {
   }
 }
 
+/** The account size that prefills a new position; null when never given. */
+export async function getAccountEquity(userId: string): Promise<Decimal | null> {
+  const [row] = await db
+    .select({ accountEquity: exitSettings.accountEquity })
+    .from(exitSettings)
+    .where(eq(exitSettings.userId, userId))
+  return row?.accountEquity ? new Decimal(row.accountEquity) : null
+}
+
 export interface ExitSettingsInput {
   targetMultiple: string
   partialExitFraction: string
@@ -494,6 +536,7 @@ export interface ExitSettingsInput {
   timeStopDays: number
   trailingMethod: TrailingMethod
   staleTradingDays: number
+  accountEquity: string | null
 }
 
 export async function saveExitSettings(

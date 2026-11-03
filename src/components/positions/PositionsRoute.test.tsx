@@ -93,7 +93,7 @@ const serving = (book = BOOK) => {
 }
 
 /** Every screen the sidebar links to; the others are empty stand-ins. */
-const NAV_ROUTES = ['/dashboard', '/trades', '/exits', '/dividends', '/calendar', '/stats', '/nisa', '/tax', '/import', '/settings']
+const NAV_ROUTES = ['/dashboard', '/trades', '/playbook', '/exits', '/dividends', '/calendar', '/stats', '/nisa', '/tax', '/import', '/settings']
 
 /**
  * The real Positions route under a bare root — or, `withNav`, under a root that

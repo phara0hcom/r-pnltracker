@@ -41,7 +41,9 @@ function addDays(date: string, days: number): string {
 
 /** The instant a JST time on (or a day either side of) `tradeDate` names, or null when it is blank or malformed. */
 export function resolveExecutedAt(tradeDate: string, input: TimeInput): Date | null {
-  if (!TIME.test(input.time)) return null
+  // A date still being typed is as blank as the time: an Invalid Date would throw
+  // from the first thing that formats it, mid-render.
+  if (!TIME.test(input.time) || !/^\d{4}-\d{2}-\d{2}$/.test(tradeDate)) return null
   const date = addDays(tradeDate, input.dayOffset)
   // JST has no daylight saving, so the offset is fixed.
   return new Date(`${date}T${input.time}:00+09:00`)

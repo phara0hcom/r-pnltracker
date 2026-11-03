@@ -64,7 +64,7 @@ describe('the urgency split', () => {
     // made it announce as "7203 トヨタ自動車 — open chart on TradingView in a
     // new tab", because the link carries that text for its own screen-reader
     // label. Nothing about the rendered dialog looks different when it returns.
-    render(<ExitPlanDialog row={ROW} onClose={vi.fn()} onArchive={vi.fn()} onEdit={vi.fn()} />)
+    render(<ExitPlanDialog row={ROW} onClose={vi.fn()} />)
 
     const id = screen.getByRole('dialog').getAttribute('aria-labelledby')
     expect(id).toBeTruthy()
@@ -74,8 +74,8 @@ describe('the urgency split', () => {
     expect(screen.getByRole('link', { name: /Open 7203 on TradingView/ })).toBeTruthy()
   })
 
-  it('gives the dialog everything the card gave up, plus edit and archive', () => {
-    render(<ExitPlanDialog row={ROW} onClose={vi.fn()} onArchive={vi.fn()} onEdit={vi.fn()} />)
+  it('gives the dialog everything the card gave up, and nothing to change it with', () => {
+    render(<ExitPlanDialog row={ROW} onClose={vi.fn()} />)
 
     for (const level of [
       'Current',
@@ -89,7 +89,8 @@ describe('the urgency split', () => {
     }
     expect(screen.getByText('63d · 42 sessions')).toBeTruthy()
     expect(screen.getByText(ROW.note ?? '')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Edit plan' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Archive' })).toBeTruthy()
+    // Plans are changed in the Playbook, so nothing is managed from two places.
+    expect(screen.queryByRole('button', { name: 'Edit plan' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull()
   })
 })

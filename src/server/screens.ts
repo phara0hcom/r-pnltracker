@@ -13,6 +13,7 @@ import { authed } from './middleware'
 import { db } from '~/db'
 import { fromDividendRow, instrumentId } from '~/db/mappers'
 import { listNotes } from '~/db/notes.service'
+import { sharedNotesFor } from '~/db/playbook.service'
 import { usdJpyRate } from '~/db/prices.service'
 import {
   dividends as dividendsTable,
@@ -798,7 +799,10 @@ export interface CalendarTrade {
   avgCost: string | null
   /** Days from the quantity-weighted mean acquisition date to this sale. */
   holdingDays: number | null
+  /** Its leg's note when it belongs to a Playbook position, else its own memo. */
   memo: string | null
+  /** The Playbook position it belongs to, if any. */
+  journalId: string | null
   motivation: number | null
   /** Its place in the day's hand-set order, or null while the day has none. */
   daySequence: number | null
@@ -871,6 +875,7 @@ export const getCalendar = createServerFn({ method: 'GET' })
     const last = `${String(year)}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
     const { engine, records } = await engineFor(context.userId, data.account)
+    const shared = await sharedNotesFor(context.userId, records)
 
     // Each close carries the trade that made it, so a row finds its own close
     // even when another sell that day shares its symbol, account and size.
@@ -931,7 +936,8 @@ export const getCalendar = createServerFn({ method: 'GET' })
         returnPct: isClose ? (realized?.pct ?? null) : null,
         avgCost: isClose ? (realized?.avgCost ?? null) : null,
         holdingDays: isClose ? (realized?.holdingDays ?? null) : null,
-        memo: record.memo,
+        memo: shared.has(record.id) ? shared.get(record.id)!.note || null : record.memo,
+        journalId: shared.get(record.id)?.journalId ?? null,
         motivation: record.motivation,
         daySequence: trade.daySequence ?? null,
         executedAt: record.executedAt?.toISOString() ?? null,

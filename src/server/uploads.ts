@@ -9,6 +9,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { authed } from './middleware'
 import { commitImport, previewImport } from '~/db/import.service'
 import { idFor } from '~/db/mappers'
+import { linkablePositions } from '~/db/playbook.service'
 import { listTrades, setDayOrder, setExecutionTimes } from '~/db/trades.service'
 import type { NormalizedTrade } from '~/lib/domain/types'
 import { daysToOrder, type OrderCandidate } from '~/lib/import/dayOrder'
@@ -252,6 +253,11 @@ export interface CommitResult {
   files: CommitSummary[]
   /** Days whose order was refused, with why. The trades themselves imported. */
   orderProblems: string[]
+  /**
+   * Playbook positions awaiting import that now have matching trades. Only
+   * reported: the owner links, the import never does.
+   */
+  positionsToLink: number
 }
 
 export const commitFiles = createServerFn({ method: 'POST' })
@@ -300,5 +306,5 @@ export const commitFiles = createServerFn({ method: 'POST' })
       const applied = await setDayOrder(context.userId, day.date, day.ids)
       if (!applied.ok) orderProblems.push(`${day.date}: ${applied.message}`)
     }
-    return { files: out, orderProblems }
+    return { files: out, orderProblems, positionsToLink: await linkablePositions(context.userId) }
   })

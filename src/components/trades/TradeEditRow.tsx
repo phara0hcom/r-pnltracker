@@ -72,12 +72,17 @@ export function TradeEditRow({
 
   const save = useMutation({
     mutationFn: () => {
-      const changed = (Object.keys(draft) as (keyof Draft)[]).some((key) => draft[key] !== initial[key])
+      // The memo is left out: a note is not a correction of Rakuten's figures, and
+      // on a Playbook trade it is the leg's note, not this row's.
+      const changed = (Object.keys(draft) as (keyof Draft)[]).some(
+        (key) => key !== 'memo' && draft[key] !== initial[key],
+      )
       return saveTrade({
         data: {
           id: row.id,
           // Read against the date being saved, so moving the date keeps the time.
           executedAt: market ? timeEdit(row, draft.tradeDate, time) : undefined,
+          note: draft.memo !== initial.memo ? draft.memo.trim() || null : undefined,
           patch: changed ? {
             symbol: draft.symbol,
             name: row.name,
@@ -91,7 +96,6 @@ export function TradeEditRow({
             fee: draft.fee || undefined,
             feeTax: draft.feeTax || undefined,
             fxRate: row.currency === 'USD' ? draft.fxRate : undefined,
-            memo: draft.memo || undefined,
           } : undefined,
         },
       })
@@ -262,7 +266,7 @@ export function TradeEditRow({
         <td colSpan={visible.size}>
           <div className={styles.auxRow}>
             <label className={styles.memoField}>
-              <span className={styles.memoLabel}>Memo</span>
+              <span className={styles.memoLabel}>{row.journalId ? 'Note (shared with its Playbook leg)' : 'Memo'}</span>
               <input
                 type="text"
                 className={styles.memoInput}

@@ -5,6 +5,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import { authed } from './middleware'
 import { deleteNote, upsertNote } from '~/db/notes.service'
+import { saveTradeNote } from '~/db/playbook.service'
 import { setTradeJournal } from '~/db/trades.service'
 
 const noteSchema = z.object({
@@ -43,15 +44,15 @@ export const removeNote = createServerFn({ method: 'POST' })
  * Per-trade journal entry.
  *
  * Kept apart from the trade-editing path so recording how a trade felt can never
- * alter its figures or mark it as hand-corrected.
+ * alter its figures or mark it as hand-corrected. For a trade in a Playbook
+ * position the note is its leg's, so this and the position page edit one note;
+ * motivation stays on the trade either way.
  */
 export const saveTradeJournal = createServerFn({ method: 'POST' })
   .middleware([authed])
   .validator((data: unknown) => tradeJournalSchema.parse(data))
   .handler(async ({ data, context }) => {
-    await setTradeJournal(context.userId, data.tradeId, {
-      memo: data.memo ?? null,
-      motivation: data.motivation ?? null,
-    })
+    await saveTradeNote(context.userId, data.tradeId, data.memo ?? null)
+    await setTradeJournal(context.userId, data.tradeId, { motivation: data.motivation ?? null })
     return { ok: true as const }
   })

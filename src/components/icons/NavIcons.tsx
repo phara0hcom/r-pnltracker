@@ -53,6 +53,14 @@ const Positions = ({ className }: IconProps) => (
   </svg>
 )
 
+/** An open book: the journal of what was traded and why. */
+const Playbook = ({ className }: IconProps) => (
+  <svg {...BASE} className={className}>
+    <path d="M8 4.2C6.7 3.2 4.8 2.8 2.5 3v9.6c2.3-.2 4.2.2 5.5 1.2 1.3-1 3.2-1.4 5.5-1.2V3C11.2 2.8 9.3 3.2 8 4.2Z" />
+    <path d="M8 4.2v9.6" />
+  </svg>
+)
+
 /**
  * A coin taking income in.
  *
@@ -128,6 +136,7 @@ export const NAV_ICONS = {
   '/dashboard': Dashboard,
   '/trades': Trades,
   '/positions': Positions,
+  '/playbook': Playbook,
   '/exits': Exits,
   '/dividends': Dividends,
   '/calendar': Calendar,

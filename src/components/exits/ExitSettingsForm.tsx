@@ -58,6 +58,7 @@ export function ExitSettingsForm({
           timeStopDays: form.timeStopDays,
           trailingMethod: form.trailingMethod,
           staleTradingDays: form.staleTradingDays,
+          accountEquity: form.accountEquity?.trim() ? form.accountEquity.trim() : null,
         },
       }),
     onSuccess: () => {
@@ -171,6 +172,15 @@ export function ExitSettingsForm({
               </option>
             ))}
           </select>
+        </FormField>
+
+        <FormField label="Account size (¥)" error={errors.accountEquity} hint="Prefills a new position's risk %">
+          <input
+            className={styles.input}
+            inputMode="decimal"
+            value={form.accountEquity ?? ''}
+            onChange={(event) => { setForm({ ...form, accountEquity: event.target.value }) }}
+          />
         </FormField>
       </div>
 

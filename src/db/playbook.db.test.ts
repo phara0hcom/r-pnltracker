@@ -304,3 +304,252 @@ describe.skipIf(!containerAvailable)('an id stored as a value', () => {
     expect((await playbook!.reattachAnnotation(USER, legId, { ...leg, firstTradeId: mine! })).ok).toBe(true)
   })
 })
+
+describe.skipIf(!containerAvailable)('opening a position with a live plan', () => {
+  const live = (): PlaybookService.LivePlanInput => ({
+    rule: {
+      symbol: '8411',
+      accountType: 'SPECIFIC' as const,
+      entryDate: '2026-09-01',
+      entryPrice: '3000',
+      totalShares: '100',
+      supportLevel: '2900',
+      lotSize: 100,
+      trailingMethod: null,
+      note: null,
+    },
+    multiples: { stopAtr: '2', target: '1.5' },
+  })
+
+  it('creates the plan in the same write, linked and with its own multiples', async () => {
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] }), live()))
+    const { rows } = await sql!.query<{ journal_id: string; entry_stop_atr_multiple: string; entry_target_multiple: string }>(
+      'select journal_id, entry_stop_atr_multiple, entry_target_multiple from exit_rules',
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.journal_id).toBe(id)
+    expect(Number(rows[0]!.entry_stop_atr_multiple)).toBe(2)
+    expect(Number(rows[0]!.entry_target_multiple)).toBe(1.5)
+  })
+
+  it('archives the old plan in the same transaction when its position is closed', async () => {
+    const [first] = await store(buy('2026-08-01'), sell('2026-08-10'))
+    const closed = value(await playbook!.createJournalEntry(USER, position({ anchorTradeId: first!, entryDate: '2026-08-01' })))
+    await sql!.query(
+      `insert into exit_rules (id, user_id, instrument_id, account_type, entry_date, entry_price, total_shares, support_level, journal_id)
+       select 'old', user_id, instrument_id, account_type, entry_date, 3000, 100, 2900, id from journal_entries where id = $1`,
+      [closed],
+    )
+    value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] }), live()))
+    const { rows } = await sql!.query<{ id: string; archived: boolean }>(
+      'select id, archived_at is not null as archived from exit_rules order by id = $1 desc',
+      ['old'],
+    )
+    expect(rows.map((row) => row.archived)).toEqual([true, false])
+  })
+
+  it('refuses a new plan while the old one still describes an open position, writing nothing', async () => {
+    const [first] = await store(buy('2026-08-01'))
+    const held = value(await playbook!.createJournalEntry(USER, position({ anchorTradeId: first!, entryDate: '2026-08-01' })))
+    await sql!.query(
+      `insert into exit_rules (id, user_id, instrument_id, account_type, entry_date, entry_price, total_shares, support_level, journal_id)
+       select 'old', user_id, instrument_id, account_type, entry_date, 3000, 100, 2900, id from journal_entries where id = $1`,
+      [held],
+    )
+    const result = await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] }), live())
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining('Archive it') as string })
+    expect((await sql!.query('select 1 from journal_entries')).rowCount).toBe(1)
+    expect((await sql!.query('select 1 from exit_rules where archived_at is null')).rowCount).toBe(1)
+  })
+
+  it('stores the streak’s start as the fallback key, not a date typed for the plan', async () => {
+    const [anchor] = await store(buy('2026-09-01'))
+    const id = value(
+      await playbook!.createJournalEntry(USER, position({ anchorTradeId: anchor!, entryDate: '2026-09-03' })),
+    )
+    expect((await playbook!.getJournalEntry(USER, id))!.entryDate).toBe('2026-09-01')
+  })
+})
+
+describe.skipIf(!containerAvailable)('from scratch', () => {
+  const pool = { symbol: '8411', accountType: 'SPECIFIC' as const }
+
+  it('is refused while the pool holds units, or already waits for an export', async () => {
+    expect(await playbook!.scratchProblem(USER, pool)).toBeNull()
+    await store(buy('2026-09-01'))
+    expect(await playbook!.scratchProblem(USER, pool)).toContain('from the holding')
+    await sql!.query('delete from trades')
+    value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    expect(await playbook!.scratchProblem(USER, pool)).toContain('awaiting import')
+  })
+})
+
+describe.skipIf(!containerAvailable)('linking with a plan to correct', () => {
+  const insertPlan = () =>
+    sql!.query(
+      `insert into exit_rules (id, user_id, instrument_id, account_type, entry_date, entry_price, total_shares, support_level, journal_id)
+       select 'plan', user_id, instrument_id, account_type, entry_date, 3001, 100, 2900, id from journal_entries`,
+    )
+
+  it('corrects the plan to the imported entry only when asked', async () => {
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    await insertPlan()
+    const [anchor] = await store(buy('2026-09-01'))
+    value(await playbook!.linkJournalEntry(USER, id, anchor!, { correctPlan: true }))
+    const { rows } = await sql!.query<{ entry_price: string }>('select entry_price from exit_rules')
+    expect(Number(rows[0]!.entry_price)).toBe(3000)
+  })
+
+  it('leaves the plan alone otherwise', async () => {
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    await insertPlan()
+    const [anchor] = await store(buy('2026-09-01'))
+    value(await playbook!.linkJournalEntry(USER, id, anchor!))
+    const { rows } = await sql!.query<{ entry_price: string }>('select entry_price from exit_rules')
+    expect(Number(rows[0]!.entry_price)).toBe(3001)
+  })
+
+  it('offers a relink to a position that lost its trades', async () => {
+    const [anchor] = await store(buy('2026-09-01'))
+    const id = value(await playbook!.createJournalEntry(USER, position({ anchorTradeId: anchor! })))
+    await sql!.query('update trades set deleted_at = now() where id = $1', [anchor])
+    const [next] = await store(buy('2026-09-05'))
+    expect((await playbook!.candidatesFor(USER, id)).map((streak) => streak.anchorId)).toEqual([next])
+    value(await playbook!.linkJournalEntry(USER, id, next!))
+    expect((await playbook!.getJournalEntry(USER, id))!.anchorTradeId).toBe(next)
+  })
+})
+
+describe.skipIf(!containerAvailable)('the shared note', () => {
+  it('writes to the leg for a trade in a position, without touching the trade', async () => {
+    const [anchor, second] = await store(buy('2026-09-01'), buy('2026-09-01'))
+    const id = value(await playbook!.createJournalEntry(USER, position({ anchorTradeId: anchor! })))
+    await playbook!.saveTradeNote(USER, second!, 'the why')
+
+    const entry = (await playbook!.getJournalEntry(USER, id))!
+    expect(entry.legs.map((leg) => leg.note)).toEqual(['the why'])
+    const { rows } = await sql!.query<{ memo: string | null; is_edited: boolean }>('select memo, is_edited from trades')
+    expect(rows.every((row) => row.memo === null && !row.is_edited)).toBe(true)
+  })
+
+  it('keeps a rating when the note is saved, and stores an emptied note as empty', async () => {
+    const [anchor] = await store(buy('2026-09-01'))
+    const id = value(await playbook!.createJournalEntry(USER, position({ anchorTradeId: anchor! })))
+    value(await playbook!.setLegAnnotation(USER, id, { side: 'ENTRY', date: '2026-09-01', firstTradeId: anchor!, rating: 7 }))
+    await playbook!.saveTradeNote(USER, anchor!, 'a note')
+    await playbook!.saveTradeNote(USER, anchor!, null)
+    expect((await playbook!.getJournalEntry(USER, id))!.legs).toMatchObject([{ rating: 7, note: '' }])
+  })
+
+  it('writes to the memo for a trade outside any position', async () => {
+    const [anchor] = await store(buy('2026-09-01'))
+    await playbook!.saveTradeNote(USER, anchor!, 'plain memo')
+    const { rows } = await sql!.query<{ memo: string; is_edited: boolean }>('select memo, is_edited from trades')
+    expect(rows).toEqual([{ memo: 'plain memo', is_edited: false }])
+  })
+
+  it('shows the memo again once the position is deleted', async () => {
+    const [anchor] = await store(buy('2026-09-01'))
+    await playbook!.saveTradeNote(USER, anchor!, 'memo first')
+    const id = value(await playbook!.createJournalEntry(USER, position({ anchorTradeId: anchor! })))
+    const { listTrades } = await import('./trades.service')
+    expect((await playbook!.sharedNotesFor(USER, await listTrades(USER))).get(anchor!)?.note).toBe('memo first')
+    await playbook!.deleteJournalEntry(USER, id)
+    expect((await playbook!.sharedNotesFor(USER, await listTrades(USER))).size).toBe(0)
+  })
+})
+
+describe.skipIf(!containerAvailable)('a leg’s time', () => {
+  it('writes through only to fills that have none', async () => {
+    const [anchor, second] = await store(buy('2026-09-01'), buy('2026-09-01'))
+    const id = value(await playbook!.createJournalEntry(USER, position({ anchorTradeId: anchor! })))
+    const earlier = new Date('2026-09-01T00:05:00.000Z')
+    await sql!.query('update trades set executed_at = $1 where id = $2', [earlier, second])
+    value(await playbook!.setLegTime(USER, id, anchor!, new Date('2026-09-01T00:30:00.000Z')))
+    const { rows } = await sql!.query<{ id: string; executed_at: Date }>('select id, executed_at from trades')
+    const at = new Map(rows.map((row) => [row.id, row.executed_at.toISOString()]))
+    expect(at.get(anchor!)).toBe('2026-09-01T00:30:00.000Z')
+    expect(at.get(second!)).toBe('2026-09-01T00:05:00.000Z')
+  })
+})
+
+describe.skipIf(!containerAvailable)('typed legs', () => {
+  it('replaces them, keeping a kept leg’s rating and moving the entry date', async () => {
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    const [stored] = (await playbook!.getJournalEntry(USER, id))!.legs
+    value(
+      await playbook!.replaceTypedLegs(USER, id, [
+        { id: stored!.id, side: 'ENTRY', date: '2026-08-30', executedAt: null, price: '3100', quantity: '100', fee: '0' },
+        { side: 'EXIT', date: '2026-09-05', executedAt: null, price: '3300', quantity: '100', fee: '0' },
+      ]),
+    )
+    const entry = (await playbook!.getJournalEntry(USER, id))!
+    expect(entry.entryDate).toBe('2026-08-30')
+    expect(entry.legs.map((leg) => leg.side)).toEqual(['ENTRY', 'EXIT'])
+    expect(entry.legs[0]).toMatchObject({ rating: 8, note: 'bounce off the 20d' })
+  })
+
+  it('refuses on a linked position, whose figures come from its trades', async () => {
+    const [anchor] = await store(buy('2026-09-01'))
+    const id = value(await playbook!.createJournalEntry(USER, position({ anchorTradeId: anchor! })))
+    expect((await playbook!.replaceTypedLegs(USER, id, [])).ok).toBe(false)
+  })
+
+  it('refuses to leave a position with no buy', async () => {
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    expect((await playbook!.replaceTypedLegs(USER, id, [])).ok).toBe(false)
+  })
+})
+
+describe.skipIf(!containerAvailable)('filing existing plans', () => {
+  const plan = (id: string, entryDate: string) =>
+    sql!.query(
+      `insert into instruments (id, symbol, name, asset_class, currency)
+       values ($1, '8411', 'みずほ', 'JP_EQUITY', 'JPY') on conflict do nothing`,
+      [mappers!.instrumentId('8411')],
+    ).then(() =>
+      sql!.query(
+        `insert into exit_rules (id, user_id, instrument_id, account_type, entry_date, entry_price, total_shares, support_level)
+         values ($1, $2, $3, 'SPECIFIC', $4, 3000, 100, 2900)`,
+        [id, USER, mappers!.instrumentId('8411'), entryDate],
+      ),
+    )
+
+  it('anchors each plan to its streak and sets journal_id', async () => {
+    const [anchor] = await store(buy('2026-09-01'))
+    await plan('old', '2026-09-01')
+    expect(await playbook!.fileExistingPlans(USER)).toEqual({ filed: 1, skipped: 0 })
+    const { rows } = await sql!.query<{ journal_id: string }>('select journal_id from exit_rules')
+    const entry = (await playbook!.getJournalEntry(USER, rows[0]!.journal_id))!
+    expect(entry.anchorTradeId).toBe(anchor)
+    expect(entry.setupId).toBeNull()
+  })
+
+  it('skips a plan with no streak, leaving it to be archived', async () => {
+    await plan('old', '2026-09-01')
+    expect(await playbook!.fileExistingPlans(USER)).toEqual({ filed: 0, skipped: 1 })
+    expect((await sql!.query('select 1 from journal_entries')).rowCount).toBe(0)
+  })
+
+  it('files nothing twice', async () => {
+    await store(buy('2026-09-01'))
+    await plan('old', '2026-09-01')
+    await playbook!.fileExistingPlans(USER)
+    expect(await playbook!.fileExistingPlans(USER)).toEqual({ filed: 0, skipped: 0 })
+  })
+})
+
+describe.skipIf(!containerAvailable)('deleting a position', () => {
+  it('archives its live plan as it unlinks it, so nothing pushes about a deleted position', async () => {
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    await sql!.query(
+      `insert into exit_rules (id, user_id, instrument_id, account_type, entry_date, entry_price, total_shares, support_level, journal_id)
+       select 'plan', user_id, instrument_id, account_type, entry_date, 3000, 100, 2900, id from journal_entries`,
+    )
+    await playbook!.deleteJournalEntry(USER, id)
+    const { rows } = await sql!.query<{ journal_id: string | null; archived: boolean }>(
+      'select journal_id, archived_at is not null as archived from exit_rules',
+    )
+    expect(rows).toEqual([{ journal_id: null, archived: true }])
+  })
+})

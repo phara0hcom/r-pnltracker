@@ -1,0 +1,236 @@
+@use '../../styles/mixins' as m;
+
+.back {
+  display: inline-block;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+
+  @include m.focus-ring;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  gap: var(--space-4);
+}
+
+.prompt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+  border: 1px solid var(--color-warn);
+  border-radius: var(--radius-md);
+}
+
+.button {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-3);
+  margin-block: var(--space-3);
+}
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.figureLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.figureValue {
+  font-size: var(--text-sm);
+
+  @include m.tabular-nums;
+}
+
+.figureHint {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.block {
+  display: block;
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+.flat {
+  color: var(--color-text);
+}
+
+.message {
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-md);
+}
+
+.urgent {
+  color: var(--color-loss);
+  background-color: var(--color-loss-dim);
+}
+
+.attention {
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+}
+
+.neutral {
+  color: var(--color-text-muted);
+}
+
+.rowEnd {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.legs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.leg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.legHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.legFigures {
+  margin-left: auto;
+
+  @include m.tabular-nums;
+}
+
+.sideEntry {
+  color: var(--color-profit);
+}
+
+.sideExit {
+  color: var(--color-loss);
+}
+
+.muted {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-block: var(--space-2);
+}
+
+.textarea {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.focus-ring;
+}
+
+.timeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.unattached {
+  margin-top: var(--space-4);
+}
+
+.subTitle {
+  font-size: var(--text-sm);
+}
+
+.criteria {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0;
+  margin: 0 0 var(--space-2);
+  border: none;
+}
+
+.check {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--text-sm);
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.suggestion {
+  padding: 1px var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-full);
+
+  @include m.interactive-surface;
+}

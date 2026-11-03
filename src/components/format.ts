@@ -125,6 +125,18 @@ export const pct = (value: number | null | undefined, digits = 1): string =>
 export const ratio = (value: number | null | undefined, digits = 2): string =>
   value == null ? '—' : value.toFixed(digits)
 
+/**
+ * A per-share price. Yen keeps one decimal where it has one — a stop at ¥2,700.5
+ * is a real level, and `money` would round it — and US stays at two.
+ */
+export const priceText = (value: string | number | null | undefined, currency: 'JPY' | 'USD'): string => {
+  if (value == null) return '—'
+  if (currency === 'USD') return money(value, 'USD')
+  const asNumber = Number(value)
+  const magnitude = Math.abs(asNumber).toLocaleString('en-US', { maximumFractionDigits: 1 })
+  return withSign(asNumber, magnitude, '0', false) + '¥' + magnitude
+}
+
 export const qty = (value: string | number): string =>
   Number(value).toLocaleString('en-US', { maximumFractionDigits: 4 })
 

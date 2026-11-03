@@ -1,0 +1,143 @@
+@use '../../styles/mixins' as m;
+
+.row {
+  position: relative;
+
+  &:hover {
+    background-color: var(--color-surface-hover);
+  }
+}
+
+/* Stretched over the row, so the whole row opens the position. */
+.rowLink {
+  color: var(--color-text);
+
+  &::after {
+    position: absolute;
+    inset: 0;
+    content: '';
+  }
+
+  @include m.focus-ring;
+}
+
+.name {
+  color: var(--color-text-muted);
+}
+
+.sub {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.aside {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+.statusCell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.status {
+  padding: 1px var(--space-2);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  border-radius: var(--radius-full);
+}
+
+.statusOpen {
+  color: var(--color-accent);
+  background-color: var(--color-accent-dim);
+}
+
+.statusWaiting {
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+}
+
+.statusClosed {
+  color: var(--color-text-muted);
+  background-color: var(--color-surface-raised);
+}
+
+.statusMissing {
+  color: var(--color-loss);
+  background-color: var(--color-loss-dim);
+}
+
+/* Above the stretched link, so it can be pressed. */
+.linkButton {
+  position: relative;
+  z-index: 1;
+  padding: 1px var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  text-decoration: underline;
+
+  @include m.focus-ring;
+}
+
+.ladder {
+  width: 100%;
+  min-width: 6rem;
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.cardHead {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.cardWho {
+  min-width: 0;
+}
+
+.cardResult {
+  font-size: var(--text-sm);
+  text-align: right;
+
+  @include m.tabular-nums;
+}
+
+.cardMeta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}

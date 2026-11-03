@@ -134,6 +134,18 @@ function useTradeJournal(trade: CalendarTrade) {
   const [motivation, setMotivation] = useState<number | null>(savedMotivation)
   const [open, setOpen] = useState(false)
 
+  /*
+   * One leg's fills share one note, so saving on a sibling row changes this
+   * trade's memo from outside. Taken up when the refetched month arrives, unless
+   * this row is mid-edit.
+   */
+  const [seenMemo, setSeenMemo] = useState(trade.memo)
+  if (trade.memo !== seenMemo) {
+    setSeenMemo(trade.memo)
+    setSavedMemo(trade.memo ?? '')
+    if (!open) setMemo(trade.memo ?? '')
+  }
+
   const hasJournal = Boolean(savedMemo) || savedMotivation != null
   const dirty = memo.trim() !== savedMemo.trim() || motivation !== savedMotivation
 
@@ -260,7 +272,7 @@ function Editor({ trade, journal }: { trade: CalendarTrade; journal: Journal }) 
       />
 
       <label className={styles.field}>
-        <span className={styles.fieldLabel}>Note</span>
+        <span className={styles.fieldLabel}>{trade.journalId ? 'Note — shared with its Playbook leg' : 'Note'}</span>
         <textarea
           className={styles.memoInput}
           rows={2}

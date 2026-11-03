@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import styles from './import.module.scss'
 import { qty } from '~/components/format'
@@ -499,6 +499,13 @@ function Import() {
 
       {result ? (
         <Section title="Imported">
+          {result.positionsToLink > 0 ? (
+            <p>
+              Trades found for {result.positionsToLink} position
+              {result.positionsToLink === 1 ? '' : 's'} awaiting import —{' '}
+              <Link to="/playbook">link {result.positionsToLink === 1 ? 'it' : 'them'} in the Playbook</Link>.
+            </p>
+          ) : null}
           {result.orderProblems.length > 0 ? (
             <div className={styles.errors} role="alert">
               <h3 className={styles.errorTitle}>Order not applied</h3>

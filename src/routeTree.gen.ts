@@ -23,6 +23,8 @@ import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedStatsRouteImport } from './routes/_authed/stats'
 import { Route as AuthedTaxRouteImport } from './routes/_authed/tax'
 import { Route as AuthedTradesRouteImport } from './routes/_authed/trades'
+import { Route as AuthedPlaybookIndexRouteImport } from './routes/_authed/playbook.index'
+import { Route as AuthedPlaybookJournalIdRouteImport } from './routes/_authed/playbook.$journalId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiTvSecretRouteImport } from './routes/api/tv/$secret'
 
@@ -95,6 +97,16 @@ const AuthedTradesRoute = AuthedTradesRouteImport.update({
   path: '/trades',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedPlaybookIndexRoute = AuthedPlaybookIndexRouteImport.update({
+  id: '/playbook/',
+  path: '/playbook/',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedPlaybookJournalIdRoute = AuthedPlaybookJournalIdRouteImport.update({
+  id: '/playbook/$journalId',
+  path: '/playbook/$journalId',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -120,8 +132,10 @@ export interface FileRoutesByFullPath {
   '/stats': typeof AuthedStatsRoute
   '/tax': typeof AuthedTaxRoute
   '/trades': typeof AuthedTradesRoute
+  '/playbook/$journalId': typeof AuthedPlaybookJournalIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
+  '/playbook/': typeof AuthedPlaybookIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -137,8 +151,10 @@ export interface FileRoutesByTo {
   '/stats': typeof AuthedStatsRoute
   '/tax': typeof AuthedTaxRoute
   '/trades': typeof AuthedTradesRoute
+  '/playbook/$journalId': typeof AuthedPlaybookJournalIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
+  '/playbook': typeof AuthedPlaybookIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -156,8 +172,10 @@ export interface FileRoutesById {
   '/_authed/stats': typeof AuthedStatsRoute
   '/_authed/tax': typeof AuthedTaxRoute
   '/_authed/trades': typeof AuthedTradesRoute
+  '/_authed/playbook/$journalId': typeof AuthedPlaybookJournalIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
+  '/_authed/playbook/': typeof AuthedPlaybookIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -175,8 +193,10 @@ export interface FileRouteTypes {
     | '/stats'
     | '/tax'
     | '/trades'
+    | '/playbook/$journalId'
     | '/api/auth/$'
     | '/api/tv/$secret'
+    | '/playbook/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -192,8 +212,10 @@ export interface FileRouteTypes {
     | '/stats'
     | '/tax'
     | '/trades'
+    | '/playbook/$journalId'
     | '/api/auth/$'
     | '/api/tv/$secret'
+    | '/playbook'
   id:
     | '__root__'
     | '/'
@@ -210,8 +232,10 @@ export interface FileRouteTypes {
     | '/_authed/stats'
     | '/_authed/tax'
     | '/_authed/trades'
+    | '/_authed/playbook/$journalId'
     | '/api/auth/$'
     | '/api/tv/$secret'
+    | '/_authed/playbook/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -322,6 +346,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedTradesRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/playbook/': {
+      id: '/_authed/playbook/'
+      path: '/playbook'
+      fullPath: '/playbook/'
+      preLoaderRoute: typeof AuthedPlaybookIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/playbook/$journalId': {
+      id: '/_authed/playbook/$journalId'
+      path: '/playbook/$journalId'
+      fullPath: '/playbook/$journalId'
+      preLoaderRoute: typeof AuthedPlaybookJournalIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -351,6 +389,8 @@ interface AuthedRouteChildren {
   AuthedStatsRoute: typeof AuthedStatsRoute
   AuthedTaxRoute: typeof AuthedTaxRoute
   AuthedTradesRoute: typeof AuthedTradesRoute
+  AuthedPlaybookJournalIdRoute: typeof AuthedPlaybookJournalIdRoute
+  AuthedPlaybookIndexRoute: typeof AuthedPlaybookIndexRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
@@ -365,6 +405,8 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedStatsRoute: AuthedStatsRoute,
   AuthedTaxRoute: AuthedTaxRoute,
   AuthedTradesRoute: AuthedTradesRoute,
+  AuthedPlaybookJournalIdRoute: AuthedPlaybookJournalIdRoute,
+  AuthedPlaybookIndexRoute: AuthedPlaybookIndexRoute,
 }
 
 const AuthedRouteWithChildren =

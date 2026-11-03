@@ -103,6 +103,10 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/lib/playbook/streaks.ts` | holding streaks — what a Playbook position *is*; anchors, legs, linking |
 | `src/lib/playbook/score.ts` / `stats.ts` / `paper.ts` | position score, setup statistics, paper results — never stored |
 | `src/db/playbook.service.ts` | setups, positions and leg annotations; only anchors and annotations are stored |
+| `src/lib/playbook/position.ts` | one position as the screens read it — status, result, R, score — and the shared note |
+| `src/lib/playbook/plan.ts` | a plan's levels before there is a plan: the dialog's preview and every static plan |
+| `src/server/playbookView.ts` | the Playbook's reads, kept out of client-reachable modules like `server/engine.ts` |
+| `src/server/exitPosition.ts` | a plan's holding facts and `evaluateExitRule`, shared by Exit Rules, the Playbook and the notifier |
 
 Every server function touching user data must `.middleware([authed])`. The typed
 `context.userId` means a handler that forgets the check does not compile.
@@ -166,6 +170,17 @@ derivation and sources.
   annotations are. A regrouped-away anchor falls back to the pool's streak starting on the stored
   `entryDate` (or the day after, for US); failing both the position says so rather than guessing.
   `openEntryStreaks` reads off the same `holdingStreaks`, so "flat" has one definition.
+- **A filed plan reads its own position, not its pool.** `holdingFacts` takes shares from the
+  position's streak once linked and its typed legs while awaiting import (`planShares`), for all
+  three callers of `evaluateExitRule`. Otherwise a position opened from scratch reads
+  `POSITION_CLOSED` until its trades arrive, and the notifier pushes a spurious change when they do.
+- **A trade's note in a live real position is its leg's** (`sharedNotes`, `saveTradeNote`). It reads
+  as its fills' memos until the owner writes one, nothing is copied, and an emptied note is stored
+  as `''` so the memos do not come back. Archiving or deleting the position shows the memo again.
+  Writing a note never marks a trade edited — on Trades too, where the memo no longer goes through
+  `updateTrade`.
+- **A position's account size is in its own currency**, because the risk rating compares it with
+  prices. Settings holds yen; a US position's prefill converts at today's rate and locks when filed.
 - **A US close is shown in dollars as Rakuten shows it**: the sale (約定代金) less
   the cost of those shares *including* buy commission, sell commission not taken
   off (`lib/pnl/usdResult.ts`) — all nine September 2026 US closes match to the

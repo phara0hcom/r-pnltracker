@@ -70,7 +70,7 @@ export function roundDownToLot(shares: Decimal, lotSize: number): Decimal {
  * the two would put it exactly where routine volatility reaches.
  */
 export function initialStopFor(
-  position: ExitRulePosition,
+  position: Pick<ExitRulePosition, 'entryPrice' | 'entryAtr' | 'entryStopAtrMultiple' | 'supportLevel'>,
 ): { stop: Decimal; fromSupportOnly: boolean } {
   if (position.entryAtr === null) {
     // No entry-date payload — usually an alert created after the position was
