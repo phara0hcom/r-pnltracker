@@ -15,6 +15,7 @@ import type { NormalizedTrade } from '~/lib/domain/types'
 import { daysToOrder, type OrderCandidate } from '~/lib/import/dayOrder'
 import { timedMarket } from '~/lib/import/executionTime'
 import { figuresOf, orderFilesForImport, type StoredTrade } from '~/lib/import/plan'
+import { reportError } from '~/lib/observability/report'
 import { quotedPrice } from '~/lib/prices/quoteUnit'
 
 export interface UploadPayload {
@@ -306,5 +307,11 @@ export const commitFiles = createServerFn({ method: 'POST' })
       const applied = await setDayOrder(context.userId, day.date, day.ids)
       if (!applied.ok) orderProblems.push(`${day.date}: ${applied.message}`)
     }
-    return { files: out, orderProblems, positionsToLink: await linkablePositions(context.userId) }
+    // Only a reminder, read after the commit: failing here would report trades
+    // that did import as an error.
+    const positionsToLink = await linkablePositions(context.userId).catch((error: unknown) => {
+      reportError(error, { phase: 'linkable-positions' })
+      return 0
+    })
+    return { files: out, orderProblems, positionsToLink }
   })

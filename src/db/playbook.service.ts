@@ -14,7 +14,14 @@
 import { randomUUID } from 'node:crypto'
 import Decimal from 'decimal.js'
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
-import { createExitRule, ExitPlanRefused, listExitRules, type ExitRuleInput, type ExitRuleRecord } from './exit.service'
+import {
+  correctedEntryFacts,
+  createExitRule,
+  ExitPlanRefused,
+  listExitRules,
+  type ExitRuleInput,
+  type ExitRuleRecord,
+} from './exit.service'
 import { decOrNull, idFor, instrumentId, toInstrumentRow } from './mappers'
 import { exitRules, instruments, journalEntries, journalLegs, setups, trades } from './schema'
 import { listTrades, setTradeJournal, type TradeRecord } from './trades.service'
@@ -26,6 +33,7 @@ import {
   isOpen,
   legsOf,
   linkCandidates,
+  linkedPlanDate,
   pairTypedLegs,
   resolvePosition,
   streakOfPlan,
@@ -612,6 +620,9 @@ export async function saveTradeNote(userId: string, tradeId: string, note: strin
     await setTradeJournal(userId, tradeId, { memo: note })
     return
   }
+  // The Calendar sends the note it shows even when only the motivation changed,
+  // and writing it back would copy a fill's memos into the leg.
+  if ((note ?? '') === shared.note.trim()) return
   const result = await setLegAnnotation(userId, shared.journalId, {
     legId: shared.annotationId ?? undefined,
     side: shared.side,
@@ -721,7 +732,9 @@ export async function setLegTime(
 /**
  * Replace a position's typed legs — awaiting import and paper only; a linked
  * position's figures come from its trades. Legs named by id keep their rating and
- * note, and the position's entry date follows the earliest typed entry.
+ * note, and the position's entry date follows the earliest typed entry — its live
+ * plan's too, since the plan replays bars from that date and has no other way to
+ * have it corrected.
  */
 export async function replaceTypedLegs(
   userId: string,
@@ -739,6 +752,7 @@ export async function replaceTypedLegs(
 
   const kept = new Set(legs.flatMap((leg) => (leg.id ? [leg.id] : [])))
   const stored = new Set(entry.legs.map((leg) => leg.id))
+  const plan = (await listExitRules(userId)).find((rule) => rule.journalId === journalId)
   await db.transaction(async (tx) => {
     for (const leg of entry.legs) {
       if (kept.has(leg.id)) continue
@@ -766,6 +780,12 @@ export async function replaceTypedLegs(
       .update(journalEntries)
       .set({ entryDate, updatedAt: new Date() })
       .where(and(eq(journalEntries.userId, userId), eq(journalEntries.id, journalId)))
+    if (plan && plan.entryDate !== entryDate) {
+      await tx
+        .update(exitRules)
+        .set({ ...(await correctedEntryFacts(plan.instrumentId, entryDate, tx)), updatedAt: new Date() })
+        .where(and(eq(exitRules.userId, userId), eq(exitRules.id, plan.id)))
+    }
   })
   return { ok: true, value: journalId }
 }
@@ -826,6 +846,9 @@ export async function linkJournalEntry(
   if (plan?.supportLevel.gte(streak.entryPrice)) {
     return fail('The plan’s support sits above the imported entry price — edit the plan first.')
   }
+  if (plan?.target1Override?.lte(streak.entryPrice)) {
+    return fail('The plan’s Target 1 sits at or below the imported entry price — edit the plan first.')
+  }
 
   const typed = entry.legs.filter((leg) => leg.firstTradeId === null)
   const { pairs, times } = pairTypedLegs(
@@ -861,11 +884,13 @@ export async function linkJournalEntry(
     }
     if (plan) {
       // The typo-correction path: fixing the record is not the market moving it.
+      const entryDate = linkedPlanDate(plan, streak.entryDate)
       await tx
         .update(exitRules)
         .set({
           entryPrice: streak.entryPrice.toFixed(),
           totalShares: streak.sharesBought.toFixed(),
+          ...(entryDate !== plan.entryDate && (await correctedEntryFacts(plan.instrumentId, entryDate, tx))),
           updatedAt: new Date(),
         })
         .where(and(eq(exitRules.userId, userId), eq(exitRules.id, plan.id)))

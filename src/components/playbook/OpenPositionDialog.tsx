@@ -216,7 +216,7 @@ export function OpenPositionDialog({
   const [plan, setPlan] = useState<PlanForm>(() => blankPlan(undefined))
   const [wantsStatic, setWantsStatic] = useState(true)
   const [equity, setEquity] = useState<string | null>(null)
-  const [created, setCreated] = useState<string | null>(null)
+  const [created, setCreated] = useState<{ id: string; symbol: string } | null>(null)
 
   // Re-seed on open rather than in an effect, as the exit forms do.
   const [wasOpen, setWasOpen] = useState(open)
@@ -319,7 +319,9 @@ export function OpenPositionDialog({
     },
     (result) => {
       if (result.live) {
-        setCreated(result.id)
+        // The server's: the refetch this triggers drops the streak just claimed,
+        // so the form's own `symbol` falls back to the blank scratch field.
+        setCreated({ id: result.id, symbol: result.symbol })
       } else {
         onOpenChange(false)
         onOpened(result.id)
@@ -371,13 +373,13 @@ export function OpenPositionDialog({
           {created ? (
             <>
               <Dialog.Description className={styles.description}>
-                Position opened. Add a TradingView alert for {symbol} — alerts are per symbol, and without one the plan
+                Position opened. Add a TradingView alert for {created.symbol} — alerts are per symbol, and without one the plan
                 reads as stale. See <code>docs/exit-rules.md</code> §1.3.
               </Dialog.Description>
               <div className={styles.footer}>
                 <Link
                   to="/playbook/$journalId"
-                  params={{ journalId: created }}
+                  params={{ journalId: created.id }}
                   className={styles.primary}
                   onClick={() => {
                     onOpenChange(false)
@@ -619,6 +621,19 @@ export function OpenPositionDialog({
                         defaultMethod={defaults?.trailingMethod ?? null}
                         live={live}
                       />
+                      {/* Only a live plan stores one; a static plan is levels on the position. */}
+                      {live ? (
+                        <FormField label="Note">
+                          <input
+                            className={styles.input}
+                            value={plan.note}
+                            onChange={(event) => {
+                              setPlan({ ...plan, note: event.target.value })
+                            }}
+                            placeholder="Thesis, catalyst, why this level"
+                          />
+                        </FormField>
+                      ) : null}
                       {live && defaults ? (
                         <FrameworkNote
                           partialExitFraction={defaults.partialExitFraction}

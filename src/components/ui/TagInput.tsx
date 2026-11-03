@@ -27,6 +27,7 @@ export function TagInput({
   labelledBy,
   placeholder = 'Add a tag',
   className,
+  disabled = false,
 }: {
   tags: readonly string[]
   draft: string
@@ -36,6 +37,7 @@ export function TagInput({
   labelledBy: string
   placeholder?: string
   className?: string
+  disabled?: boolean
 }) {
   const commit = (text: string) => {
     const next = withDraft(tags, text)
@@ -53,6 +55,7 @@ export function TagInput({
               type="button"
               className={styles.remove}
               aria-label={`Remove tag ${tag}`}
+              disabled={disabled}
               onClick={() => {
                 onChange(tags.filter((kept) => kept !== tag))
               }}
@@ -69,6 +72,7 @@ export function TagInput({
         placeholder={tags.length === 0 ? placeholder : ''}
         aria-labelledby={labelledBy}
         enterKeyHint="done"
+        disabled={disabled}
         onChange={(event) => {
           const text = event.target.value
           // A comma ends a tag as Enter does — what the old comma-separated

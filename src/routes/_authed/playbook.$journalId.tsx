@@ -285,7 +285,9 @@ function LegCard({ position, leg }: { position: PositionDetail; leg: LegView }) 
       {market && leg.firstTradeId && !leg.allTimed ? (
         <div className={styles.timeRow}>
           <ExecutionTimeInput tradeDate={leg.date} market={market} value={time} label={label} onChange={setTime} />
-          {resolved && resolved !== leg.executedAt ? (
+          {/* Not hidden when it matches the time shown: that time is the first
+              timed fill's, and giving it to the rest is the usual case. */}
+          {resolved ? (
             <button
               type="button"
               className={styles.button}
@@ -400,12 +402,13 @@ function Review({ position }: { position: PositionDetail }) {
           draft={draft}
           labelledBy="mistakes-label"
           placeholder="Chased, no stop, sized too big…"
+          disabled={disabled}
           onChange={(mistakes) => {
             save.run({ mistakes })
           }}
           onDraftChange={setDraft}
         />
-        {position.mistakeSuggestions.length > 0 ? (
+        {!disabled && position.mistakeSuggestions.length > 0 ? (
           <div className={styles.suggestions}>
             {position.mistakeSuggestions.map((tag) => (
               <button

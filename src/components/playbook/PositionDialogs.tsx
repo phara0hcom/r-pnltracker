@@ -87,14 +87,15 @@ function Footer({
 function EditLivePlan({ position, onClose }: { position: PositionDetail; onClose: () => void }) {
   const view = position.planView
   const row = view.kind === 'LIVE' ? view.row : null
-  const [entryPrice, setEntryPrice] = useState(row?.entryPrice ?? '')
+  const exact = view.kind === 'LIVE' ? view.exact : null
+  const [entryPrice, setEntryPrice] = useState(exact?.entryPrice ?? '')
   const [shares, setShares] = useState(row?.totalShares ?? '')
   const [form, setForm] = useState<PlanForm>({
-    supportLevel: row?.supportLevel ?? '',
+    supportLevel: exact?.supportLevel ?? '',
     stopMultiple: view.kind === 'LIVE' ? view.stopMultiple : '',
     targetMultiple: view.kind === 'LIVE' ? view.targetMultiple : '',
     targetManual: view.kind === 'LIVE' && view.target1Manual,
-    target1: view.kind === 'LIVE' && view.target1Manual ? (row?.target1 ?? '') : '',
+    target1: exact?.target1Override ?? '',
     extraTargets: position.extraTargets,
     trailingMethod: row?.trailingMethodOverride ?? '',
     note: row?.note ?? '',
@@ -178,8 +179,8 @@ function EditLivePlan({ position, onClose }: { position: PositionDetail; onClose
 }
 
 function EditStaticPlan({ position, onClose }: { position: PositionDetail; onClose: () => void }) {
-  const [stop, setStop] = useState(position.stop ?? '')
-  const [target1, setTarget1] = useState(position.target1 ?? '')
+  const [stop, setStop] = useState(position.exactStop ?? '')
+  const [target1, setTarget1] = useState(position.exactTarget1 ?? '')
   const [targets, setTargets] = useState(position.extraTargets)
   const unit = position.currency === 'USD' ? '$' : '¥'
   const save = usePlaybookAction(
@@ -558,6 +559,7 @@ export function LinkDialog({ position, onClose }: { position: PositionDetail; on
             />
             Also correct the plan to the imported entry: {qty(candidate.shares)} at{' '}
             {priceText(candidate.entryPrice, position.currency)}
+            {candidate.planDateTo ? `, entered ${candidate.planDateTo}` : ''}
           </label>
         ) : null}
         <Footer

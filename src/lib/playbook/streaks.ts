@@ -216,6 +216,16 @@ export function streakOfPlan(
   )
 }
 
+/**
+ * The date a plan should carry once linked to a streak: the streak's, so it does
+ * not replay bars from a mistyped day or read as superseded by the streak just
+ * chosen. Except a US streak one day later, which is Rakuten re-dating the fill on
+ * settlement: a plan keeps the date it was made against (`docs/exit-rules.md`).
+ */
+export function linkedPlanDate(plan: Pick<PositionAnchor, 'assetClass' | 'entryDate'>, streakDate: string): string {
+  return plan.assetClass === 'US_EQUITY' && streakDate === addDays(plan.entryDate, 1) ? plan.entryDate : streakDate
+}
+
 /** A real position's status. Paper positions use `paperStatus` in `paper.ts`. */
 export function realStatus(resolution: Resolution): PositionStatus {
   switch (resolution.kind) {

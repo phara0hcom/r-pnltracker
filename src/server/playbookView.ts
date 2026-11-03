@@ -36,6 +36,7 @@ import {
   holdingStreaks,
   isOpen,
   linkCandidates,
+  linkedPlanDate,
   streakOfPlan,
   type HoldingStreak,
 } from '~/lib/playbook/streaks'
@@ -254,6 +255,8 @@ export type PlanView =
       stopMultiple: string
       targetMultiple: string
       target1Manual: boolean
+      /** Unrounded, for Edit plan: `row` is for reading, and saving it back would round the locked facts. */
+      exact: { entryPrice: string; supportLevel: string; target1Override: string | null }
     }
   | { kind: 'ARCHIVED'; stop: string; target1: string; entryPrice: string; supportLevel: string }
   | { kind: 'STATIC'; stop: string | null; target1: string | null }
@@ -267,6 +270,8 @@ export interface LinkCandidate {
   fills: { id: string; date: string; side: LegSide; quantity: string; price: string }[]
   /** Against the plan's entry facts, so the owner can be offered the correction. */
   planDiffers: boolean
+  /** The date that correction moves the plan to; null when it stays. */
+  planDateTo: string | null
 }
 
 export interface TypedLegView {
@@ -295,6 +300,9 @@ export interface PositionDetail extends PositionRow {
   entryPrice: string | null
   stop: string | null
   target1: string | null
+  /** Unrounded, for Edit plan to start from. */
+  exactStop: string | null
+  exactTarget1: string | null
   riskPerShare: string | null
   plannedR: string | null
   riskAmount: string | null
@@ -327,6 +335,8 @@ const legView = (leg: DerivedLeg): LegView => ({
 })
 
 function candidateView(streak: HoldingStreak, plan: ExitRuleRecord | undefined): LinkCandidate {
+  const correctedDate = plan ? linkedPlanDate(plan, streak.entryDate) : null
+  const planDateTo = correctedDate !== plan?.entryDate ? correctedDate : null
   return {
     anchorId: streak.anchorId,
     entryDate: streak.entryDate,
@@ -341,7 +351,9 @@ function candidateView(streak: HoldingStreak, plan: ExitRuleRecord | undefined):
       price: record.trade.unitPrice.toFixed(2),
     })),
     planDiffers:
-      plan !== undefined && (!plan.entryPrice.eq(streak.entryPrice) || !plan.totalShares.eq(streak.sharesBought)),
+      plan !== undefined &&
+      (!plan.entryPrice.eq(streak.entryPrice) || !plan.totalShares.eq(streak.sharesBought) || planDateTo !== null),
+    planDateTo,
   }
 }
 
@@ -357,6 +369,11 @@ function planViewOf(
       stopMultiple: plan.entryStopAtrMultiple.toFixed(),
       targetMultiple: plan.entryTargetMultiple.toFixed(),
       target1Manual: plan.target1Override !== null,
+      exact: {
+        entryPrice: plan.entryPrice.toFixed(),
+        supportLevel: plan.supportLevel.toFixed(),
+        target1Override: plan.target1Override?.toFixed() ?? null,
+      },
     }
   }
   if (plan) {
@@ -426,6 +443,8 @@ export async function positionDetail(userId: string, id: string): Promise<Positi
     entryPrice: price(derived.entryPrice),
     stop: price(derived.stop),
     target1: price(derived.target1),
+    exactStop: derived.stop?.toFixed() ?? null,
+    exactTarget1: derived.target1?.toFixed() ?? null,
     riskPerShare: price(derived.riskPerShare),
     plannedR: derived.plannedR?.toFixed(2) ?? null,
     riskAmount: derived.riskAmount?.toFixed(2) ?? null,
@@ -442,7 +461,8 @@ export async function positionDetail(userId: string, id: string): Promise<Positi
       .filter((tag) => !entry.mistakes.includes(tag))
       .sort(),
     lessons: entry.lessons,
-    candidates: candidates.map((streak) => candidateView(streak, plan)),
+    // Linking only ever corrects a live plan.
+    candidates: candidates.map((streak) => candidateView(streak, plan?.archivedAt === null ? plan : undefined)),
   }
 }
 

@@ -447,6 +447,13 @@ every US plan opened before settlement the next day, with nothing sold (SO,
 October 2026). For the same reason a US close dated on the plan's own entry day
 does not count: it may be the previous session's, moved onto that day.
 
+**A corrected entry date moves the plan with it.** Correcting a typed leg's date,
+or linking with "correct the plan", sets the plan's entry date and re-reads the
+ATR frozen with it from the new day's bar — or leaves it empty for the webhook to
+backfill. As with any typo correction, this is fixing the record rather than the
+market moving it. The US re-dating above is not a correction: a US streak dated
+one day after the plan leaves the plan's date alone (`linkedPlanDate`).
+
 **An unknown ticker is discarded with a 404** and logged: nothing has ever traded
 or filed it, so there is nothing to attach a bar to. A position opened from scratch
 or on paper creates its instrument, so the feed stores and publishes closes for it

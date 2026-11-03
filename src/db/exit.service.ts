@@ -263,6 +263,23 @@ export async function updateExitRule(
     .where(and(eq(exitRules.userId, userId), eq(exitRules.id, id)))
 }
 
+/**
+ * A corrected entry date and the ATR frozen with it. That ATR belonged to the
+ * mistaken day, so it goes too — from the new day's bar, or empty for the webhook
+ * to backfill, as on a plan opened before its entry-day bar exists.
+ */
+export async function correctedEntryFacts(
+  instrumentId: string,
+  entryDate: string,
+  executor: Executor = db,
+): Promise<{ entryDate: string; entryAtr: string | null }> {
+  const [bar] = await executor
+    .select({ atr14: exitFeedBars.atr14 })
+    .from(exitFeedBars)
+    .where(and(eq(exitFeedBars.instrumentId, instrumentId), eq(exitFeedBars.tradingDay, entryDate)))
+  return { entryDate, entryAtr: bar?.atr14 ?? null }
+}
+
 /** The ATR of a symbol's entry-date bar, if one has arrived. */
 export async function entryAtrFor(symbol: string, entryDate: string): Promise<Decimal | null> {
   // The preview asks as the owner types, and Postgres would throw on a partial date.

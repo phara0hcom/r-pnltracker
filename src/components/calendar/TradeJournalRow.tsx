@@ -191,7 +191,13 @@ function useTradeJournal(trade: CalendarTrade) {
       setMotivation(previous.motivation)
       patchCache(previous)
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['calendar'] }),
+    // The note is its leg's too, and a cached position page would otherwise show
+    // the old text for 5 minutes — and save over this one if edited.
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['calendar'] }),
+        trade.journalId ? queryClient.invalidateQueries({ queryKey: ['playbook'] }) : null,
+      ]),
   })
 
   return {

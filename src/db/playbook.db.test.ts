@@ -409,6 +409,53 @@ describe.skipIf(!containerAvailable)('linking with a plan to correct', () => {
     expect(Number(rows[0]!.entry_price)).toBe(3001)
   })
 
+  it('moves the plan to the streak’s date with the correction, dropping the old day’s ATR', async () => {
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    await insertPlan()
+    await sql!.query('update exit_rules set entry_atr = 50')
+    const [anchor] = await store(buy('2026-09-05'))
+    value(await playbook!.linkJournalEntry(USER, id, anchor!, { correctPlan: true }))
+    const { rows } = await sql!.query<{ entry_date: string; entry_atr: string | null }>(
+      'select entry_date::text, entry_atr from exit_rules',
+    )
+    expect(rows[0]).toEqual({ entry_date: '2026-09-05', entry_atr: null })
+  })
+
+  it('keeps the plan’s date without the correction', async () => {
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    await insertPlan()
+    const [anchor] = await store(buy('2026-09-05'))
+    value(await playbook!.linkJournalEntry(USER, id, anchor!))
+    const { rows } = await sql!.query<{ entry_date: string }>('select entry_date::text from exit_rules')
+    expect(rows[0]!.entry_date).toBe('2026-09-01')
+  })
+
+  it('refuses a correction that would put the entry above a manual Target 1', async () => {
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    await insertPlan()
+    await sql!.query('update exit_rules set target1_override = 2950, support_level = 2800')
+    const [anchor] = await store(buy('2026-09-01'))
+    const linked = await playbook!.linkJournalEntry(USER, id, anchor!, { correctPlan: true })
+    expect(linked.ok).toBe(false)
+    const { rows } = await sql!.query<{ entry_price: string }>('select entry_price from exit_rules')
+    expect(Number(rows[0]!.entry_price)).toBe(3001)
+  })
+
+  it('moves the live plan with a corrected typed leg, and leaves it when the date stands', async () => {
+    const id = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    await insertPlan()
+    await sql!.query('update exit_rules set entry_atr = 50')
+    const leg = { side: 'ENTRY', executedAt: null, price: '3100', quantity: '100', fee: '0' } as const
+    const plan = () =>
+      sql!.query<{ entry_date: string; entry_atr: string | null }>('select entry_date::text, entry_atr from exit_rules')
+
+    value(await playbook!.replaceTypedLegs(USER, id, [{ ...leg, date: '2026-09-01' }]))
+    expect(Number((await plan()).rows[0]!.entry_atr)).toBe(50)
+
+    value(await playbook!.replaceTypedLegs(USER, id, [{ ...leg, date: '2026-08-30' }]))
+    expect((await plan()).rows[0]).toEqual({ entry_date: '2026-08-30', entry_atr: null })
+  })
+
   it('offers a relink to a position that lost its trades', async () => {
     const [anchor] = await store(buy('2026-09-01'))
     const id = value(await playbook!.createJournalEntry(USER, position({ anchorTradeId: anchor! })))
@@ -470,6 +517,21 @@ describe.skipIf(!containerAvailable)('a leg’s time', () => {
     const at = new Map(rows.map((row) => [row.id, row.executed_at.toISOString()]))
     expect(at.get(anchor!)).toBe('2026-09-01T00:30:00.000Z')
     expect(at.get(second!)).toBe('2026-09-01T00:05:00.000Z')
+  })
+})
+
+describe.skipIf(!containerAvailable)('saving a trade’s shared note', () => {
+  it('writes nothing when the note is the one already showing, so a memo is not copied', async () => {
+    const [anchor] = await store(buy('2026-09-01'))
+    await sql!.query(`update trades set memo = 'why' where id = $1`, [anchor])
+    value(await playbook!.createJournalEntry(USER, position({ anchorTradeId: anchor! })))
+
+    await playbook!.saveTradeNote(USER, anchor!, 'why')
+    expect((await sql!.query('select id from journal_legs')).rows).toHaveLength(0)
+
+    await playbook!.saveTradeNote(USER, anchor!, 'changed my mind')
+    const { rows } = await sql!.query<{ note: string }>('select note from journal_legs')
+    expect(rows).toEqual([{ note: 'changed my mind' }])
   })
 })
 

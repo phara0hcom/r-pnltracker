@@ -6,6 +6,7 @@ import {
   holdingStreaks,
   legsOf,
   linkCandidates,
+  linkedPlanDate,
   pairTypedLegs,
   planShares,
   realStatus,
@@ -195,6 +196,21 @@ describe('attachAnnotations', () => {
     expect(byLeg.get('f1')?.id).toBe('a1')
     expect(byLeg.get('f2')?.id).toBe('a2')
     expect(unattached.map((annotation) => annotation.id)).toEqual(['a3'])
+  })
+})
+
+describe('linkedPlanDate', () => {
+  const plan = (assetClass: PositionAnchor['assetClass']) => ({ assetClass, entryDate: '2026-11-01' })
+
+  it('follows the streak', () => {
+    expect(linkedPlanDate(plan('JP_EQUITY'), '2026-11-05')).toBe('2026-11-05')
+    expect(linkedPlanDate(plan('US_EQUITY'), '2026-11-05')).toBe('2026-11-05')
+    expect(linkedPlanDate(plan('US_EQUITY'), '2026-10-31')).toBe('2026-10-31')
+  })
+
+  it('treats a US streak one day later as Rakuten’s re-dating, not a correction', () => {
+    expect(linkedPlanDate(plan('US_EQUITY'), '2026-11-02')).toBe('2026-11-01')
+    expect(linkedPlanDate(plan('JP_EQUITY'), '2026-11-02')).toBe('2026-11-02')
   })
 })
 

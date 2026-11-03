@@ -14,17 +14,23 @@ import { reportError } from '~/lib/observability/report'
 import type { ActionResult } from '~/server/playbook'
 
 /**
- * A validator's rejection arrives with its issues as JSON in the message. The
- * first one is the sentence to show; anything else is shown as it stands.
+ * A validator's rejection arrives with its issues as JSON in the message, and
+ * the first one is the sentence to show. Null for any other error.
  */
-export function messageOf(error: unknown): string {
-  if (!(error instanceof Error)) return 'Could not save.'
+export function validationMessage(error: unknown): string | null {
+  if (!(error instanceof Error)) return null
   try {
     const issues = JSON.parse(error.message) as { message?: string }[]
-    return issues[0]?.message ?? error.message
+    return issues[0]?.message ?? null
   } catch {
-    return error.message
+    return null
   }
+}
+
+/** What the owner reads: a validator's sentence, or anything else as it stands. */
+export function messageOf(error: unknown): string {
+  if (!(error instanceof Error)) return 'Could not save.'
+  return validationMessage(error) ?? error.message
 }
 
 export function usePlaybookAction<I, T extends object = object>(
@@ -47,7 +53,8 @@ export function usePlaybookAction<I, T extends object = object>(
       return queryClient.invalidateQueries()
     },
     onError: (error: unknown) => {
-      reportError(error, { mutation: 'playbook' })
+      // A rejected input is the owner's to fix, not a failure for Sentry.
+      if (validationMessage(error) === null) reportError(error, { mutation: 'playbook' })
       setProblem(messageOf(error))
     },
   })

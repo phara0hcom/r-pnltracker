@@ -118,7 +118,7 @@ export const previewExitPlan = createServerFn({ method: 'POST' })
 export const openPosition = createServerFn({ method: 'POST' })
   .middleware([authed])
   .validator((data: unknown) => openPositionSchema.parse(data))
-  .handler(async ({ data, context }): Promise<ActionResult<{ id: string; live: boolean }>> => {
+  .handler(async ({ data, context }): Promise<ActionResult<{ id: string; live: boolean; symbol: string }>> => {
     const { userId } = context
     const scratch = data.source === 'SCRATCH'
     const anchored = !scratch
@@ -212,7 +212,7 @@ export const openPosition = createServerFn({ method: 'POST' })
         : null
 
     const created = await createJournalEntry(userId, input, live)
-    return created.ok ? { ok: true, id: created.value, live: live !== null } : created
+    return created.ok ? { ok: true, id: created.value, live: live !== null, symbol } : created
   })
 
 export const createSetupInline = createServerFn({ method: 'POST' })
