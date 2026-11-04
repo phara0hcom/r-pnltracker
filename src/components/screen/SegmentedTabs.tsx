@@ -2,7 +2,7 @@ import styles from './SegmentedTabs.module.scss'
 import { cx } from '~/lib/cx'
 
 /**
- * SP-only segmented control switching between a page's own sections.
+ * Segmented control switching between a page's own sections or views.
  *
  * Local state, owned by the caller — no routing, no data fetching, just which
  * section is visible. `active`/`onChange` rather than internal state so the

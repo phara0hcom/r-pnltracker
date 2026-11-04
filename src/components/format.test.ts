@@ -6,7 +6,7 @@
  * shows the wrong figure, correctly formatted, and is believed.
  */
 import { describe, expect, it } from 'vitest'
-import { dollarsCompact, money, moneySigned, pctSigned, tone, yen, yenCompact, yenSigned } from './format'
+import { dollarsCompact, money, moneySigned, pctSigned, rSigned, tone, yen, yenCompact, yenSigned } from './format'
 
 describe('money', () => {
   it('groups dollars, exactly as lib/exit/rules.ts does', () => {
@@ -115,5 +115,14 @@ describe('tone', () => {
     // An unpriced position is not a losing one, and colouring it red says so.
     expect(tone(null)).toBe('flat')
     expect(tone(undefined)).toBe('flat')
+  })
+})
+
+describe('rSigned', () => {
+  it('signs a multiple with the minus sign, and neither signs nor drops zero', () => {
+    expect(rSigned('2.1')).toBe('+2.10R')
+    expect(rSigned('-1.3')).toBe('\u22121.30R')
+    expect(rSigned('-0.001')).toBe('0.00R')
+    expect(rSigned(null)).toBe('—')
   })
 })

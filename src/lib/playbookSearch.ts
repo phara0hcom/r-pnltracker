@@ -52,6 +52,18 @@ export const playbookSearchSchema = accountScopeSchema.extend(marketScopeSchema.
 
 export type PlaybookSearch = z.infer<typeof playbookSearchSchema>
 
+/**
+ * One setup's page: the same table's sort, plus which ranking is showing. `kind`
+ * picks whose best and worst, and a stale `kind` for a kind the setup has no
+ * positions of falls back on the page rather than here, where it is not known.
+ */
+export const setupPageSearchSchema = accountScopeSchema.extend(marketScopeSchema.shape).extend({
+  kind: z.enum(['REAL', 'PAPER']).optional().catch(undefined),
+  rank: z.enum(['SCORE', 'R']).optional().catch(undefined),
+  sortBy: z.enum(PLAYBOOK_SORTABLE).optional().catch(undefined),
+  sortDir: z.enum(['asc', 'desc']).optional().catch(undefined),
+})
+
 export interface PlaybookFilters {
   account: AccountFilter
   market: MarketFilter

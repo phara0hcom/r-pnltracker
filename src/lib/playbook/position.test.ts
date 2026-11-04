@@ -7,7 +7,16 @@ import Decimal from 'decimal.js'
 import { describe, expect, it } from 'vitest'
 import type { NormalizedTrade } from '../domain/types'
 import { runEngine } from '../pnl/engine'
-import { derivePosition, legNote, sharedNotes, type PlanBasis, type StoredLeg, type StoredPosition } from './position'
+import {
+  derivePosition,
+  legNote,
+  scoredPosition,
+  sharedNotes,
+  type DerivedPosition,
+  type PlanBasis,
+  type StoredLeg,
+  type StoredPosition,
+} from './position'
 import { holdingStreaks, streakOfPlan, type StreakTrade } from './streaks'
 import { makeTrade } from '~/test/trade'
 
@@ -243,5 +252,33 @@ describe('streakOfPlan', () => {
     const plan = { symbol: 'AAPL', accountType: 'SPECIFIC', assetClass: 'US_EQUITY', entryDate: '2026-09-01' } as const
     expect(streakOfPlan(plan, streaks)?.anchorId).toBe('t1')
     expect(streakOfPlan({ ...plan, assetClass: 'JP_EQUITY' }, streaks)).toBeNull()
+  })
+})
+
+describe('scoredPosition', () => {
+  const derived = (result: Partial<NonNullable<DerivedPosition['result']>>): DerivedPosition =>
+    ({
+      status: 'CLOSED',
+      r: null,
+      score: { overall: 7 },
+      result: { shown: new Decimal(0), jpy: null, native: new Decimal(0), unitsClosed: new Decimal(1), returnPct: null, ...result },
+    }) as DerivedPosition
+
+  it('reads a real result in yen, so a dollar gain lost to the currency is not a win', () => {
+    const scored = scoredPosition(
+      { id: 'p', kind: 'REAL' },
+      derived({ shown: new Decimal(100), jpy: new Decimal(-500) }),
+    )
+    expect(scored.result?.toFixed()).toBe('-500')
+  })
+
+  it('reads a paper result in its own currency, having no yen', () => {
+    const scored = scoredPosition({ id: 'p', kind: 'PAPER' }, derived({ shown: new Decimal(40) }))
+    expect(scored.result?.toFixed()).toBe('40')
+  })
+
+  it('has no result until something closes', () => {
+    const scored = scoredPosition({ id: 'p', kind: 'REAL' }, { ...derived({}), status: 'OPEN', result: null })
+    expect(scored.result).toBeNull()
   })
 })

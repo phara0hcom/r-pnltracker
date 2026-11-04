@@ -106,6 +106,8 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/lib/playbook/position.ts` | one position as the screens read it — status, result, R, score — and the shared note |
 | `src/lib/playbook/plan.ts` | a plan's levels before there is a plan: the dialog's preview and every static plan |
 | `src/server/playbookView.ts` | the Playbook's reads, kept out of client-reachable modules like `server/engine.ts` |
+| `src/components/playbook/SetupFields.tsx` / `SetupDialog.tsx` | a setup's form, one row per criterion so a rename keeps its id; create, edit and archive |
+| `src/components/playbook/RankedTrades.tsx` | a setup's best and worst trades, one `ImageGallery` per trade |
 | `src/server/exitPosition.ts` | a plan's holding facts and `evaluateExitRule`, shared by Exit Rules, the Playbook and the notifier |
 | `src/db/imageStore.ts` | the one place that stores images: `put` / `get` / `del` over Blob, local disk or disabled |
 | `src/lib/playbook/images.ts` | magic bytes, the upload cap, pathnames, grouping, placeholder wording — pure and client-safe |
@@ -187,6 +189,11 @@ derivation and sources.
   position's streak once linked and its typed legs while awaiting import (`planShares`), for all
   three callers of `evaluateExitRule`. Otherwise a position opened from scratch reads
   `POSITION_CLOSED` until its trades arrive, and the notifier pushes a spurious change when they do.
+- **Setup statistics count live positions only, and real and paper apart.** An archived position
+  counts nowhere and shows on no screen, as on `/playbook`. An archived setup leaves the Setups page
+  and takes no new positions, but its positions keep it, and its name is free for a new one: the
+  lists that choose a setup offer it as `Name (archived)` only where a position is still under it. A
+  real result is compared in yen, so a dollar gain the currency took back is not a win.
 - **A trade's note in a live real position is its leg's** (`sharedNotes`, `saveTradeNote`). It reads
   as its fills' memos until the owner writes one, nothing is copied, and an emptied note is stored
   as `''` so the memos do not come back. Archiving or deleting the position shows the memo again.

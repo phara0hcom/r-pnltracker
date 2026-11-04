@@ -2,7 +2,7 @@ import Decimal from 'decimal.js'
 import { describe, expect, it } from 'vitest'
 import { paperResult, paperStatus, type PaperLeg } from './paper'
 import { curve, overallScore, ratedLegs, resultScore, riskScore, rMultiple } from './score'
-import { rankBestWorst, setupStats, type ScoredPosition } from './stats'
+import { kindsUsed, rankBestWorst, rankingsByKind, setupStats, type ScoredPosition } from './stats'
 import { extraTargetsProblem, ratingProblem, staticPlanProblem } from './validate'
 
 const d = (value: number | string) => new Decimal(value)
@@ -178,6 +178,62 @@ describe('rankBestWorst', () => {
   it('ranks by R over only the positions that have one', () => {
     const ranked = rankBestWorst(closed(12), 'R')
     expect('single' in ranked && ranked.single.map((p) => p.id)).toEqual(['p10', 'p8', 'p6', 'p4', 'p2', 'p0'])
+  })
+})
+
+describe('rankBestWorst at the boundary', () => {
+  const closed = (count: number) =>
+    Array.from({ length: count }, (_, index): ScoredPosition => ({
+      id: `p${String(index)}`,
+      kind: 'REAL',
+      status: 'CLOSED',
+      result: d(index),
+      r: d(index),
+      overall: index,
+    }))
+
+  it('keeps one list at nine, and at ten shares no trade between best and worst', () => {
+    expect('single' in rankBestWorst(closed(9), 'SCORE')).toBe(true)
+    const ranked = rankBestWorst(closed(10), 'SCORE')
+    if (!('best' in ranked)) throw new Error('expected two lists')
+    const ids = [...ranked.best, ...ranked.worst].map((position) => position.id)
+    expect(new Set(ids).size).toBe(10)
+  })
+
+  it('falls back to one list when too few of ten or more have the figure', () => {
+    const some = closed(12).map((position, index) => (index < 9 ? position : { ...position, r: null }))
+    expect('best' in rankBestWorst(some, 'SCORE')).toBe(true)
+    expect('single' in rankBestWorst(some, 'R')).toBe(true)
+  })
+
+  it('leaves an open position out, whatever its score', () => {
+    const ranked = rankBestWorst([...closed(2), { ...closed(1)[0]!, id: 'open', status: 'OPEN', overall: 99 }], 'SCORE')
+    expect('single' in ranked && ranked.single.map((position) => position.id)).toEqual(['p1', 'p0'])
+  })
+})
+
+describe('rankingsByKind', () => {
+  const position = (id: string, kind: ScoredPosition['kind'], overall: number): ScoredPosition => ({
+    id,
+    kind,
+    status: 'CLOSED',
+    result: d(1),
+    r: d(overall),
+    overall,
+  })
+
+  it('never ranks paper beside real', () => {
+    const { REAL, PAPER } = rankingsByKind([position('r', 'REAL', 3), position('p', 'PAPER', 9)])
+    expect('single' in REAL.SCORE && REAL.SCORE.single.map((item) => item.id)).toEqual(['r'])
+    expect('single' in PAPER.R && PAPER.R.single.map((item) => item.id)).toEqual(['p'])
+  })
+})
+
+describe('kindsUsed', () => {
+  it('lists the kinds with any position, real first, and none for an unused setup', () => {
+    expect(kindsUsed([])).toEqual([])
+    expect(kindsUsed([{ kind: 'PAPER' }])).toEqual(['PAPER'])
+    expect(kindsUsed([{ kind: 'PAPER' }, { kind: 'REAL' }])).toEqual(['REAL', 'PAPER'])
   })
 })
 

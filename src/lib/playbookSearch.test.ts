@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchesPlaybookFilters, playbookSearchSchema, type PlaybookFilters } from './playbookSearch'
+import { matchesPlaybookFilters, playbookSearchSchema, setupPageSearchSchema, type PlaybookFilters } from './playbookSearch'
 
 const real = { kind: 'REAL', accountType: 'SPECIFIC', assetClass: 'JP_EQUITY', setupId: 's1', status: 'OPEN' } as const
 const paper = { ...real, kind: 'PAPER', accountType: null, assetClass: 'US_EQUITY' } as const
@@ -32,5 +32,18 @@ describe('matchesPlaybookFilters', () => {
 describe('playbookSearchSchema', () => {
   it('drops a bad value to absent, so no default is written into the address', () => {
     expect(playbookSearchSchema.parse({ kind: 'NOPE', status: 'NOPE', sortBy: 'NOPE', sortDir: 'up' })).toEqual({})
+  })
+})
+
+describe('setupPageSearchSchema', () => {
+  it('keeps the account and market scopes, which a zod object would otherwise strip', () => {
+    expect(setupPageSearchSchema.parse({ scope: 'NISA', rank: 'R' })).toMatchObject({ scope: 'NISA', rank: 'R' })
+  })
+
+  it('reads anything it does not know as absent', () => {
+    const parsed = setupPageSearchSchema.parse({ rank: 'LUCK', kind: 'ALL', sortBy: 'nope' })
+    expect(parsed.rank).toBeUndefined()
+    expect(parsed.kind).toBeUndefined()
+    expect(parsed.sortBy).toBeUndefined()
   })
 })

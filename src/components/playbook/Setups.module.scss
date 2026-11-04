@@ -1,0 +1,315 @@
+@use '../../styles/mixins' as m;
+
+.back {
+  display: inline-block;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+
+  @include m.focus-ring;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.action {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+
+  @include m.interactive-surface;
+
+  @include m.mobile {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+  }
+}
+
+.warning {
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-warn);
+  background-color: var(--color-warn-dim);
+  border: 1px solid var(--color-warn);
+  border-radius: var(--radius-md);
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────────── */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  gap: var(--space-3);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.cardHead {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.cardName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+  text-decoration: underline;
+  text-decoration-color: var(--color-border-strong);
+
+  @include m.focus-ring;
+}
+
+.cardEnd {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
+.description {
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  white-space: pre-line;
+}
+
+.muted {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.kind {
+  flex-shrink: 0;
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.kindPaper {
+  color: var(--color-warn);
+  border-color: var(--color-warn);
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+  gap: var(--space-3);
+  align-self: stretch;
+
+  @include m.mobile {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── One setup ─────────────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.kindFigures {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.criteria {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.criteriaLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.criterion {
+  min-width: 0;
+  padding: 2px var(--space-2);
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background-color: var(--color-surface-raised);
+  border-radius: var(--radius-md);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.control {
+  width: min(20rem, 100%);
+}
+
+/* ── Ranked trades ─────────────────────────────────────────────────────── */
+
+.lists {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.listsSplit {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  @include m.mobile {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.list {
+  min-width: 0;
+}
+
+.listTitle {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.trades {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.trade {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.tradeHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.tradeLink {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+  text-decoration: underline;
+  text-decoration-color: var(--color-border-strong);
+
+  @include m.focus-ring;
+}
+
+.tradeName {
+  font-weight: normal;
+  color: var(--color-text-muted);
+}
+
+.tradeFigures {
+  display: flex;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+
+  @include m.tabular-nums;
+}
+
+.tradeMeta {
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+
+  @include m.tabular-nums;
+}
+
+.profit {
+  color: var(--color-profit);
+}
+
+.loss {
+  color: var(--color-loss);
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.note {
+  min-width: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.noteLabel {
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+
+.noteDate {
+  color: var(--color-text-subtle);
+
+  @include m.tabular-nums;
+}
+
+.noteText {
+  overflow-wrap: anywhere;
+  color: var(--color-text-muted);
+  white-space: pre-line;
+}
+
+.unranked {
+  margin-top: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}

@@ -9,6 +9,8 @@ import type Decimal from 'decimal.js'
 import { ZERO } from '../domain/types'
 import type { JournalKind, PositionStatus } from './types'
 
+const JOURNAL_KINDS: readonly JournalKind[] = ['REAL', 'PAPER']
+
 export interface ScoredPosition {
   id: string
   kind: JournalKind
@@ -54,11 +56,21 @@ export function setupStats(positions: readonly ScoredPosition[]): Record<Journal
   }
 }
 
+/**
+ * The kinds a setup has been used as, real first: one card each. Any position
+ * counts, open ones too — a setup in use on paper is not an unused real one.
+ */
+export function kindsUsed(positions: readonly Pick<ScoredPosition, 'kind'>[]): JournalKind[] {
+  return JOURNAL_KINDS.filter((kind) => positions.some((position) => position.kind === kind))
+}
+
 export type RankBy = 'SCORE' | 'R'
 
 /** Below this many ranked positions, one list — two lists of five would share trades. */
 const SPLIT_AT = 10
 const SHOWN = 5
+
+export type Ranking<P> = { best: P[]; worst: P[] } | { single: P[] }
 
 /**
  * The best and worst closed positions, by overall score or by R.
@@ -69,7 +81,7 @@ const SHOWN = 5
 export function rankBestWorst<P extends ScoredPosition>(
   positions: readonly P[],
   by: RankBy,
-): { best: P[]; worst: P[] } | { single: P[] } {
+): Ranking<P> {
   const value = (position: P): number | null =>
     by === 'R' ? (position.r?.toNumber() ?? null) : position.overall
   const ranked = positions
@@ -77,4 +89,22 @@ export function rankBestWorst<P extends ScoredPosition>(
     .sort((left, right) => value(right)! - value(left)!)
   if (ranked.length < SPLIT_AT) return { single: ranked }
   return { best: ranked.slice(0, SHOWN), worst: ranked.slice(-SHOWN).reverse() }
+}
+
+const RANKED_BY: readonly RankBy[] = ['SCORE', 'R']
+
+/**
+ * Every ranking a setup's page can show, so its toggles need no second request.
+ *
+ * Per kind, because a paper win beside a real one would read as the same evidence.
+ */
+export function rankingsByKind<P extends ScoredPosition>(
+  positions: readonly P[],
+): Record<JournalKind, Record<RankBy, Ranking<P>>> {
+  const of = (kind: JournalKind) => {
+    const mine = positions.filter((position) => position.kind === kind)
+    const [score, r] = RANKED_BY.map((by) => rankBestWorst(mine, by))
+    return { SCORE: score!, R: r! }
+  }
+  return { REAL: of('REAL'), PAPER: of('PAPER') }
 }

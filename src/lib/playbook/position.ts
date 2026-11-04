@@ -12,6 +12,7 @@ import type { RealizedEvent } from '../pnl/engine'
 import { usdGain } from '../pnl/usdResult'
 import { paperResult, paperStatus, type PaperLeg } from './paper'
 import { overallScore, ratedLegs, resultScore, riskScore, rMultiple, type Score } from './score'
+import type { ScoredPosition } from './stats'
 import {
   attachAnnotations,
   isOpen,
@@ -298,6 +299,22 @@ export function derivePosition(
     riskPct: riskAmount && equity?.gt(0) ? riskAmount.div(equity) : null,
     sizePct: entryPrice && shares && equity?.gt(0) ? entryPrice.mul(shares).div(equity) : null,
     score,
+  }
+}
+
+/**
+ * A position as the setup statistics read it. A real result is its yen, the figure
+ * the dashboard totals by, not the dollars a US close shows: the two can disagree
+ * on the sign once the currency has moved. Paper has only its own currency.
+ */
+export function scoredPosition(position: Pick<StoredPosition, 'id' | 'kind'>, derived: DerivedPosition): ScoredPosition {
+  return {
+    id: position.id,
+    kind: position.kind,
+    status: derived.status,
+    result: derived.result && (position.kind === 'REAL' ? derived.result.jpy : derived.result.shown),
+    r: derived.r,
+    overall: derived.score.overall,
   }
 }
 

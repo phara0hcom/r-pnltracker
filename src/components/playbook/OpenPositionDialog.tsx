@@ -27,6 +27,7 @@ import { ImageDrop, ImagesNotConfigured } from './ImageDrop'
 import { ImageFields } from './ImageFields'
 import imageStyles from './Images.module.scss'
 import { FrameworkNote, PlanInputs, PlanPreview, target1OverrideOf, type PlanForm } from './PlanFields'
+import { SetupFields, toSetupDraft, toSetupInput } from './SetupFields'
 import { usePlaybookAction } from './usePlaybookAction'
 import { ACCOUNT_LABEL, priceText, qty } from '~/components/format'
 import { ExecutionTimeInput } from '~/components/trades/ExecutionTimeInput'
@@ -129,56 +130,18 @@ function CandidateList({
   )
 }
 
-/** Step 2's inline form. A setup has only a name, a description and its criteria. */
+/** Step 2's inline form. The fields are the Setups page's, so both write a setup the same way. */
 function NewSetup({ onCreated }: { onCreated: (id: string) => void }) {
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [criteria, setCriteria] = useState('')
+  const [draft, setDraft] = useState(() => toSetupDraft(null))
   const create = usePlaybookAction(
-    () =>
-      createSetupInline({
-        data: {
-          name,
-          description,
-          criteria: criteria
-            .split('\n')
-            .map((text) => ({ text: text.trim() }))
-            .filter((criterion) => criterion.text !== ''),
-        },
-      }),
+    () => createSetupInline({ data: toSetupInput(draft) }),
     (result) => {
       onCreated(result.id)
     },
   )
   return (
     <div className={styles.form}>
-      <FormField label="Name">
-        <input
-          className={styles.input}
-          value={name}
-          onChange={(event) => {
-            setName(event.target.value)
-          }}
-        />
-      </FormField>
-      <FormField label="Description">
-        <input
-          className={styles.input}
-          value={description}
-          onChange={(event) => {
-            setDescription(event.target.value)
-          }}
-        />
-      </FormField>
-      <FormField label="Entry criteria" hint="One per line — ticked on each position">
-        <textarea
-          className={styles.textarea}
-          value={criteria}
-          onChange={(event) => {
-            setCriteria(event.target.value)
-          }}
-        />
-      </FormField>
+      <SetupFields draft={draft} onChange={setDraft} />
       {create.problem ? (
         <p className={styles.formError} role="alert">
           {create.problem}
@@ -188,7 +151,7 @@ function NewSetup({ onCreated }: { onCreated: (id: string) => void }) {
         <button
           type="button"
           className={cx(styles.secondary, styles.small)}
-          disabled={create.pending || name.trim() === ''}
+          disabled={create.pending || draft.name.trim() === ''}
           onClick={() => {
             create.run(undefined)
           }}

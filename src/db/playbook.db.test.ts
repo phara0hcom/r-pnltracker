@@ -165,6 +165,178 @@ describe.skipIf(!containerAvailable)('setups', () => {
   })
 })
 
+describe.skipIf(!containerAvailable)('setups as the Setups pages use them', () => {
+  const OTHER = 'u-test-setups'
+  const input = { name: 'Breakout', description: '', criteria: [] }
+
+  beforeEach(async () => {
+    await sql!.query(
+      `insert into "user" (id, name, email, email_verified, created_at, updated_at)
+       values ($1, 'Other', 'other-setups@example.com', true, now(), now()) on conflict do nothing`,
+      [OTHER],
+    )
+  })
+
+  it('gives two writes racing for one name a message, not a raw 23505', async () => {
+    const attempts = await Promise.all(Array.from({ length: 6 }, () => playbook!.createSetup(USER, input)))
+    expect(attempts.filter((attempt) => attempt.ok)).toHaveLength(1)
+    for (const attempt of attempts.filter((item) => !item.ok)) {
+      expect(attempt).toEqual({ ok: false, message: 'There is already a setup called Breakout.' })
+    }
+  })
+
+  it('refuses renaming onto a live name, and allows keeping its own', async () => {
+    const id = value(await playbook!.createSetup(USER, input))
+    const second = value(await playbook!.createSetup(USER, { ...input, name: 'Pullback' }))
+    expect(await playbook!.updateSetup(USER, second, input)).toEqual({
+      ok: false,
+      message: 'There is already a setup called Breakout.',
+    })
+    expect((await playbook!.updateSetup(USER, id, { ...input, description: 'Edited' })).ok).toBe(true)
+  })
+
+  it('lets two users, and an archived setup and a live one, share a name', async () => {
+    const first = value(await playbook!.createSetup(USER, input))
+    expect((await playbook!.createSetup(OTHER, input)).ok).toBe(true)
+    await playbook!.archiveSetup(USER, first)
+    expect((await playbook!.createSetup(USER, input)).ok).toBe(true)
+  })
+
+  it('will not edit an archived setup, and keeps the date it was first archived', async () => {
+    const id = value(await playbook!.createSetup(USER, input))
+    await playbook!.archiveSetup(USER, id)
+    const [{ archivedAt } = { archivedAt: null }] = await playbook!.listSetups(USER, true)
+    expect(await playbook!.updateSetup(USER, id, { ...input, name: 'Renamed' })).toEqual({
+      ok: false,
+      message: 'That setup no longer exists.',
+    })
+    await playbook!.archiveSetup(USER, id)
+    expect((await playbook!.listSetups(USER, true))[0]!.archivedAt).toEqual(archivedAt)
+  })
+
+  it('will not edit or archive someone else’s setup', async () => {
+    const id = value(await playbook!.createSetup(OTHER, input))
+    expect((await playbook!.updateSetup(USER, id, { ...input, name: 'Mine now' })).ok).toBe(false)
+    await playbook!.archiveSetup(USER, id)
+    const [theirs] = await playbook!.listSetups(OTHER)
+    expect(theirs).toMatchObject({ name: 'Breakout', archivedAt: null })
+    expect(await playbook!.listSetups(USER)).toEqual([])
+  })
+
+  it('keeps a position under a setup archived since, but will not file a new one there', async () => {
+    const setupId = value(await playbook!.createSetup(USER, input))
+    const other = value(await playbook!.createSetup(USER, { ...input, name: 'Pullback' }))
+    const id = value(await playbook!.createJournalEntry(USER, position({ setupId, legs: [typedBuy] })))
+    const moving = value(await playbook!.createJournalEntry(USER, position({ symbol: '7203', setupId: other, legs: [typedBuy] })))
+    await playbook!.archiveSetup(USER, setupId)
+
+    // Edit position sends the setup back with everything else.
+    expect((await playbook!.updateJournalEntry(USER, id, { setupId, lessons: 'kept' })).ok).toBe(true)
+    expect((await playbook!.getJournalEntry(USER, id))?.setupId).toBe(setupId)
+    expect((await playbook!.updateJournalEntry(USER, moving, { setupId })).ok).toBe(false)
+    expect((await playbook!.createJournalEntry(USER, position({ symbol: '6758', setupId, legs: [typedBuy] }))).ok).toBe(false)
+  })
+
+  it('keeps only ticks for criteria the position’s setup still has', async () => {
+    const setupId = value(
+      await playbook!.createSetup(USER, { ...input, criteria: [{ text: 'Volume' }, { text: 'Trend' }] }),
+    )
+    const [volume, trend] = (await playbook!.listSetups(USER))[0]!.criteria
+    const id = value(await playbook!.createJournalEntry(USER, position({ setupId, legs: [typedBuy] })))
+    const ticks = async () => (await playbook!.getJournalEntry(USER, id))?.criteriaMet
+
+    await playbook!.updateJournalEntry(USER, id, { criteriaMet: [volume!.id, trend!.id] })
+    expect(await ticks()).toEqual([volume!.id, trend!.id])
+
+    // Removing a criterion leaves its tick until the next save, which drops it.
+    await playbook!.updateSetup(USER, setupId, { ...input, criteria: [trend!] })
+    expect(await ticks()).toEqual([volume!.id, trend!.id])
+    await playbook!.updateJournalEntry(USER, id, { criteriaMet: [volume!.id, trend!.id] })
+    expect(await ticks()).toEqual([trend!.id])
+
+    // An archived setup keeps its criteria, so its positions keep their ticks.
+    await playbook!.archiveSetup(USER, setupId)
+    await playbook!.updateJournalEntry(USER, id, { criteriaMet: [trend!.id] })
+    expect(await ticks()).toEqual([trend!.id])
+
+    // With no setup there is nothing a tick could belong to.
+    await playbook!.updateJournalEntry(USER, id, { setupId: null })
+    await playbook!.updateJournalEntry(USER, id, { criteriaMet: [trend!.id] })
+    expect(await ticks()).toEqual([])
+  })
+
+  it('reads a setup’s page for its owner only, without archived positions', async () => {
+    const { setupPage, setupsData } = await import('~/server/playbookView')
+    const setupId = value(await playbook!.createSetup(USER, input))
+    const unused = value(await playbook!.createSetup(USER, { ...input, name: 'Unused' }))
+    const paper = (symbol: string, sold: string) =>
+      playbook!.createJournalEntry(
+        USER,
+        position({
+          kind: 'PAPER',
+          accountType: null,
+          symbol,
+          setupId,
+          legs: [
+            { ...typedBuy, note: null, rating: 8 },
+            { ...typedBuy, side: 'EXIT', date: '2026-09-05', executedAt: null, price: sold, rating: 6, note: 'took it' },
+          ],
+        }),
+      )
+    const kept = value(await paper('7203', '3300'))
+    const archived = value(await paper('6758', '2000'))
+    await playbook!.archiveJournalEntry(USER, archived)
+
+    expect(await setupPage(OTHER, setupId)).toBeNull()
+    const page = (await setupPage(USER, setupId))!
+    expect(page.kinds).toEqual(['PAPER'])
+    expect(page.rows.map((row) => row.id)).toEqual([kept])
+    expect(page.figures.PAPER).toMatchObject({ closed: 1, winRate: 1, withR: 0 })
+    expect(page.figures.REAL.closed).toBe(0)
+    expect(page.rankings.PAPER.SCORE.list).toEqual({ single: [kept] })
+    expect(page.rankings.PAPER.R).toEqual({ list: { single: [] }, unranked: 1 })
+    expect(page.trades[kept]?.legs.map((leg) => leg.note)).toEqual(['', 'took it'])
+
+    const { cards } = await setupsData(USER)
+    expect(cards.map((card) => [card.name, card.kind])).toEqual([
+      ['Breakout', 'PAPER'],
+      ['Unused', null],
+    ])
+    expect(cards.find((card) => card.id === unused)?.figures.closed).toBe(0)
+    expect((await setupsData(OTHER)).cards).toEqual([])
+  })
+
+  it('loads many positions’ images at once, for their owner and the phases asked for', async () => {
+    const { journalImages } = schema!
+    const insert = (id: string, journalId: string, userId: string, phase: 'ENTRY' | 'PLAN', at: number) =>
+      database!.db.insert(journalImages).values({
+        id,
+        userId,
+        journalId,
+        phase,
+        pathname: `${id}.webp`,
+        thumbPathname: `${id}.thumb.webp`,
+        contentType: 'image/webp',
+        bytes: 1,
+        position: at,
+      })
+    const mine = value(await playbook!.createJournalEntry(USER, position({ legs: [typedBuy] })))
+    const second = value(await playbook!.createJournalEntry(USER, position({ symbol: '7203', legs: [typedBuy] })))
+    const theirs = value(await playbook!.createJournalEntry(OTHER, position({ legs: [typedBuy] })))
+    await insert('b', mine, USER, 'ENTRY', 1)
+    await insert('a', mine, USER, 'ENTRY', 0)
+    await insert('plan', mine, USER, 'PLAN', 0)
+    await insert('c', second, USER, 'ENTRY', 0)
+    await insert('x', theirs, OTHER, 'ENTRY', 0)
+
+    const images = await playbook!.listJournalImagesFor(USER, [mine, second, theirs], ['ENTRY', 'EXIT'])
+    expect(images.get(mine)?.map((image) => image.id)).toEqual(['a', 'b'])
+    expect(images.get(second)?.map((image) => image.id)).toEqual(['c'])
+    expect(images.has(theirs)).toBe(false)
+    expect((await playbook!.listJournalImagesFor(USER, [], ['ENTRY'])).size).toBe(0)
+  })
+})
+
 describe.skipIf(!containerAvailable)('positions', () => {
   it('files one position per streak, and refuses a second', async () => {
     const [anchor] = await store(buy('2026-09-01'), sell('2026-09-05'))

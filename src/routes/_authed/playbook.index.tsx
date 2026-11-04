@@ -12,7 +12,7 @@ import styles from './playbook.module.scss'
 import { ExitLadder } from '~/components/exits/ExitLadder'
 import { ACCOUNT_LABEL, priceText } from '~/components/format'
 import { OpenPositionDialog } from '~/components/playbook/OpenPositionDialog'
-import { LinkDialog } from '~/components/playbook/PositionDialogs'
+import { LinkLoader } from '~/components/playbook/PositionDialogs'
 import { PositionTable, STATUS_LABEL } from '~/components/playbook/PositionTable'
 import { usePlaybookAction } from '~/components/playbook/usePlaybookAction'
 import { Empty, PageHeader, Section } from '~/components/screen'
@@ -34,7 +34,6 @@ import {
   archivePlan,
   fileExitPlans,
   getPlaybook,
-  getPosition,
   type ActionResult,
   type PositionRow,
 } from '~/server/playbook'
@@ -46,15 +45,6 @@ export const Route = createFileRoute('/_authed/playbook/')({
 })
 
 const KIND_LABEL: Record<KindFilter, string> = { REAL: 'Real', PAPER: 'Paper', ALL: 'Real and paper' }
-
-/** Loads the full position only when its dialog opens. */
-function LinkLoader({ id, onClose }: { id: string; onClose: () => void }) {
-  const { data } = useQuery({
-    queryKey: ['playbook', 'position', id],
-    queryFn: () => getPosition({ data: { id } }),
-  })
-  return data ? <LinkDialog position={data} onClose={onClose} /> : null
-}
 
 function NeedsAction({ rows, onArchive }: { rows: PositionRow[]; onArchive: (planId: string) => void }) {
   return (
@@ -157,6 +147,9 @@ function Playbook() {
         }
         actionsBeside
       >
+        <Link to="/playbook/setups" className={styles.openButton}>
+          Setups
+        </Link>
         <button
           type="button"
           className={styles.openButton}

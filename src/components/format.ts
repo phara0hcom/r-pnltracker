@@ -137,6 +137,14 @@ export const priceText = (value: string | number | null | undefined, currency: '
   return withSign(asNumber, magnitude, '0', false) + '¥' + magnitude
 }
 
+/** An R multiple, signed like any other change: `+2.10R`, `−1.30R`. */
+export const rSigned = (value: string | number | null | undefined): string => {
+  if (value == null) return '—'
+  const asNumber = Number(value)
+  const magnitude = Math.abs(asNumber).toFixed(2)
+  return withSign(asNumber, magnitude, '0.00', true) + magnitude + 'R'
+}
+
 export const qty = (value: string | number): string =>
   Number(value).toLocaleString('en-US', { maximumFractionDigits: 4 })
 

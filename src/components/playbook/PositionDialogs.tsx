@@ -3,6 +3,7 @@
  * imported trades. Each is opened from the page and refreshes it on success.
  */
 import * as Dialog from '@radix-ui/react-dialog'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import styles from './Dialog.module.scss'
 import { PlanInputs, PlanPreview, target1OverrideOf, type PlanForm } from './PlanFields'
@@ -14,9 +15,9 @@ import { useDialogHistory } from '~/components/ui/useDialogHistory'
 import { cx } from '~/lib/cx'
 import { EMPTY_TIME, resolveExecutedAt, timedMarket, toTimeInput, type TimeInput } from '~/lib/import/executionTime'
 import type { LegSide } from '~/lib/playbook/types'
-import { linkPosition, updatePlan, updatePosition, type PositionDetail } from '~/server/playbook'
+import { getPosition, linkPosition, updatePlan, updatePosition, type PositionDetail } from '~/server/playbook'
 
-function Frame({
+export function Frame({
   open,
   onClose,
   title,
@@ -575,4 +576,13 @@ export function LinkDialog({ position, onClose }: { position: PositionDetail; on
       </div>
     </Frame>
   )
+}
+
+/** `LinkDialog` from a list, which holds rows: loads the full position only when it opens. */
+export function LinkLoader({ id, onClose }: { id: string; onClose: () => void }) {
+  const { data } = useQuery({
+    queryKey: ['playbook', 'position', id],
+    queryFn: () => getPosition({ data: { id } }),
+  })
+  return data ? <LinkDialog position={data} onClose={onClose} /> : null
 }

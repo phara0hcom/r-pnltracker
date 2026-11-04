@@ -11,7 +11,7 @@ import styles from './PositionTable.module.scss'
 import { AccountDot } from '~/components/AccountDot'
 import { ExitFlags } from '~/components/exits/ExitFlags'
 import { ExitLadder } from '~/components/exits/ExitLadder'
-import { ACCOUNT_LABEL, moneySigned, pctSigned, tone, yenSigned } from '~/components/format'
+import { ACCOUNT_LABEL, moneySigned, pctSigned, rSigned, tone, yenSigned } from '~/components/format'
 import { Empty, SortHeader, Table } from '~/components/screen'
 import { useIsMobile } from '~/components/ui/useIsMobile'
 import { cx } from '~/lib/cx'
@@ -186,7 +186,7 @@ export function PositionTable({
             <p className={styles.cardMeta}>
               {row.setupName ?? 'No setup'} · {shortDate(row.openDate)}
               {row.closeDate ? ` → ${shortDate(row.closeDate)}` : ''}
-              {row.r ? ` · ${row.r}R` : ''}
+              {row.r ? ` · ${rSigned(row.r)}` : ''}
             </p>
             <p className={styles.cardMeta}>
               Entry {row.entryScore ?? '—'} · Exit {row.exitScore ?? '—'} · Risk {row.riskScore ?? '—'} · Overall{' '}
@@ -239,7 +239,7 @@ export function PositionTable({
               className={toneClass(row.r)}
               title={row.currency === 'USD' && row.r ? 'After both commissions, so slightly below what the dollar figure implies' : undefined}
             >
-              {row.r === null ? '—' : `${row.r}R`}
+              {rSigned(row.r)}
             </td>
             <td data-numeric="">{row.entryScore ?? '—'}</td>
             <td data-numeric="">{row.exitScore ?? '—'}</td>

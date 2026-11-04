@@ -11,7 +11,7 @@ import { useState } from 'react'
 import styles from './playbookPosition.module.scss'
 import { ExitFlags } from '~/components/exits/ExitFlags'
 import { ExitLadder } from '~/components/exits/ExitLadder'
-import { ACCOUNT_LABEL, pct, priceText, qty, tone } from '~/components/format'
+import { ACCOUNT_LABEL, pct, priceText, qty, rSigned, tone } from '~/components/format'
 import { FrameworkNote, METHOD_LABEL } from '~/components/playbook/PlanFields'
 import { PositionCharts } from '~/components/playbook/PositionCharts'
 import { EditPlanDialog, EditPositionDialog, LinkDialog } from '~/components/playbook/PositionDialogs'
@@ -186,7 +186,7 @@ function ScorePanel({ position }: { position: PositionDetail }) {
         <Figure label="Planned R" value={position.plannedR ?? '—'} />
         <Figure
           label="Actual R"
-          value={position.r ?? '—'}
+          value={rSigned(position.r)}
           hint={currency === 'USD' && position.r ? 'after both commissions' : undefined}
         />
       </div>

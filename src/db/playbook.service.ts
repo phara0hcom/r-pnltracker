@@ -9,7 +9,7 @@
  * Every query is scoped by `userId`, child tables included, so an id straight
  * from a request body that belongs to someone else matches nothing. An id
  * stored as a value matches no `where`, and the foreign keys do not know the
- * owner, so those are checked with `ownsSetup` and `ownsTrade` before writing.
+ * owner, so those are checked with `setupProblem` and `ownsTrade` before writing.
  */
 import { randomUUID } from 'node:crypto'
 import { waitUntil } from '@vercel/functions'
@@ -51,12 +51,26 @@ export type PlaybookResult<T = string> = { ok: true; value: T } | { ok: false; m
 
 const fail = (message: string): { ok: false; message: string } => ({ ok: false, message })
 
-async function ownsSetup(userId: string, id: string): Promise<boolean> {
-  const [row] = await db
-    .select({ id: setups.id })
+/**
+ * Why a position cannot be filed under this setup, if it cannot: it is someone
+ * else's, or archived. A position may stay under a setup archived since it was
+ * filed, so saving its other fields is not refused; `journalId` names that position.
+ */
+export async function setupProblem(userId: string, setupId: string, journalId?: string): Promise<string | null> {
+  const [setup] = await db
+    .select({ archivedAt: setups.archivedAt })
     .from(setups)
-    .where(and(eq(setups.userId, userId), eq(setups.id, id)))
-  return row !== undefined
+    .where(and(eq(setups.userId, userId), eq(setups.id, setupId)))
+  if (!setup) return 'That setup no longer exists.'
+  if (!setup.archivedAt) return null
+  if (journalId) {
+    const [entry] = await db
+      .select({ setupId: journalEntries.setupId })
+      .from(journalEntries)
+      .where(and(eq(journalEntries.userId, userId), eq(journalEntries.id, journalId)))
+    if (entry?.setupId === setupId) return null
+  }
+  return 'That setup has been archived. Choose another.'
 }
 
 /** Soft-deleted rows count: a regrouped fill is still the owner's to refer to. */
@@ -112,7 +126,8 @@ export async function listSetups(userId: string, includeArchived = false): Promi
 
 /**
  * Checked explicitly before writing, as `createExitRule` does, so a clash is a
- * message rather than a raw 23505 from the partial index.
+ * message rather than a raw 23505 from the partial index. Two writes can still
+ * race past this, which `isNameClash` catches.
  */
 async function nameTaken(userId: string, name: string, exceptId?: string): Promise<boolean> {
   const rows = await db
@@ -122,31 +137,52 @@ async function nameTaken(userId: string, name: string, exceptId?: string): Promi
   return rows.some((row) => row.id !== exceptId)
 }
 
+/** Drizzle wraps pg's error, so the constraint is on its cause. */
+function isNameClash(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const cause = error.cause as { code?: string; constraint?: string } | undefined
+  return cause?.code === '23505' && cause.constraint === 'setups_active_name_uq'
+}
+
+const nameClash = (name: string) => fail(`There is already a setup called ${name}.`)
+
 export async function createSetup(userId: string, input: SetupInput): Promise<PlaybookResult> {
   const name = input.name.trim()
   if (name === '') return fail('A setup needs a name.')
-  if (await nameTaken(userId, name)) return fail(`There is already a setup called ${name}.`)
+  if (await nameTaken(userId, name)) return nameClash(name)
   const id = newId('setup')
-  await db.insert(setups).values({
-    id,
-    userId,
-    name,
-    description: input.description.trim(),
-    criteria: cleanCriteria(input.criteria),
-  })
+  try {
+    await db.insert(setups).values({
+      id,
+      userId,
+      name,
+      description: input.description.trim(),
+      criteria: cleanCriteria(input.criteria),
+    })
+  } catch (error) {
+    if (isNameClash(error)) return nameClash(name)
+    throw error
+  }
   return { ok: true, value: id }
 }
 
 export async function updateSetup(userId: string, id: string, input: SetupInput): Promise<PlaybookResult> {
   const name = input.name.trim()
   if (name === '') return fail('A setup needs a name.')
-  if (await nameTaken(userId, name, id)) return fail(`There is already a setup called ${name}.`)
-  const [row] = await db
-    .update(setups)
-    .set({ name, description: input.description.trim(), criteria: cleanCriteria(input.criteria), updatedAt: new Date() })
-    .where(and(eq(setups.userId, userId), eq(setups.id, id)))
-    .returning({ id: setups.id })
-  return row ? { ok: true, value: row.id } : fail('That setup no longer exists.')
+  if (await nameTaken(userId, name, id)) return nameClash(name)
+  try {
+    // An archived setup is history: its name is no longer reserved, so an edit
+    // could not be checked against the live ones it would have to stand beside.
+    const [row] = await db
+      .update(setups)
+      .set({ name, description: input.description.trim(), criteria: cleanCriteria(input.criteria), updatedAt: new Date() })
+      .where(and(eq(setups.userId, userId), eq(setups.id, id), isNull(setups.archivedAt)))
+      .returning({ id: setups.id })
+    return row ? { ok: true, value: row.id } : fail('That setup no longer exists.')
+  } catch (error) {
+    if (isNameClash(error)) return nameClash(name)
+    throw error
+  }
 }
 
 /** Kept, not deleted: its positions still name it. Archiving frees the name. */
@@ -154,7 +190,7 @@ export async function archiveSetup(userId: string, id: string): Promise<void> {
   await db
     .update(setups)
     .set({ archivedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(setups.userId, userId), eq(setups.id, id)))
+    .where(and(eq(setups.userId, userId), eq(setups.id, id), isNull(setups.archivedAt)))
 }
 
 // ── Positions ───────────────────────────────────────────────────────────────
@@ -384,7 +420,8 @@ export async function createJournalEntry(
   if (input.kind === 'PAPER' && input.accountType !== null) return fail('A paper position has no account.')
   if (input.kind === 'PAPER' && input.anchorTradeId !== null) return fail('A paper position has no trades.')
   if (input.kind === 'REAL' && input.accountType === null) return fail('Choose the account it was traded in.')
-  if (input.setupId !== null && !(await ownsSetup(userId, input.setupId))) return fail('That setup no longer exists.')
+  const setup = input.setupId === null ? null : await setupProblem(userId, input.setupId)
+  if (setup) return fail(setup)
   if (input.anchorTradeId === null && !input.legs.some((leg) => leg.side === 'ENTRY')) {
     return fail('Enter the buy, or file it from a holding.')
   }
@@ -543,13 +580,43 @@ export interface JournalEntryPatch {
   lessons?: string
 }
 
+/**
+ * Ticks are kept only for criteria the position's setup still has. The page resends
+ * the whole list on every click, so an id left by a removed criterion would otherwise
+ * stay for good and, added up, reach the schema's cap and refuse the save.
+ */
+async function currentTicks(
+  userId: string,
+  id: string,
+  ticks: readonly string[],
+  patchedSetupId: string | null | undefined,
+): Promise<string[]> {
+  let setupId = patchedSetupId
+  if (setupId === undefined) {
+    const [entry] = await db
+      .select({ setupId: journalEntries.setupId })
+      .from(journalEntries)
+      .where(and(eq(journalEntries.userId, userId), eq(journalEntries.id, id)))
+    setupId = entry?.setupId ?? null
+  }
+  if (setupId === null) return []
+  const [setup] = await db
+    .select({ criteria: setups.criteria })
+    .from(setups)
+    .where(and(eq(setups.userId, userId), eq(setups.id, setupId)))
+  const known = new Set(setup?.criteria.map((criterion) => criterion.id))
+  return ticks.filter((tick) => known.has(tick))
+}
+
 /** The owner's review and static plan. Symbol, account and anchor are not editable here. */
 export async function updateJournalEntry(userId: string, id: string, patch: JournalEntryPatch): Promise<PlaybookResult> {
   const problem =
     (patch.extraTargets ? extraTargetsProblem(patch.extraTargets) : null) ??
     (patch.riskRatingOverride !== undefined ? ratingProblem(patch.riskRatingOverride) : null)
   if (problem) return fail(problem)
-  if (patch.setupId && !(await ownsSetup(userId, patch.setupId))) return fail('That setup no longer exists.')
+  const setup = patch.setupId ? await setupProblem(userId, patch.setupId, id) : null
+  if (setup) return fail(setup)
+  const criteriaMet = patch.criteriaMet && (await currentTicks(userId, id, patch.criteriaMet, patch.setupId))
   // Built explicitly: spreading the patch would pass any extra field through.
   const [row] = await db
     .update(journalEntries)
@@ -560,7 +627,7 @@ export async function updateJournalEntry(userId: string, id: string, patch: Jour
       ...(patch.extraTargets !== undefined && { extraTargets: patch.extraTargets }),
       ...(patch.accountEquity !== undefined && { accountEquity: patch.accountEquity }),
       ...(patch.riskRatingOverride !== undefined && { riskRatingOverride: patch.riskRatingOverride }),
-      ...(patch.criteriaMet !== undefined && { criteriaMet: patch.criteriaMet }),
+      ...(criteriaMet !== undefined && { criteriaMet }),
       ...(patch.mistakes !== undefined && { mistakes: patch.mistakes }),
       ...(patch.lessons !== undefined && { lessons: patch.lessons }),
       updatedAt: new Date(),
@@ -1041,6 +1108,36 @@ export async function listJournalImages(userId: string, journalId: string): Prom
     .from(journalImages)
     .where(and(eq(journalImages.userId, userId), eq(journalImages.journalId, journalId)))
     .orderBy(asc(journalImages.position), asc(journalImages.createdAt))
+}
+
+/**
+ * The images of many positions in one query, so a page of them costs no more than
+ * one. Grouped by position, each in its gallery order.
+ */
+export async function listJournalImagesFor(
+  userId: string,
+  journalIds: readonly string[],
+  phases: readonly ImagePhase[],
+): Promise<Map<string, JournalImageRecord[]>> {
+  const byJournal = new Map<string, JournalImageRecord[]>()
+  if (journalIds.length === 0) return byJournal
+  const rows = await db
+    .select(imageColumns)
+    .from(journalImages)
+    .where(
+      and(
+        eq(journalImages.userId, userId),
+        inArray(journalImages.journalId, [...journalIds]),
+        inArray(journalImages.phase, [...phases]),
+      ),
+    )
+    .orderBy(asc(journalImages.position), asc(journalImages.createdAt))
+  for (const row of rows) {
+    const list = byJournal.get(row.journalId) ?? []
+    list.push(row)
+    byJournal.set(row.journalId, list)
+  }
+  return byJournal
 }
 
 /** Null both for a missing image and for someone else's: existence does not leak. */

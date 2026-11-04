@@ -1,7 +1,7 @@
 /**
  * Thumbnails that open a lightbox. Knows nothing about positions or editing, so
  * the setup pages can show their images with it: `actions` adds controls under
- * each image, and `grouped={false}` drops the phase headings.
+ * each image, `grouped={false}` drops the phase headings and `compact` shrinks them.
  *
  * The lightbox is held by id, not index, so an image deleted from under it closes
  * it rather than sliding the next one into its place.
@@ -10,15 +10,19 @@ import { useState } from 'react'
 import { describeImage, ImageLightbox } from './ImageLightbox'
 import styles from './Images.module.scss'
 import { StoredImage } from './StoredImage'
+import { cx } from '~/lib/cx'
 import { groupByPhase, PHASE_LABEL, type GalleryImage } from '~/lib/playbook/images'
 
 export function ImageGallery({
   images,
   grouped = true,
+  compact = false,
   actions,
 }: {
   images: readonly GalleryImage[]
   grouped?: boolean
+  /** Smaller thumbnails, for a gallery that is one part of a card. */
+  compact?: boolean
   actions?: (image: GalleryImage) => React.ReactNode
 }) {
   const [openId, setOpenId] = useState<string | null>(null)
@@ -32,7 +36,7 @@ export function ImageGallery({
       {groups.map((group) => (
         <div key={group.phase ?? 'all'}>
           {group.phase ? <h3 className={styles.groupTitle}>{PHASE_LABEL[group.phase]}</h3> : null}
-          <ul className={styles.grid}>
+          <ul className={cx(styles.grid, compact && styles.gridCompact)}>
             {group.images.map((image) => (
               <li key={image.id} className={styles.card}>
                 <button

@@ -9,9 +9,10 @@
 import { createServerFn } from '@tanstack/react-start'
 import Decimal from 'decimal.js'
 import { authed } from './middleware'
-import { lotSizeFor, openOptions, playbookData, positionDetail } from './playbookView'
+import { lotSizeFor, openOptions, playbookData, positionDetail, setupPage, setupsData } from './playbookView'
 import { archiveExitRule, entryAtrFor, getExitRule, listExitRules, updateExitRule } from '~/db/exit.service'
 import {
+  archiveSetup as archiveStoredSetup,
   archiveJournalEntry,
   createJournalEntry,
   addJournalImage,
@@ -21,14 +22,15 @@ import {
   fileExistingPlans,
   getJournalEntry,
   linkJournalEntry,
-  listSetups,
   reattachAnnotation,
   replaceTypedLegs,
   scratchProblem,
   setLegAnnotation,
   setLegTime,
+  setupProblem,
   updateJournalEntry,
   updateJournalImage,
+  updateSetup as updateStoredSetup,
   type JournalEntryInput,
   type LivePlanInput,
 } from '~/db/playbook.service'
@@ -47,6 +49,7 @@ import {
   updateImageSchema,
   updatePlanSchema,
   updatePositionSchema,
+  updateSetupSchema,
   uploadImageSchema,
 } from '~/lib/playbook/schemas'
 import { extraTargetsProblem, staticPlanProblem, symbolProblem } from '~/lib/playbook/validate'
@@ -59,6 +62,12 @@ export type {
   PlaybookData,
   PositionDetail,
   PositionRow,
+  RankedTrade,
+  SetupCardView,
+  SetupFiguresView,
+  SetupPageData,
+  SetupRanking,
+  SetupsData,
   StreakCandidate,
   TypedLegView,
   UnattachedLeg,
@@ -77,6 +86,15 @@ export const getPosition = createServerFn({ method: 'GET' })
   .middleware([authed])
   .validator((data: unknown) => positionIdSchema.parse(data))
   .handler(({ data, context }) => positionDetail(context.userId, data.id))
+
+export const getSetups = createServerFn({ method: 'GET' })
+  .middleware([authed])
+  .handler(({ context }) => setupsData(context.userId))
+
+export const getSetupPage = createServerFn({ method: 'GET' })
+  .middleware([authed])
+  .validator((data: unknown) => positionIdSchema.parse(data))
+  .handler(({ data, context }) => setupPage(context.userId, data.id))
 
 export const getOpenOptions = createServerFn({ method: 'GET' })
   .middleware([authed])
@@ -228,15 +246,31 @@ export const createSetupInline = createServerFn({ method: 'POST' })
     return created.ok ? { ok: true, id: created.value } : created
   })
 
+export const updateSetup = createServerFn({ method: 'POST' })
+  .middleware([authed])
+  .validator((data: unknown) => updateSetupSchema.parse(data))
+  .handler(async ({ data, context }): Promise<ActionResult> => {
+    const { id, ...input } = data
+    const updated = await updateStoredSetup(context.userId, id, input)
+    return updated.ok ? { ok: true } : updated
+  })
+
+export const archiveSetup = createServerFn({ method: 'POST' })
+  .middleware([authed])
+  .validator((data: unknown) => positionIdSchema.parse(data))
+  .handler(async ({ data, context }): Promise<ActionResult> => {
+    await archiveStoredSetup(context.userId, data.id)
+    return { ok: true }
+  })
+
 export const updatePosition = createServerFn({ method: 'POST' })
   .middleware([authed])
   .validator((data: unknown) => updatePositionSchema.parse(data))
   .handler(async ({ data, context }): Promise<ActionResult> => {
     const { id, legs, ...patch } = data
-    if (patch.setupId) {
-      const setups = await listSetups(context.userId)
-      if (!setups.some((setup) => setup.id === patch.setupId)) return refused('That setup no longer exists.')
-    }
+    // Ahead of the legs, so a refusal leaves nothing half-saved.
+    const problem = patch.setupId ? await setupProblem(context.userId, patch.setupId, id) : null
+    if (problem) return refused(problem)
     if (legs) {
       const replaced = await replaceTypedLegs(
         context.userId,

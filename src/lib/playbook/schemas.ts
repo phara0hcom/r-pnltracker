@@ -49,10 +49,20 @@ const typedLeg = z.object({
 export type TypedLegInput = z.infer<typeof typedLeg>
 
 export const setupSchema = z.object({
-  name: z.string().trim().min(1, 'A setup needs a name.').max(80),
-  description: z.string().trim().max(1000),
-  criteria: z.array(z.object({ id: z.string().min(1).optional(), text: z.string().trim().max(200) })).max(30),
+  name: z.string().trim().min(1, 'A setup needs a name.').max(80, 'A setup’s name is 80 characters at most.'),
+  description: z.string().trim().max(1000, 'A description is 1,000 characters at most.'),
+  criteria: z
+    .array(
+      z.object({
+        /** Kept across a rename, so ticks already recorded against it survive. */
+        id: z.string().min(1).optional(),
+        text: z.string().trim().max(200, 'A criterion is 200 characters at most.'),
+      }),
+    )
+    .max(30, 'A setup can have 30 criteria at most.'),
 })
+
+export const updateSetupSchema = setupSchema.extend({ id: z.string().min(1) })
 
 /**
  * Opening a position, by source. A holding or past trade names the streak by its

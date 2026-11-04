@@ -28,6 +28,8 @@ import { Route as AuthedPlaybookJournalIdRouteImport } from './routes/_authed/pl
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiImagesIdRouteImport } from './routes/api/images/$id'
 import { Route as ApiTvSecretRouteImport } from './routes/api/tv/$secret'
+import { Route as AuthedPlaybookSetupsIndexRouteImport } from './routes/_authed/playbook.setups.index'
+import { Route as AuthedPlaybookSetupsSetupIdRouteImport } from './routes/_authed/playbook.setups.$setupId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -123,6 +125,18 @@ const ApiTvSecretRoute = ApiTvSecretRouteImport.update({
   path: '/api/tv/$secret',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthedPlaybookSetupsIndexRoute =
+  AuthedPlaybookSetupsIndexRouteImport.update({
+    id: '/playbook/setups/',
+    path: '/playbook/setups/',
+    getParentRoute: () => AuthedRoute,
+  } as any)
+const AuthedPlaybookSetupsSetupIdRoute =
+  AuthedPlaybookSetupsSetupIdRouteImport.update({
+    id: '/playbook/setups/$setupId',
+    path: '/playbook/setups/$setupId',
+    getParentRoute: () => AuthedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -143,6 +157,8 @@ export interface FileRoutesByFullPath {
   '/api/images/$id': typeof ApiImagesIdRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
   '/playbook/': typeof AuthedPlaybookIndexRoute
+  '/playbook/setups/$setupId': typeof AuthedPlaybookSetupsSetupIdRoute
+  '/playbook/setups/': typeof AuthedPlaybookSetupsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -163,6 +179,8 @@ export interface FileRoutesByTo {
   '/api/images/$id': typeof ApiImagesIdRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
   '/playbook': typeof AuthedPlaybookIndexRoute
+  '/playbook/setups/$setupId': typeof AuthedPlaybookSetupsSetupIdRoute
+  '/playbook/setups': typeof AuthedPlaybookSetupsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -185,6 +203,8 @@ export interface FileRoutesById {
   '/api/images/$id': typeof ApiImagesIdRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
   '/_authed/playbook/': typeof AuthedPlaybookIndexRoute
+  '/_authed/playbook/setups/$setupId': typeof AuthedPlaybookSetupsSetupIdRoute
+  '/_authed/playbook/setups/': typeof AuthedPlaybookSetupsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -207,6 +227,8 @@ export interface FileRouteTypes {
     | '/api/images/$id'
     | '/api/tv/$secret'
     | '/playbook/'
+    | '/playbook/setups/$setupId'
+    | '/playbook/setups/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -227,6 +249,8 @@ export interface FileRouteTypes {
     | '/api/images/$id'
     | '/api/tv/$secret'
     | '/playbook'
+    | '/playbook/setups/$setupId'
+    | '/playbook/setups'
   id:
     | '__root__'
     | '/'
@@ -248,6 +272,8 @@ export interface FileRouteTypes {
     | '/api/images/$id'
     | '/api/tv/$secret'
     | '/_authed/playbook/'
+    | '/_authed/playbook/setups/$setupId'
+    | '/_authed/playbook/setups/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -394,6 +420,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTvSecretRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authed/playbook/setups/': {
+      id: '/_authed/playbook/setups/'
+      path: '/playbook/setups'
+      fullPath: '/playbook/setups/'
+      preLoaderRoute: typeof AuthedPlaybookSetupsIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/playbook/setups/$setupId': {
+      id: '/_authed/playbook/setups/$setupId'
+      path: '/playbook/setups/$setupId'
+      fullPath: '/playbook/setups/$setupId'
+      preLoaderRoute: typeof AuthedPlaybookSetupsSetupIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
   }
 }
 
@@ -411,6 +451,8 @@ interface AuthedRouteChildren {
   AuthedTradesRoute: typeof AuthedTradesRoute
   AuthedPlaybookJournalIdRoute: typeof AuthedPlaybookJournalIdRoute
   AuthedPlaybookIndexRoute: typeof AuthedPlaybookIndexRoute
+  AuthedPlaybookSetupsSetupIdRoute: typeof AuthedPlaybookSetupsSetupIdRoute
+  AuthedPlaybookSetupsIndexRoute: typeof AuthedPlaybookSetupsIndexRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
@@ -427,6 +469,8 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedTradesRoute: AuthedTradesRoute,
   AuthedPlaybookJournalIdRoute: AuthedPlaybookJournalIdRoute,
   AuthedPlaybookIndexRoute: AuthedPlaybookIndexRoute,
+  AuthedPlaybookSetupsSetupIdRoute: AuthedPlaybookSetupsSetupIdRoute,
+  AuthedPlaybookSetupsIndexRoute: AuthedPlaybookSetupsIndexRoute,
 }
 
 const AuthedRouteWithChildren =

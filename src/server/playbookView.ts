@@ -22,6 +22,7 @@ import {
   getJournalEntry,
   listJournalEntries,
   listJournalImages,
+  listJournalImagesFor,
   listSetups,
   toStreakTrades,
   unfiledPlans,
@@ -35,7 +36,14 @@ import { initialStopFor, target1For } from '~/lib/exit/rules'
 import type { TrailingMethod } from '~/lib/exit/types'
 import { webhookSecretUsable } from '~/lib/exit/webhook'
 import type { GalleryImage } from '~/lib/playbook/images'
-import { derivePosition, type DerivedLeg, type DerivedPosition, type PlanBasis } from '~/lib/playbook/position'
+import {
+  derivePosition,
+  scoredPosition,
+  type DerivedLeg,
+  type DerivedPosition,
+  type PlanBasis,
+} from '~/lib/playbook/position'
+import { kindsUsed, rankingsByKind, setupStats, type RankBy, type Ranking, type SetupStats } from '~/lib/playbook/stats'
 import {
   holdingStreaks,
   isOpen,
@@ -128,6 +136,23 @@ async function loadBook(userId: string, includeArchived = false) {
   return { entries, streaks, realizedBy, plans, settings, setups, planRow }
 }
 
+type Book = Awaited<ReturnType<typeof loadBook>>
+
+interface ReadPosition {
+  entry: JournalEntryRecord
+  plan: ExitRuleRecord | undefined
+  derived: DerivedPosition
+}
+
+/** Every live position, derived. Archived ones are not in `book.entries`, so they count nowhere. */
+function readPositions(book: Book): ReadPosition[] {
+  const planFor = new Map(book.plans.flatMap((plan) => (plan.journalId ? [[plan.journalId, plan] as const] : [])))
+  return book.entries.map((entry) => {
+    const plan = planFor.get(entry.id)
+    return { entry, plan, derived: derivePosition(entry, book.streaks, book.realizedBy, plan ? planBasis(plan) : null) }
+  })
+}
+
 /** A plan's locked entry facts, live or archived. */
 export function planBasis(plan: ExitRuleRecord): PlanBasis {
   const { stop } = initialStopFor(plan)
@@ -185,15 +210,15 @@ const SEVERITY_RANK: Record<ExitRuleRow['actionSeverity'], number> = { urgent: 0
 const retired = (plan: ExitRuleRow): boolean =>
   plan.actionKind === 'POSITION_CLOSED' || plan.actionKind === 'PLAN_SUPERSEDED'
 
-export async function playbookData(userId: string): Promise<PlaybookData> {
-  const book = await loadBook(userId, true)
+/**
+ * Table rows for these positions. What is claimed is worked out over the whole
+ * book, even when these are one setup's: a streak another setup's position holds
+ * is not there to link.
+ */
+function rowsOf(book: Book, positions: readonly ReadPosition[]): PositionRow[] {
   const claimed = claimedStreaks(book.entries, book.streaks)
-  const planFor = new Map(book.plans.flatMap((plan) => (plan.journalId ? [[plan.journalId, plan] as const] : [])))
-
-  const rows = book.entries
-    .map((entry) => {
-      const plan = planFor.get(entry.id)
-      const derived = derivePosition(entry, book.streaks, book.realizedBy, plan ? planBasis(plan) : null)
+  return positions
+    .map(({ entry, plan, derived }) => {
       const linkable =
         derived.status === 'AWAITING_IMPORT' &&
         entry.accountType !== null &&
@@ -201,6 +226,22 @@ export async function playbookData(userId: string): Promise<PlaybookData> {
       return toRow(entry, derived, book.setups, plan?.archivedAt === null ? book.planRow(plan) : null, linkable)
     })
     .sort(byDefaultOrder)
+}
+
+/**
+ * The setups to offer in a list: the live ones, and any archived one in `keep`. A
+ * position still under an archived setup has to find it there, or the control would
+ * read as another choice while the position stayed where it was.
+ */
+const setupChoices = (setups: readonly SetupRecord[], keep: ReadonlySet<string | null>): { id: string; name: string }[] =>
+  setups
+    .filter((setup) => !setup.archivedAt || keep.has(setup.id))
+    .map(({ id, name, archivedAt }) => ({ id, name: archivedAt ? `${name} (archived)` : name }))
+
+export async function playbookData(userId: string): Promise<PlaybookData> {
+  const book = await loadBook(userId, true)
+  const claimed = claimedStreaks(book.entries, book.streaks)
+  const rows = rowsOf(book, readPositions(book))
 
   const unfiled = unfiledPlans(book.plans, book.streaks, claimed)
   return {
@@ -212,7 +253,7 @@ export async function playbookData(userId: string): Promise<PlaybookData> {
           SEVERITY_RANK[left.plan!.actionSeverity] - SEVERITY_RANK[right.plan!.actionSeverity] ||
           right.plan!.tradingDaysHeld - left.plan!.tradingDaysHeld,
       ),
-    setups: book.setups.filter((setup) => !setup.archivedAt).map(({ id, name }) => ({ id, name })),
+    setups: setupChoices(book.setups, new Set(rows.map((row) => row.setupId))),
     plansToFile: unfiled.filter((item) => item.streak).length,
     orphanPlans: unfiled
       .filter((item) => !item.streak)
@@ -432,7 +473,7 @@ export async function positionDetail(userId: string, id: string): Promise<Positi
     ...toRow(entry, derived, book.setups, row, candidates.length > 0),
     archived: entry.archivedAt !== null,
     setup: setup ? { id: setup.id, name: setup.name, criteria: setup.criteria } : null,
-    setups: book.setups.filter((candidate) => !candidate.archivedAt).map(({ id: setupId, name }) => ({ id: setupId, name })),
+    setups: setupChoices(book.setups, new Set([entry.setupId])),
     legs: derived.legs.map(legView),
     unattached: derived.unattached.map((leg) => ({
       id: leg.id,
@@ -484,6 +525,178 @@ export async function positionDetail(userId: string, id: string): Promise<Positi
     candidates: candidates.map((streak) => candidateView(streak, plan?.archivedAt === null ? plan : undefined)),
     images: images.map(galleryImage),
     imagesEnabled: imageStoreMode() !== 'DISABLED',
+  }
+}
+
+// ── Setups ──────────────────────────────────────────────────────────────────
+
+/** A setup's statistics for one kind, as strings. Scores are worked out on this read and never stored. */
+export interface SetupFiguresView {
+  closed: number
+  /** 0–1; null with nothing closed. */
+  winRate: number | null
+  averageR: string | null
+  /** How many positions `averageR` covers. */
+  withR: number
+  averageScore: string | null
+  withScore: number
+}
+
+export interface SetupCardView {
+  id: string
+  name: string
+  description: string
+  criteria: Criterion[]
+  /** Null for a setup with no positions yet. */
+  kind: JournalKind | null
+  figures: SetupFiguresView
+}
+
+export interface SetupsData {
+  cards: SetupCardView[]
+}
+
+const figuresOf = (stats: SetupStats): SetupFiguresView => ({
+  closed: stats.closed,
+  winRate: stats.winRate,
+  averageR: stats.averageR?.toFixed(2) ?? null,
+  withR: stats.withR,
+  averageScore: score(stats.averageScore),
+  withScore: stats.withScore,
+})
+
+/**
+ * One card per active setup and kind it is used as. A position counts when it is
+ * live and closed: an archived position is on no screen, and neither is a setup's
+ * archived self, so its positions stay on the Playbook under its name but on no card.
+ */
+export async function setupsData(userId: string): Promise<SetupsData> {
+  const book = await loadBook(userId)
+  const positions = readPositions(book)
+  return {
+    cards: book.setups
+      .filter((setup) => !setup.archivedAt)
+      .flatMap((setup) => {
+        const mine = positions
+          .filter(({ entry }) => entry.setupId === setup.id)
+          .map(({ entry, derived }) => scoredPosition(entry, derived))
+        const stats = setupStats(mine)
+        const { id, name, description, criteria } = setup
+        const kinds = kindsUsed(mine)
+        return (kinds.length > 0 ? kinds : [null]).map(
+          (kind): SetupCardView => ({
+            id,
+            name,
+            description,
+            criteria,
+            kind,
+            figures: figuresOf(stats[kind ?? 'REAL']),
+          }),
+        )
+      }),
+  }
+}
+
+export interface RankedTrade {
+  row: PositionRow
+  /** Its legs that have something to read: a rating or a note. */
+  legs: { side: LegSide; date: string; rating: number | null; note: string }[]
+  images: GalleryImage[]
+}
+
+export interface SetupRanking {
+  /** Position ids, looked up in `trades`. */
+  list: Ranking<string>
+  /** Closed positions without the figure ranked by, so the page can say they are left out. */
+  unranked: number
+}
+
+export interface SetupPageData {
+  setup: { id: string; name: string; description: string; criteria: Criterion[]; archived: boolean }
+  /** The kinds it is used as. Empty with no positions. */
+  kinds: JournalKind[]
+  figures: Record<JournalKind, SetupFiguresView>
+  rankings: Record<JournalKind, Record<RankBy, SetupRanking>>
+  trades: Record<string, RankedTrade>
+  rows: PositionRow[]
+}
+
+const idsOf = (ranking: Ranking<{ id: string }>): Ranking<string> => {
+  const ids = (list: readonly { id: string }[]) => list.map((position) => position.id)
+  return 'single' in ranking
+    ? { single: ids(ranking.single) }
+    : { best: ids(ranking.best), worst: ids(ranking.worst) }
+}
+
+/** The charts a ranked trade shows: how it went in, and how it came out. */
+const RANKED_PHASES = ['ENTRY', 'EXIT'] as const
+
+/**
+ * One setup's page. Null for a setup that is missing or someone else's. An archived
+ * one still reads, since a link to it can outlive it, but only as history.
+ *
+ * Every ranking comes at once, each kind by both figures, so the toggles work from
+ * memory and on a saved copy offline. That is at most twenty trades per kind, and
+ * their images are one query.
+ */
+export async function setupPage(userId: string, setupId: string): Promise<SetupPageData | null> {
+  const book = await loadBook(userId, true)
+  const setup = book.setups.find((candidate) => candidate.id === setupId)
+  if (!setup) return null
+
+  const mine = readPositions(book).filter(({ entry }) => entry.setupId === setupId)
+  const scored = mine.map(({ entry, derived }) => scoredPosition(entry, derived))
+  const stats = setupStats(scored)
+  const ranked = rankingsByKind(scored)
+  const rows = rowsOf(book, mine)
+
+  const rankingFor = (kind: JournalKind, by: RankBy): SetupRanking => ({
+    list: idsOf(ranked[kind][by]),
+    unranked: stats[kind].closed - (by === 'R' ? stats[kind].withR : stats[kind].withScore),
+  })
+  const rankings: SetupPageData['rankings'] = {
+    REAL: { SCORE: rankingFor('REAL', 'SCORE'), R: rankingFor('REAL', 'R') },
+    PAPER: { SCORE: rankingFor('PAPER', 'SCORE'), R: rankingFor('PAPER', 'R') },
+  }
+
+  const shown = [
+    ...new Set(
+      Object.values(rankings).flatMap((byFigure) =>
+        Object.values(byFigure).flatMap(({ list }) => ('single' in list ? list.single : [...list.best, ...list.worst])),
+      ),
+    ),
+  ]
+  // Rows only: nothing here touches the store, so an outage there cannot break this.
+  const images = await listJournalImagesFor(userId, shown, RANKED_PHASES)
+  const trades = Object.fromEntries(
+    shown.map((id): [string, RankedTrade] => {
+      const position = mine.find(({ entry }) => entry.id === id)!
+      return [
+        id,
+        {
+          row: rows.find((row) => row.id === id)!,
+          legs: position.derived.legs
+            .filter((leg) => leg.rating !== null || leg.note !== '')
+            .map(({ side, date, rating, note }) => ({ side, date, rating, note })),
+          images: (images.get(id) ?? []).map(galleryImage),
+        },
+      ]
+    }),
+  )
+
+  return {
+    setup: {
+      id: setup.id,
+      name: setup.name,
+      description: setup.description,
+      criteria: setup.criteria,
+      archived: setup.archivedAt !== null,
+    },
+    kinds: kindsUsed(scored),
+    figures: { REAL: figuresOf(stats.REAL), PAPER: figuresOf(stats.PAPER) },
+    rankings,
+    trades,
+    rows,
   }
 }
 
