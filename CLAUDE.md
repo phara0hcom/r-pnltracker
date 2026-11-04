@@ -107,6 +107,11 @@ already-formatted strings (`Decimal` → string) and the components only render 
 | `src/lib/playbook/plan.ts` | a plan's levels before there is a plan: the dialog's preview and every static plan |
 | `src/server/playbookView.ts` | the Playbook's reads, kept out of client-reachable modules like `server/engine.ts` |
 | `src/server/exitPosition.ts` | a plan's holding facts and `evaluateExitRule`, shared by Exit Rules, the Playbook and the notifier |
+| `src/db/imageStore.ts` | the one place that stores images: `put` / `get` / `del` over Blob, local disk or disabled |
+| `src/lib/playbook/images.ts` | magic bytes, the upload cap, pathnames, grouping, placeholder wording — pure and client-safe |
+| `src/server/imageResponse.ts` | what `/api/images/$id` answers: session, ownership, headers |
+| `src/components/playbook/heldImages.ts` | images waiting to upload or that failed; shared by the dialog and the position page, memory only |
+| `src/components/playbook/ImageGallery.tsx` / `ImageLightbox.tsx` | thumbnails and the lightbox layer; know nothing about positions |
 
 Every server function touching user data must `.middleware([authed])`. The typed
 `context.userId` means a handler that forgets the check does not compile.
@@ -170,6 +175,14 @@ derivation and sources.
   annotations are. A regrouped-away anchor falls back to the pool's streak starting on the stored
   `entryDate` (or the day after, for US); failing both the position says so rather than guessing.
   `openEntryStreaks` reads off the same `holdingStreaks`, so "flat" has one definition.
+- **Chart images are private and online-only.** Bytes decide the type (`checkUpload`), never the
+  declared one, and image plus thumbnail cap at 3 MB decoded, so base64 stays under Vercel's 4.5 MB
+  body limit; `MAX_FILE_BYTES` would not. `/api/images/$id` is `private, no-store`, because the
+  browser's HTTP cache cannot be wiped on sign-out, and answers a missing image and someone else's
+  identically. Row deletes run first and `del()` follows in `waitUntil`, including for a position's
+  cascade, whose pathnames are read in the transaction: a leftover file costs a few hundred KB, a
+  row pointing at nothing is a broken image. Archiving keeps them. Only the route touches the store,
+  so a storage outage is a placeholder in a slot and never a failed render.
 - **A filed plan reads its own position, not its pool.** `holdingFacts` takes shares from the
   position's streak once linked and its typed legs while awaiting import (`planShares`), for all
   three callers of `evaluateExitRule`. Otherwise a position opened from scratch reads
@@ -275,6 +288,10 @@ the exit-rules feed rather than failing), `SENTRY_DSN` / `VITE_SENTRY_DSN` (unse
 reporting; the `VITE_` half is inlined at build time, so changing it on Vercel needs a
 redeploy), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` / `VITE_VAPID_PUBLIC_KEY`
 (unset disables exit-rule push notifications — generate with `npx web-push generate-vapid-keys`),
+`BLOB_STORE_ID` (set by connecting the private Blob store; authenticates by OIDC on Vercel, and
+nothing goes in `.env`) or `BLOB_READ_WRITE_TOKEN` (optional static token, to reach the real store
+from a local run — never `vercel env pull`, which replaces `.env`). With neither, images go to a
+gitignored `.images/` locally and are disabled on Vercel,
 and build-only `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` for source maps.
 
 Price providers degrade rather than throw: Finnhub (US only) → JP scrape (Yahoo, then

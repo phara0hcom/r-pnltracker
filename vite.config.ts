@@ -23,6 +23,8 @@ const SERVER_ONLY = [
   // Not `better-auth`: its `dist/client` half is the browser SDK and belongs
   // in the client bundle. `src/lib/auth.ts` above is the server instance.
   /\/node_modules\/(pg|pg-pool|pg-protocol|pg-types|drizzle-orm|iconv-lite|web-push)\//,
+  // Images upload through a server function, so the browser needs no Blob code at all.
+  /\/node_modules\/@vercel\/blob\//,
   /*
    * Sentry's Node half, and the module-hook machinery OpenTelemetry patches with.
    *
@@ -150,6 +152,29 @@ function serviceWorker(): Plugin {
   }
 }
 
+/**
+ * Lets an `<img>` reach `/api/images/$id` under `npm run dev`.
+ *
+ * Nitro's dev middleware takes any request with `Sec-Fetch-Dest: image` for a
+ * static asset and hands it to Vite, which answers 404 — so every chart showed a
+ * placeholder, while `fetch` and opening the same URL worked. Dropping the header
+ * sends the request on to the app. Production has no such middleware.
+ */
+function imagesReachTheApp(): Plugin {
+  return {
+    name: 'pnl:images-reach-the-app',
+    apply: 'serve',
+    // Ahead of Nitro's middleware, which reads the header.
+    enforce: 'pre',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        if (req.url?.startsWith('/api/images/')) delete req.headers['sec-fetch-dest']
+        next()
+      })
+    },
+  }
+}
+
 /*
  * Source maps are built and uploaded only when there is somewhere to upload them.
  *
@@ -171,6 +196,7 @@ export default defineConfig({
   server: { port: 3000 },
   build: { sourcemap: uploadSourceMaps ? 'hidden' : false },
   plugins: [
+    imagesReachTheApp(),
     tanstackStart(),
     ...(uploadSourceMaps
       ? [

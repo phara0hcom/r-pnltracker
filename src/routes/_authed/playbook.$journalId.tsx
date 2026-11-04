@@ -13,6 +13,7 @@ import { ExitFlags } from '~/components/exits/ExitFlags'
 import { ExitLadder } from '~/components/exits/ExitLadder'
 import { ACCOUNT_LABEL, pct, priceText, qty, tone } from '~/components/format'
 import { FrameworkNote, METHOD_LABEL } from '~/components/playbook/PlanFields'
+import { PositionCharts } from '~/components/playbook/PositionCharts'
 import { EditPlanDialog, EditPositionDialog, LinkDialog } from '~/components/playbook/PositionDialogs'
 import { ResultText, ScoreText, StatusBadge } from '~/components/playbook/PositionTable'
 import { RatingInput } from '~/components/playbook/RatingInput'
@@ -528,7 +529,7 @@ function Position() {
         )}
         <ConfirmButton
           size="small"
-          title="Remove the position and its notes and ratings. The trades stay in Trades."
+          title="Remove the position with its notes, ratings and chart images. The trades stay in Trades."
           onConfirm={() => {
             remove.run(position.id)
           }}
@@ -579,6 +580,13 @@ function Position() {
         />
         <ScorePanel position={position} />
       </div>
+
+      <PositionCharts
+        journalId={position.id}
+        images={position.images}
+        enabled={position.imagesEnabled}
+        archived={position.archived}
+      />
 
       <Section title="Legs" description="One leg per side and day: one order filled as several executions is one decision.">
         {position.legs.length === 0 ? (

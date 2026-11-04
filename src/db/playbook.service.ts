@@ -12,8 +12,9 @@
  * owner, so those are checked with `ownsSetup` and `ownsTrade` before writing.
  */
 import { randomUUID } from 'node:crypto'
+import { waitUntil } from '@vercel/functions'
 import Decimal from 'decimal.js'
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
   correctedEntryFacts,
   createExitRule,
@@ -22,11 +23,14 @@ import {
   type ExitRuleInput,
   type ExitRuleRecord,
 } from './exit.service'
+import { del, imageStoreMode, put } from './imageStore'
 import { decOrNull, idFor, instrumentId, toInstrumentRow } from './mappers'
-import { exitRules, instruments, journalEntries, journalLegs, setups, trades } from './schema'
+import { exitRules, instruments, journalEntries, journalImages, journalLegs, setups, trades } from './schema'
 import { listTrades, setTradeJournal, type TradeRecord } from './trades.service'
 import { db } from './index'
 import type { AccountType, AssetClass, Currency } from '~/lib/domain/types'
+import { reportError } from '~/lib/observability/report'
+import { checkUpload, imagePathnames } from '~/lib/playbook/images'
 import { sharedNotes, type SharedNote } from '~/lib/playbook/position'
 import {
   holdingStreaks,
@@ -40,7 +44,7 @@ import {
   type HoldingStreak,
   type StreakTrade,
 } from '~/lib/playbook/streaks'
-import type { Criterion, ExtraTarget, JournalKind, LegSide } from '~/lib/playbook/types'
+import type { Criterion, ExtraTarget, ImagePhase, JournalKind, LegSide } from '~/lib/playbook/types'
 import { extraTargetsProblem, ratingProblem } from '~/lib/playbook/validate'
 
 export type PlaybookResult<T = string> = { ok: true; value: T } | { ok: false; message: string }
@@ -585,16 +589,32 @@ export async function archiveJournalEntry(userId: string, id: string): Promise<v
  * Removes the position and its annotations. A plan it owned outlives it, unlinked
  * and archived: left live it would go on pushing notifications about a position
  * that no longer exists. The trades stay, and their memos show again.
+ *
+ * Its images' rows go with it by cascade, which would strand their blobs, so the
+ * pathnames are read first and discarded once the delete has committed. The row
+ * lock is what makes that list complete: an upload in flight either inserted
+ * before it, or fails its foreign key after and cleans up its own files.
  */
 export async function deleteJournalEntry(userId: string, id: string): Promise<void> {
   const now = new Date()
-  await db.transaction(async (tx) => {
+  const stored = await db.transaction(async (tx) => {
+    await tx
+      .select({ id: journalEntries.id })
+      .from(journalEntries)
+      .where(and(eq(journalEntries.userId, userId), eq(journalEntries.id, id)))
+      .for('update')
+    const images = await tx
+      .select({ pathname: journalImages.pathname, thumbPathname: journalImages.thumbPathname })
+      .from(journalImages)
+      .where(and(eq(journalImages.userId, userId), eq(journalImages.journalId, id)))
     await tx
       .update(exitRules)
       .set({ archivedAt: now, updatedAt: now })
       .where(and(eq(exitRules.userId, userId), eq(exitRules.journalId, id), isNull(exitRules.archivedAt)))
     await tx.delete(journalEntries).where(and(eq(journalEntries.userId, userId), eq(journalEntries.id, id)))
+    return images
   })
+  discardStored(stored.flatMap(pathnamesOf))
 }
 
 /** A trade's shared note, for each trade in a live real position. Skips the reads when there are none. */
@@ -968,4 +988,168 @@ export async function fileExistingPlans(userId: string): Promise<{ filed: number
     filed += 1
   }
   return { filed, skipped: pending.length - filed }
+}
+
+// ── Images ──────────────────────────────────────────────────────────────────
+
+export interface JournalImageRecord {
+  id: string
+  journalId: string
+  phase: ImagePhase
+  timeframe: string | null
+  caption: string
+  pathname: string
+  thumbPathname: string | null
+  contentType: string
+  width: number | null
+  height: number | null
+}
+
+const imageColumns = {
+  id: journalImages.id,
+  journalId: journalImages.journalId,
+  phase: journalImages.phase,
+  timeframe: journalImages.timeframe,
+  caption: journalImages.caption,
+  pathname: journalImages.pathname,
+  thumbPathname: journalImages.thumbPathname,
+  contentType: journalImages.contentType,
+  width: journalImages.width,
+  height: journalImages.height,
+}
+
+const pathnamesOf = (image: { pathname: string; thumbPathname: string | null }): string[] =>
+  image.thumbPathname ? [image.pathname, image.thumbPathname] : [image.pathname]
+
+/**
+ * Removes stored files after the answer has gone. A leftover file costs a few
+ * hundred KB and a row pointing at nothing is a broken image, so this only ever
+ * runs once the rows are gone, and a failure is reported rather than surfaced.
+ */
+function discardStored(pathnames: readonly string[]): void {
+  if (pathnames.length === 0) return
+  waitUntil(
+    del(pathnames).catch((error: unknown) => {
+      reportError(error, { route: 'playbook.images', phase: 'delete', count: pathnames.length })
+    }),
+  )
+}
+
+export async function listJournalImages(userId: string, journalId: string): Promise<JournalImageRecord[]> {
+  return db
+    .select(imageColumns)
+    .from(journalImages)
+    .where(and(eq(journalImages.userId, userId), eq(journalImages.journalId, journalId)))
+    .orderBy(asc(journalImages.position), asc(journalImages.createdAt))
+}
+
+/** Null both for a missing image and for someone else's: existence does not leak. */
+export async function getJournalImage(userId: string, id: string): Promise<JournalImageRecord | null> {
+  const [row] = await db
+    .select(imageColumns)
+    .from(journalImages)
+    .where(and(eq(journalImages.userId, userId), eq(journalImages.id, id)))
+  return row ?? null
+}
+
+export interface ImageFields {
+  phase: ImagePhase
+  timeframe: string | null
+  caption: string
+}
+
+export interface ImageUpload extends ImageFields {
+  journalId: string
+  image: { base64: string; contentType: string; width: number; height: number }
+  thumb: { base64: string; contentType: string; width: number; height: number }
+}
+
+/** After the phase's last image; the same subquery whichever way one arrives there. */
+const nextPosition = (userId: string, journalId: string, phase: ImagePhase) =>
+  sql<number>`(
+    select coalesce(max(${journalImages.position}), -1) + 1 from ${journalImages}
+    where ${journalImages.userId} = ${userId}
+      and ${journalImages.journalId} = ${journalId}
+      and ${journalImages.phase} = ${phase}
+  )`
+
+/**
+ * Store an image and write its row, in one request, so a failed second call
+ * cannot strand a file. Whatever was put is removed again if the rest fails.
+ *
+ * The type stored is what the bytes prove (`checkUpload`), never what was declared.
+ */
+export async function addJournalImage(userId: string, upload: ImageUpload): Promise<PlaybookResult> {
+  if (imageStoreMode() === 'DISABLED') return fail('Image storage is not configured.')
+  const image = Buffer.from(upload.image.base64, 'base64')
+  const thumb = Buffer.from(upload.thumb.base64, 'base64')
+  const checked = checkUpload(
+    { bytes: image, declared: upload.image.contentType },
+    { bytes: thumb, declared: upload.thumb.contentType },
+  )
+  if ('problem' in checked) return fail(checked.problem)
+
+  const [entry] = await db
+    .select({ id: journalEntries.id })
+    .from(journalEntries)
+    .where(and(eq(journalEntries.userId, userId), eq(journalEntries.id, upload.journalId)))
+  if (!entry) return fail('That position no longer exists.')
+
+  const { pathname, thumbPathname } = imagePathnames(userId, upload.journalId, randomUUID(), checked.type)
+  const id = newId('image')
+  const stored: string[] = []
+  try {
+    await put(pathname, image, checked.type)
+    stored.push(pathname)
+    await put(thumbPathname, thumb, checked.type)
+    stored.push(thumbPathname)
+    await db.insert(journalImages).values({
+      id,
+      userId,
+      journalId: upload.journalId,
+      phase: upload.phase,
+      timeframe: upload.timeframe,
+      caption: upload.caption,
+      pathname,
+      thumbPathname,
+      contentType: checked.type,
+      width: upload.image.width,
+      height: upload.image.height,
+      // What it costs in the store, for reading against the quota.
+      bytes: image.byteLength + thumb.byteLength,
+      position: nextPosition(userId, upload.journalId, upload.phase),
+    })
+  } catch (error) {
+    discardStored(stored)
+    // The driver's error, not Drizzle's: that one's message quotes every parameter,
+    // the caption included, and a message reaches Sentry as it stands.
+    const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error
+    reportError(cause, { route: 'playbook.images', phase: 'upload', stored: stored.length })
+    return fail(stored.length === 2 ? 'The image could not be saved.' : 'Image storage is unavailable, so the image was not saved.')
+  }
+  return { ok: true, value: id }
+}
+
+/** A change of phase moves it to the end of its new group. */
+export async function updateJournalImage(userId: string, id: string, fields: ImageFields): Promise<PlaybookResult> {
+  const current = await getJournalImage(userId, id)
+  if (!current) return fail('That image no longer exists.')
+  await db
+    .update(journalImages)
+    .set({
+      phase: fields.phase,
+      timeframe: fields.timeframe,
+      caption: fields.caption,
+      ...(fields.phase !== current.phase && { position: nextPosition(userId, current.journalId, fields.phase) }),
+    })
+    .where(and(eq(journalImages.userId, userId), eq(journalImages.id, id)))
+  return { ok: true, value: id }
+}
+
+export async function deleteJournalImage(userId: string, id: string): Promise<void> {
+  const removed = await db
+    .delete(journalImages)
+    .where(and(eq(journalImages.userId, userId), eq(journalImages.id, id)))
+    .returning({ pathname: journalImages.pathname, thumbPathname: journalImages.thumbPathname })
+  discardStored(removed.flatMap(pathnamesOf))
 }

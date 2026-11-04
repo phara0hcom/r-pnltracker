@@ -3,6 +3,7 @@ design_handoff_content_redesign*/
 node_modules
 .env
 .env.local
+.images/
 .output
 .vinxi
 .tanstack

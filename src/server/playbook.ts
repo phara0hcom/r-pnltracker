@@ -14,8 +14,10 @@ import { archiveExitRule, entryAtrFor, getExitRule, listExitRules, updateExitRul
 import {
   archiveJournalEntry,
   createJournalEntry,
+  addJournalImage,
   createSetup,
   deleteJournalEntry,
+  deleteJournalImage,
   fileExistingPlans,
   getJournalEntry,
   linkJournalEntry,
@@ -26,6 +28,7 @@ import {
   setLegAnnotation,
   setLegTime,
   updateJournalEntry,
+  updateJournalImage,
   type JournalEntryInput,
   type LivePlanInput,
 } from '~/db/playbook.service'
@@ -41,8 +44,10 @@ import {
   previewPlanSchema,
   reattachSchema,
   setupSchema,
+  updateImageSchema,
   updatePlanSchema,
   updatePositionSchema,
+  uploadImageSchema,
 } from '~/lib/playbook/schemas'
 import { extraTargetsProblem, staticPlanProblem, symbolProblem } from '~/lib/playbook/validate'
 
@@ -374,6 +379,37 @@ export const reattachLeg = createServerFn({ method: 'POST' })
       date: data.date,
     })
     return saved.ok ? { ok: true } : saved
+  })
+
+/**
+ * Base64 through a server function rather than straight to the store from the
+ * browser: `handleUpload` does not take OIDC tokens, a token route under `/api/*`
+ * sits outside the CSRF filter and `authed`, and here the file and its row are
+ * written in one request.
+ */
+export const uploadImage = createServerFn({ method: 'POST' })
+  .middleware([authed])
+  .validator((data: unknown) => uploadImageSchema.parse(data))
+  .handler(async ({ data, context }): Promise<ActionResult<{ id: string }>> => {
+    const added = await addJournalImage(context.userId, data)
+    return added.ok ? { ok: true, id: added.value } : added
+  })
+
+export const updateImage = createServerFn({ method: 'POST' })
+  .middleware([authed])
+  .validator((data: unknown) => updateImageSchema.parse(data))
+  .handler(async ({ data, context }): Promise<ActionResult> => {
+    const { id, ...fields } = data
+    const updated = await updateJournalImage(context.userId, id, fields)
+    return updated.ok ? { ok: true } : updated
+  })
+
+export const deleteImage = createServerFn({ method: 'POST' })
+  .middleware([authed])
+  .validator((data: unknown) => positionIdSchema.parse(data))
+  .handler(async ({ data, context }): Promise<ActionResult> => {
+    await deleteJournalImage(context.userId, data.id)
+    return { ok: true }
   })
 
 /** "File N existing exit plans" — see `fileExistingPlans`. */

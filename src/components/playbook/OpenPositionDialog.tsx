@@ -10,12 +10,22 @@
  * A holding's candidate is held by its anchor id, not its place in the list, since
  * the options refetch while the dialog sits open and an index could come to mean a
  * different position between picking one and submitting.
+ *
+ * Images have no position to belong to until the last step, so step 3 only holds
+ * them. Once the create succeeds they go to `heldImages`, which uploads them and
+ * keeps any that fail for a retry from the position page. A failed image never
+ * undoes the position: it is the trade that matters, and a chart can be added again.
  */
 import * as Dialog from '@radix-ui/react-dialog'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import styles from './Dialog.module.scss'
+import { holdForUpload, releaseHeld, type HeldImage } from './heldImages'
+import { HeldUploads } from './HeldUploads'
+import { ImageDrop, ImagesNotConfigured } from './ImageDrop'
+import { ImageFields } from './ImageFields'
+import imageStyles from './Images.module.scss'
 import { FrameworkNote, PlanInputs, PlanPreview, target1OverrideOf, type PlanForm } from './PlanFields'
 import { usePlaybookAction } from './usePlaybookAction'
 import { ACCOUNT_LABEL, priceText, qty } from '~/components/format'
@@ -190,6 +200,44 @@ function NewSetup({ onCreated }: { onCreated: (id: string) => void }) {
   )
 }
 
+/** Step 3: what will be uploaded, labelled now because it is when the owner remembers. */
+function HeldList({
+  held,
+  onChange,
+  onRemove,
+}: {
+  held: readonly HeldImage[]
+  onChange: (image: HeldImage) => void
+  onRemove: (image: HeldImage) => void
+}) {
+  return (
+    <>
+      {held.map((image) => (
+        <div key={image.key} className={imageStyles.heldCard}>
+          <img src={image.previewUrl} alt="" className={imageStyles.heldPreview} />
+          <ImageFields
+            value={image}
+            onChange={(fields) => {
+              onChange({ ...image, ...fields })
+            }}
+          />
+          <div className={imageStyles.heldCardEnd}>
+            <button
+              type="button"
+              className={cx(styles.secondary, styles.small)}
+              onClick={() => {
+                onRemove(image)
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ))}
+    </>
+  )
+}
+
 export function OpenPositionDialog({
   open,
   onOpenChange,
@@ -200,9 +248,14 @@ export function OpenPositionDialog({
   /** A position with no alert to add goes straight to its page. */
   onOpened: (id: string) => void
 }) {
-  useDialogHistory(open, () => {
+  const queryClient = useQueryClient()
+  const [held, setHeld] = useState<HeldImage[]>([])
+  const close = () => {
+    held.forEach(releaseHeld)
+    setHeld([])
     onOpenChange(false)
-  })
+  }
+  useDialogHistory(open, close)
   const today = useToday()
   const options = useQuery({ queryKey: ['playbook', 'options'], queryFn: () => getOpenOptions(), enabled: open })
 
@@ -318,6 +371,11 @@ export function OpenPositionDialog({
       })
     },
     (result) => {
+      // Handed over, previews included, so closing the dialog no longer drops them.
+      holdForUpload(result.id, held, () =>
+        queryClient.invalidateQueries({ queryKey: ['playbook', 'position', result.id] }),
+      )
+      setHeld([])
       if (result.live) {
         // The server's: the refetch this triggers drops the streak just claimed,
         // so the form's own `symbol` falls back to the blank scratch field.
@@ -365,7 +423,13 @@ export function OpenPositionDialog({
   )
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (next) onOpenChange(true)
+        else close()
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className={styles.overlay} />
         <Dialog.Content className={styles.content}>
@@ -376,14 +440,13 @@ export function OpenPositionDialog({
                 Position opened. Add a TradingView alert for {created.symbol} — alerts are per symbol, and without one the plan
                 reads as stale. See <code>docs/exit-rules.md</code> §1.3.
               </Dialog.Description>
+              <HeldUploads journalId={created.id} />
               <div className={styles.footer}>
                 <Link
                   to="/playbook/$journalId"
                   params={{ journalId: created.id }}
                   className={styles.primary}
-                  onClick={() => {
-                    onOpenChange(false)
-                  }}
+                  onClick={close}
                 >
                   Go to the position
                 </Link>
@@ -592,10 +655,34 @@ export function OpenPositionDialog({
               ) : null}
 
               {step === 2 ? (
-                <p className={styles.note}>
-                  Chart screenshots arrive with image storage in the next phase. For now this step has nothing to add,
-                  and they can be added to the position later.
-                </p>
+                <div className={styles.form}>
+                  {options.data?.imagesEnabled === false ? (
+                    <ImagesNotConfigured />
+                  ) : (
+                    <>
+                      <p className={styles.note}>
+                        Optional, and more can be added later. They are kept here in the browser and uploaded once the
+                        position exists.
+                      </p>
+                      <ImageDrop
+                        phase="ENTRY"
+                        onImages={(images) => {
+                          setHeld((current) => [...current, ...images])
+                        }}
+                      />
+                      <HeldList
+                        held={held}
+                        onChange={(image) => {
+                          setHeld((current) => current.map((item) => (item.key === image.key ? image : item)))
+                        }}
+                        onRemove={(image) => {
+                          releaseHeld(image)
+                          setHeld((current) => current.filter((item) => item.key !== image.key))
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
               ) : null}
 
               {step === 3 ? (

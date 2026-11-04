@@ -183,3 +183,15 @@ occupied, Vite would move and OAuth would fail.
    `https://<your-app>.vercel.app/api/auth/callback/google`
 4. **Set `BETTER_AUTH_URL`** to the deployed origin in Vercel's env vars. It
    drives both the OAuth callback and the same-origin check.
+
+## 7. 🟢 Chart images (Vercel Blob, private)
+
+1. Create a **private** store in **Tokyo**: Vercel → Storage → Create → Blob, or
+   `npx vercel blob create-store <name> --access private --region hnd1`. The default
+   region is Washington, and private images stream through a function pinned to
+   `hnd1`, so that would add a trans-Pacific trip to every image.
+2. Connect it to the project for Production and Preview. That sets `BLOB_STORE_ID`;
+   `VERCEL_OIDC_TOKEN` is injected at runtime and nothing goes in `.env`.
+3. Redeploy. Until then the upload control says image storage is not configured.
+
+Locally, images go to a gitignored `.images/` with no setup.

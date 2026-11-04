@@ -26,6 +26,7 @@ import { Route as AuthedTradesRouteImport } from './routes/_authed/trades'
 import { Route as AuthedPlaybookIndexRouteImport } from './routes/_authed/playbook.index'
 import { Route as AuthedPlaybookJournalIdRouteImport } from './routes/_authed/playbook.$journalId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiImagesIdRouteImport } from './routes/api/images/$id'
 import { Route as ApiTvSecretRouteImport } from './routes/api/tv/$secret'
 
 const IndexRoute = IndexRouteImport.update({
@@ -112,6 +113,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiImagesIdRoute = ApiImagesIdRouteImport.update({
+  id: '/api/images/$id',
+  path: '/api/images/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTvSecretRoute = ApiTvSecretRouteImport.update({
   id: '/api/tv/$secret',
   path: '/api/tv/$secret',
@@ -134,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/trades': typeof AuthedTradesRoute
   '/playbook/$journalId': typeof AuthedPlaybookJournalIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/images/$id': typeof ApiImagesIdRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
   '/playbook/': typeof AuthedPlaybookIndexRoute
 }
@@ -153,6 +160,7 @@ export interface FileRoutesByTo {
   '/trades': typeof AuthedTradesRoute
   '/playbook/$journalId': typeof AuthedPlaybookJournalIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/images/$id': typeof ApiImagesIdRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
   '/playbook': typeof AuthedPlaybookIndexRoute
 }
@@ -174,6 +182,7 @@ export interface FileRoutesById {
   '/_authed/trades': typeof AuthedTradesRoute
   '/_authed/playbook/$journalId': typeof AuthedPlaybookJournalIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/images/$id': typeof ApiImagesIdRoute
   '/api/tv/$secret': typeof ApiTvSecretRoute
   '/_authed/playbook/': typeof AuthedPlaybookIndexRoute
 }
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/trades'
     | '/playbook/$journalId'
     | '/api/auth/$'
+    | '/api/images/$id'
     | '/api/tv/$secret'
     | '/playbook/'
   fileRoutesByTo: FileRoutesByTo
@@ -214,6 +224,7 @@ export interface FileRouteTypes {
     | '/trades'
     | '/playbook/$journalId'
     | '/api/auth/$'
+    | '/api/images/$id'
     | '/api/tv/$secret'
     | '/playbook'
   id:
@@ -234,6 +245,7 @@ export interface FileRouteTypes {
     | '/_authed/trades'
     | '/_authed/playbook/$journalId'
     | '/api/auth/$'
+    | '/api/images/$id'
     | '/api/tv/$secret'
     | '/_authed/playbook/'
   fileRoutesById: FileRoutesById
@@ -243,6 +255,7 @@ export interface RootRouteChildren {
   AuthedRoute: typeof AuthedRouteWithChildren
   SigninRoute: typeof SigninRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiImagesIdRoute: typeof ApiImagesIdRoute
   ApiTvSecretRoute: typeof ApiTvSecretRoute
 }
 
@@ -367,6 +380,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/images/$id': {
+      id: '/api/images/$id'
+      path: '/api/images/$id'
+      fullPath: '/api/images/$id'
+      preLoaderRoute: typeof ApiImagesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/tv/$secret': {
       id: '/api/tv/$secret'
       path: '/api/tv/$secret'
@@ -417,6 +437,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthedRoute: AuthedRouteWithChildren,
   SigninRoute: SigninRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiImagesIdRoute: ApiImagesIdRoute,
   ApiTvSecretRoute: ApiTvSecretRoute,
 }
 export const routeTree = rootRouteImport

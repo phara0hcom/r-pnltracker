@@ -16,14 +16,17 @@ import {
   listExitRules,
   type ExitRuleRecord,
 } from '~/db/exit.service'
+import { imageStoreMode } from '~/db/imageStore'
 import {
   claimedStreaks,
   getJournalEntry,
   listJournalEntries,
+  listJournalImages,
   listSetups,
   toStreakTrades,
   unfiledPlans,
   type JournalEntryRecord,
+  type JournalImageRecord,
   type SetupRecord,
 } from '~/db/playbook.service'
 import { usdJpyRate } from '~/db/prices.service'
@@ -31,6 +34,7 @@ import { marketOf, OPENING_SIDES, type AccountType, type AssetClass, type Normal
 import { initialStopFor, target1For } from '~/lib/exit/rules'
 import type { TrailingMethod } from '~/lib/exit/types'
 import { webhookSecretUsable } from '~/lib/exit/webhook'
+import type { GalleryImage } from '~/lib/playbook/images'
 import { derivePosition, type DerivedLeg, type DerivedPosition, type PlanBasis } from '~/lib/playbook/position'
 import {
   holdingStreaks,
@@ -317,6 +321,9 @@ export interface PositionDetail extends PositionRow {
   mistakeSuggestions: string[]
   lessons: string
   candidates: LinkCandidate[]
+  images: GalleryImage[]
+  /** False when no store is configured: the upload control says so. */
+  imagesEnabled: boolean
 }
 
 const legView = (leg: DerivedLeg): LegView => ({
@@ -389,10 +396,22 @@ function planViewOf(
   return { kind: 'STATIC', stop: price(entry.stopPrice), target1: price(entry.target1Price) }
 }
 
+const galleryImage = (image: JournalImageRecord): GalleryImage => ({
+  id: image.id,
+  phase: image.phase,
+  timeframe: image.timeframe,
+  caption: image.caption,
+  width: image.width,
+  height: image.height,
+  url: `/api/images/${image.id}`,
+  thumbUrl: `/api/images/${image.id}?size=thumb`,
+})
+
 export async function positionDetail(userId: string, id: string): Promise<PositionDetail | null> {
   const entry = await getJournalEntry(userId, id)
   if (!entry) return null
-  const book = await loadBook(userId, true)
+  // Rows only: nothing here touches the store, so an outage there cannot break this.
+  const [book, images] = await Promise.all([loadBook(userId, true), listJournalImages(userId, id)])
   const plan = book.plans.find((candidate) => candidate.journalId === id)
   const derived = derivePosition(entry, book.streaks, book.realizedBy, plan ? planBasis(plan) : null)
   const row = plan?.archivedAt === null ? book.planRow(plan) : null
@@ -463,6 +482,8 @@ export async function positionDetail(userId: string, id: string): Promise<Positi
     lessons: entry.lessons,
     // Linking only ever corrects a live plan.
     candidates: candidates.map((streak) => candidateView(streak, plan?.archivedAt === null ? plan : undefined)),
+    images: images.map(galleryImage),
+    imagesEnabled: imageStoreMode() !== 'DISABLED',
   }
 }
 
@@ -501,6 +522,8 @@ export interface OpenOptions {
     /** The account size from Settings, in each position currency. */
     accountEquity: Record<Currency, string | null>
   }
+  /** False when no store is configured: step 3 says so. */
+  imagesEnabled: boolean
 }
 
 /** Only listed equities get plans — no provider feeds a fund's 基準価額. */
@@ -569,6 +592,7 @@ export async function openOptions(userId: string): Promise<OpenOptions> {
     setups: book.setups
       .filter((setup) => !setup.archivedAt)
       .map(({ id, name, description, criteria }) => ({ id, name, description, criteria })),
+    imagesEnabled: imageStoreMode() !== 'DISABLED',
     defaults: {
       stopMultiple: book.settings.initialStopAtrMultiple.toFixed(),
       targetMultiple: book.settings.targetMultiple.toFixed(),

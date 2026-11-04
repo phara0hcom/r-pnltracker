@@ -4,6 +4,15 @@
  */
 import { z } from 'zod'
 import { initialStopAtrMultiple, positiveDecimal, targetMultiple, trailingMethod } from '../exit/planInput'
+import {
+  decodedLength,
+  MAX_CAPTION,
+  MAX_IMAGE_EDGE,
+  MAX_TIMEFRAME,
+  MAX_UPLOAD_BASE64,
+  MAX_UPLOAD_BYTES,
+  UPLOAD_TOO_LARGE,
+} from './images'
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD')
 const instant = z.iso.datetime().nullable()
@@ -147,3 +156,33 @@ export const linkSchema = z.object({
   /** Also correct the plan's entry price and shares to the imported ones. */
   correctPlan: z.boolean(),
 })
+
+const imageFields = z.object({
+  phase: z.enum(['PLAN', 'ENTRY', 'DURING', 'EXIT']),
+  timeframe: z
+    .string()
+    .trim()
+    .max(MAX_TIMEFRAME, `A timeframe is ${String(MAX_TIMEFRAME)} characters at most, like 1D or 15m.`)
+    .transform((value) => (value === '' ? null : value)),
+  caption: z.string().trim().max(MAX_CAPTION, `A caption is ${String(MAX_CAPTION)} characters at most.`),
+})
+
+const encodedImage = z.object({
+  base64: z.string().min(1).max(MAX_UPLOAD_BASE64, UPLOAD_TOO_LARGE),
+  /** What the canvas produced. Checked against the bytes on the server, never believed. */
+  contentType: z.string().max(40),
+  width: z.number().int().min(1).max(MAX_IMAGE_EDGE),
+  height: z.number().int().min(1).max(MAX_IMAGE_EDGE),
+})
+
+/**
+ * An upload. Refused here, in the browser too, rather than sent only to fail: on
+ * Vercel an over-long body would come back as a bare 413 with no sentence in it.
+ */
+export const uploadImageSchema = imageFields
+  .extend({ journalId: z.string().min(1), image: encodedImage, thumb: encodedImage })
+  .refine((data) => decodedLength(data.image.base64) + decodedLength(data.thumb.base64) <= MAX_UPLOAD_BYTES, {
+    message: UPLOAD_TOO_LARGE,
+  })
+
+export const updateImageSchema = imageFields.extend({ id: z.string().min(1) })

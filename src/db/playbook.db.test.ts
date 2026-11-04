@@ -13,15 +13,40 @@
  */
 import Decimal from 'decimal.js'
 import type { Pool } from 'pg'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ImageStore from './imageStore'
 import type * as Mappers from './mappers'
 import type * as PlaybookService from './playbook.service'
 import type * as Schema from './schema'
 import type * as Database from './index'
 import type { NormalizedTrade } from '~/lib/domain/types'
+import type * as Report from '~/lib/observability/report'
 import { resolvePosition } from '~/lib/playbook/streaks'
 import { containerAvailable, startPostgres, stopPostgres, TEST_USER } from '~/test/postgres'
 import { makeTrade } from '~/test/trade'
+
+const stores = vi.hoisted(() => ({
+  put: vi.fn(),
+  del: vi.fn(),
+  report: vi.fn(),
+  /** What `waitUntil` was handed: the deletes that outlive the response. */
+  deferred: [] as Promise<unknown>[],
+}))
+
+vi.mock('@vercel/functions', () => ({
+  waitUntil: (promise: Promise<unknown>) => {
+    stores.deferred.push(promise)
+  },
+}))
+vi.mock('./imageStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof ImageStore>()),
+  put: stores.put,
+  del: stores.del,
+}))
+vi.mock('~/lib/observability/report', async (importOriginal) => ({
+  ...(await importOriginal<typeof Report>()),
+  reportError: stores.report,
+}))
 
 let sql: Pool | undefined
 let playbook: typeof PlaybookService | undefined
@@ -613,5 +638,188 @@ describe.skipIf(!containerAvailable)('deleting a position', () => {
       'select journal_id, archived_at is not null as archived from exit_rules',
     )
     expect(rows).toEqual([{ journal_id: null, archived: true }])
+  })
+})
+
+describe.skipIf(!containerAvailable)('images', () => {
+  const OTHER = 'u-test-other'
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]).toString('base64')
+
+  const upload = (journalId: string, over: Partial<PlaybookService.ImageUpload> = {}): PlaybookService.ImageUpload => ({
+    journalId,
+    phase: 'ENTRY',
+    timeframe: '1D',
+    caption: 'bounce',
+    image: { base64: PNG, contentType: 'image/png', width: 2000, height: 1000 },
+    thumb: { base64: PNG, contentType: 'image/png', width: 480, height: 240 },
+    ...over,
+  })
+
+  const paper = async (userId = USER) =>
+    value(
+      await playbook!.createJournalEntry(
+        userId,
+        position({ kind: 'PAPER', accountType: null, legs: [typedBuy] }),
+      ),
+    )
+
+  const settled = () => Promise.all(stores.deferred.splice(0))
+
+  beforeEach(async () => {
+    if (!containerAvailable) return
+    vi.clearAllMocks()
+    stores.put.mockResolvedValue(undefined)
+    stores.del.mockResolvedValue(undefined)
+    stores.deferred.length = 0
+    await sql!.query(
+      `insert into "user" (id, name, email, email_verified, created_at, updated_at)
+       values ($1, 'other', 'images-other@example.com', true, now(), now()) on conflict do nothing`,
+      [OTHER],
+    )
+  })
+
+  it('stores both files under the owner and position, with the type the bytes prove', async () => {
+    const journalId = await paper()
+    const id = value(await playbook!.addJournalImage(USER, upload(journalId)))
+    const [image] = await playbook!.listJournalImages(USER, journalId)
+    expect(image).toMatchObject({ id, phase: 'ENTRY', timeframe: '1D', caption: 'bounce', contentType: 'image/png' })
+    expect(image?.pathname).toMatch(new RegExp(`^users/${USER}/${journalId}/[0-9a-f-]+\\.png$`))
+    expect(image?.thumbPathname).toMatch(new RegExp(`^users/${USER}/${journalId}/[0-9a-f-]+\\.thumb\\.png$`))
+    expect(stores.put.mock.calls.map((call) => call[0] as string)).toEqual([image?.pathname, image?.thumbPathname])
+  })
+
+  it('refuses another user’s position before storing anything', async () => {
+    const theirs = await paper(OTHER)
+    expect(await playbook!.addJournalImage(USER, upload(theirs))).toEqual({
+      ok: false,
+      message: 'That position no longer exists.',
+    })
+    expect(stores.put).not.toHaveBeenCalled()
+  })
+
+  it('refuses bytes that are not an image, whatever they claim, before storing anything', async () => {
+    const journalId = await paper()
+    const html = Buffer.from('<html><script>alert(1)</script>').toString('base64')
+    const result = await playbook!.addJournalImage(
+      USER,
+      upload(journalId, { image: { base64: html, contentType: 'image/png', width: 10, height: 10 } }),
+    )
+    expect(result.ok).toBe(false)
+    expect(stores.put).not.toHaveBeenCalled()
+    expect(await playbook!.listJournalImages(USER, journalId)).toEqual([])
+  })
+
+  it('hides an image from everyone but its owner', async () => {
+    const id = value(await playbook!.addJournalImage(USER, upload(await paper())))
+    expect(await playbook!.getJournalImage(OTHER, id)).toBeNull()
+    expect((await playbook!.updateJournalImage(OTHER, id, { phase: 'EXIT', timeframe: null, caption: 'x' })).ok).toBe(false)
+    await playbook!.deleteJournalImage(OTHER, id)
+    await settled()
+    expect(stores.del).not.toHaveBeenCalled()
+    expect((await playbook!.getJournalImage(USER, id))?.caption).toBe('bounce')
+  })
+
+  it('edits phase, timeframe and caption, moving a re-phased image to the end of its group', async () => {
+    const journalId = await paper()
+    const first = value(await playbook!.addJournalImage(USER, upload(journalId, { phase: 'EXIT' })))
+    const second = value(await playbook!.addJournalImage(USER, upload(journalId, { phase: 'ENTRY' })))
+    value(await playbook!.updateJournalImage(USER, second, { phase: 'EXIT', timeframe: '5m', caption: 'out' }))
+    const images = await playbook!.listJournalImages(USER, journalId)
+    expect(images.map((image) => [image.id, image.phase, image.timeframe, image.caption])).toEqual([
+      [first, 'EXIT', '1D', 'bounce'],
+      [second, 'EXIT', '5m', 'out'],
+    ])
+  })
+
+  it('removes what it stored when the row cannot be written', async () => {
+    const journalId = await paper()
+    // The position goes between the ownership check and the insert.
+    stores.put.mockImplementationOnce(async () => {
+      await sql!.query('delete from journal_entries where id = $1', [journalId])
+    })
+    const result = await playbook!.addJournalImage(USER, upload(journalId))
+    await settled()
+    expect(result).toEqual({ ok: false, message: 'The image could not be saved.' })
+    const stored = stores.put.mock.calls.map((call) => call[0] as string)
+    expect(stored).toHaveLength(2)
+    expect(stores.del).toHaveBeenCalledWith(stored)
+    expect(stores.report).toHaveBeenCalledOnce()
+    // Free text must not reach Sentry on the back of Drizzle's "params:" message.
+    expect((stores.report.mock.calls[0]?.[0] as Error).message).not.toContain('bounce')
+  })
+
+  it('removes the first file when the second cannot be stored, and says storage is down', async () => {
+    const journalId = await paper()
+    stores.put.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('store down'))
+    const result = await playbook!.addJournalImage(USER, upload(journalId))
+    await settled()
+    expect(result).toEqual({ ok: false, message: 'Image storage is unavailable, so the image was not saved.' })
+    expect(stores.del).toHaveBeenCalledWith([stores.put.mock.calls[0]?.[0]])
+    expect(await playbook!.listJournalImages(USER, journalId)).toEqual([])
+  })
+
+  it('deleting an image removes the row first, then both files, after the answer', async () => {
+    const id = value(await playbook!.addJournalImage(USER, upload(await paper())))
+    const stored = await playbook!.getJournalImage(USER, id)
+    let rowGoneWhenDeleting = false
+    stores.del.mockImplementation(async () => {
+      rowGoneWhenDeleting = (await sql!.query('select 1 from journal_images where id = $1', [id])).rowCount === 0
+    })
+    await playbook!.deleteJournalImage(USER, id)
+    await settled()
+    expect(rowGoneWhenDeleting).toBe(true)
+    expect(stores.del).toHaveBeenCalledWith([stored?.pathname, stored?.thumbPathname])
+  })
+
+  it('deleting a position discards every image the cascade removes, and only after it commits', async () => {
+    const journalId = await paper()
+    const other = await paper()
+    await playbook!.addJournalImage(USER, upload(journalId, { phase: 'ENTRY' }))
+    await playbook!.addJournalImage(USER, upload(journalId, { phase: 'EXIT' }))
+    const kept = value(await playbook!.addJournalImage(USER, upload(other)))
+    const stored = await playbook!.listJournalImages(USER, journalId)
+
+    let rowsWhenDeleting = -1
+    stores.del.mockImplementation(async () => {
+      rowsWhenDeleting = (await sql!.query('select 1 from journal_images where journal_id = $1', [journalId])).rowCount ?? -1
+    })
+    await playbook!.deleteJournalEntry(USER, journalId)
+    await settled()
+
+    expect(rowsWhenDeleting).toBe(0)
+    expect(stores.del).toHaveBeenCalledOnce()
+    expect((stores.del.mock.calls[0]?.[0] as string[]).toSorted()).toEqual(
+      stored.flatMap((image) => [image.pathname, image.thumbPathname]).toSorted(),
+    )
+    expect(await playbook!.getJournalImage(USER, kept)).not.toBeNull()
+  })
+
+  it('deletes nothing when someone else asks to delete the position', async () => {
+    const journalId = await paper()
+    await playbook!.addJournalImage(USER, upload(journalId))
+    await playbook!.deleteJournalEntry(OTHER, journalId)
+    await settled()
+    expect(stores.del).not.toHaveBeenCalled()
+    expect(await playbook!.listJournalImages(USER, journalId)).toHaveLength(1)
+  })
+
+  it('reports a failed delete without failing the position’s removal', async () => {
+    const journalId = await paper()
+    await playbook!.addJournalImage(USER, upload(journalId))
+    const outage = new Error('store down')
+    stores.del.mockRejectedValue(outage)
+    await expect(playbook!.deleteJournalEntry(USER, journalId)).resolves.toBeUndefined()
+    await settled()
+    expect(stores.report).toHaveBeenCalledWith(outage, { route: 'playbook.images', phase: 'delete', count: 2 })
+    expect(await playbook!.getJournalEntry(USER, journalId)).toBeNull()
+  })
+
+  it('archiving keeps the images, still readable, and asks the store to delete nothing', async () => {
+    const journalId = await paper()
+    const id = value(await playbook!.addJournalImage(USER, upload(journalId)))
+    await playbook!.archiveJournalEntry(USER, journalId)
+    await settled()
+    expect(stores.del).not.toHaveBeenCalled()
+    expect(await playbook!.getJournalImage(USER, id)).not.toBeNull()
   })
 })
