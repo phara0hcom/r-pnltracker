@@ -1,7 +1,6 @@
 /**
- * Server functions for the Exit Rules screen, which is read-only now that plans
- * are opened and changed in the Playbook. Only its framework settings still save
- * from here.
+ * Server functions for the exit framework's settings, on the Settings screen.
+ * Plans themselves are read and changed through `playbook.ts`.
  *
  * Follows the same contract as `screens.ts`: `Decimal` values cross the wire as
  * exact strings and the client only formats them.
@@ -9,23 +8,11 @@
 import { createServerFn } from '@tanstack/react-start'
 import Decimal from 'decimal.js'
 import { z } from 'zod'
-import { engineFor } from './engine'
-import { evaluateExitRule, exitRuleRow, holdingContext, type ExitRuleRow } from './exitPosition'
 import { authed } from './middleware'
-import {
-  barsFor,
-  getAccountEquity,
-  getExitSettings,
-  listExitRules,
-  saveExitSettings as persistSettings,
-} from '~/db/exit.service'
-import { listJournalEntries } from '~/db/playbook.service'
+import { getAccountEquity, getExitSettings, saveExitSettings as persistSettings } from '~/db/exit.service'
 import { initialStopAtrMultiple, positiveDecimal, targetMultiple, trailingMethod } from '~/lib/exit/planInput'
 import type { TrailingMethod } from '~/lib/exit/types'
 import { webhookSecretUsable } from '~/lib/exit/webhook'
-import { holdingStreaks } from '~/lib/playbook/streaks'
-
-export type { ExitRuleRow } from './exitPosition'
 
 export interface ExitSettingsView {
   targetMultiple: string
@@ -39,58 +26,20 @@ export interface ExitSettingsView {
   accountEquity: string | null
 }
 
-export interface ExitScreenData {
-  rules: ExitRuleRow[]
-  /**
-   * Plans that no longer describe a live swing — the position is closed, or was
-   * closed and re-entered since. Shown apart rather than mixed into the live
-   * ones, whose figures they would otherwise sit beside looking equally current.
-   */
-  toArchive: ExitRuleRow[]
+export interface ExitSettingsData {
   settings: ExitSettingsView
-  /** False when the secret is unset *or too short*, so the screen can say why no data. */
+  /** False when the secret is unset *or too short*, so Settings can say why no data. */
   webhookConfigured: boolean
 }
 
-export const getExitScreen = createServerFn({ method: 'GET' })
+export const getFrameworkSettings = createServerFn({ method: 'GET' })
   .middleware([authed])
-  .handler(async ({ context }): Promise<ExitScreenData> => {
-    const [{ records, trades, engine }, rules, settings, accountEquity, entries] = await Promise.all([
-      // The single engine entry point — same pipeline every other screen uses.
-      engineFor(context.userId),
-      listExitRules(context.userId),
+  .handler(async ({ context }): Promise<ExitSettingsData> => {
+    const [settings, accountEquity] = await Promise.all([
       getExitSettings(context.userId),
       getAccountEquity(context.userId),
-      listJournalEntries(context.userId, { includeArchived: true }),
     ])
-
-    // "Today" is resolved per exchange, not from the server's clock: bars are
-    // dated in the exchange's zone, and on a UTC host the New York date lags
-    // by a session for part of every day.
-    const now = new Date()
-
-    // Shares remaining is the engine's truth, not a stored copy - importing
-    // the Target 1 sell is what moves a position from "take partial" to
-    // "trail", with no separate flag to keep in step.
-    const holdings = holdingContext(
-      engine.positions,
-      trades,
-      entries,
-      holdingStreaks(records.map((record) => ({ id: record.id, trade: record.trade }))),
-    )
-
-    const bars = await barsFor(rules.map((rule) => rule.instrumentId))
-
-    const evaluated = rules.map((rule): ExitRuleRow =>
-      exitRuleRow(rule, evaluateExitRule(rule, holdings, bars.get(rule.instrumentId) ?? [], settings, now)),
-    )
-
-    const retired = (row: ExitRuleRow): boolean =>
-      row.actionKind === 'POSITION_CLOSED' || row.actionKind === 'PLAN_SUPERSEDED'
-
     return {
-      rules: evaluated.filter((row) => !retired(row)),
-      toArchive: evaluated.filter(retired),
       settings: {
         targetMultiple: settings.targetMultiple.toFixed(2),
         partialExitFraction: settings.partialExitFraction.toFixed(2),

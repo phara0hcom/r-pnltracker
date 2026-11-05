@@ -2,6 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import styles from './settings.module.scss'
+import { ExitSettingsForm } from '~/components/exits/ExitSettingsForm'
+import { EXIT_SETTINGS_ANCHOR } from '~/components/exits/settingsAnchor'
+import { WebhookWarning } from '~/components/exits/WebhookWarning'
 import { ASSET_LABEL } from '~/components/format'
 import { InstrumentLink } from '~/components/InstrumentLink'
 import { PushNotificationSettings } from '~/components/notifications/PushNotificationSettings'
@@ -9,6 +12,7 @@ import { Empty, PageHeader, Section, Table } from '~/components/screen'
 import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { cx } from '~/lib/cx'
 import type { ProviderState } from '~/lib/prices/providers'
+import { getFrameworkSettings } from '~/server/exit'
 import {
   checkProviders,
   listPrices,
@@ -19,6 +23,7 @@ import {
 
 export const Route = createFileRoute('/_authed/settings')({
   component: Settings,
+  loader: () => getFrameworkSettings(),
 })
 
 const STATE_LABEL: Record<ProviderState, string> = {
@@ -48,7 +53,13 @@ function priceText(entry: PriceEntry, price: string): string {
 }
 
 function Settings() {
+  const initial = Route.useLoaderData()
   const queryClient = useQueryClient()
+  const { data: framework } = useQuery({
+    queryKey: ['exit-settings'],
+    queryFn: () => getFrameworkSettings(),
+    initialData: initial,
+  })
   const [drafts, setDrafts] = useState<Record<string, string>>({})
 
   const { data: prices = [], isPending } = useQuery({
@@ -279,6 +290,22 @@ function Settings() {
             </dd>
           </dl>
         </div>
+      </Section>
+
+      <Section
+        id={EXIT_SETTINGS_ANCHOR}
+        title="Exit framework"
+        description="The stop and Target 1 multiples are frozen into each plan when it is created, so changing them affects new plans only. Trail width, time stop and staleness are path-dependent and apply everywhere on the next read."
+      >
+        {framework.webhookConfigured ? null : <WebhookWarning />}
+        <ExitSettingsForm
+          settings={framework.settings}
+          // Everything, not a named list: a plan's levels and the Open position
+          // prefill on every Playbook screen are read through these.
+          onSaved={() => {
+            void queryClient.invalidateQueries()
+          }}
+        />
       </Section>
 
       <Section

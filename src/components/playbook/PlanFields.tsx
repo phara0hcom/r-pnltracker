@@ -9,6 +9,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import styles from './Dialog.module.scss'
+import { EXIT_SETTINGS_ANCHOR } from '~/components/exits/settingsAnchor'
 import { pct, priceText, ratio } from '~/components/format'
 import { FormField } from '~/components/trades/FormField'
 import { cx } from '~/lib/cx'
@@ -196,7 +197,11 @@ export function FrameworkNote({
   return (
     <p className={styles.note}>
       Partial exit {partialExitFraction} · time stop {timeStopDays} sessions · trail {trailingAtrMultiple} × ATR — global
-      settings that apply on the next read. Change them under <Link to="/exits">Exit Rules</Link>.
+      settings that apply on the next read. Change them in{' '}
+      <Link to="/settings" hash={EXIT_SETTINGS_ANCHOR}>
+        Settings
+      </Link>
+      .
     </p>
   )
 }

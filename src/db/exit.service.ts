@@ -504,7 +504,7 @@ export async function storeFeedBar(input: FeedBarDelivery): Promise<StoredFeedBa
 /**
  * How a delivery ended — see the enum on the table for what each means.
  *
- * The rows themselves are no longer written. The Exit Rules screen that read
+ * The rows themselves are no longer written. The screen that read
  * them is gone and Sentry carries the same outcomes now, so the log's own round
  * trip was a third of what the webhook made TradingView wait for. `exit_feed_
  * deliveries` is left in the schema rather than dropped: the table still holds

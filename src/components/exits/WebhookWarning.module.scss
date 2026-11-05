@@ -1,0 +1,16 @@
+.warning {
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-warn);
+  overflow-wrap: anywhere;
+  background-color: var(--color-warn-dim);
+  border: 1px solid var(--color-warn);
+  border-radius: var(--radius-md);
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.8125em;
+  }
+}

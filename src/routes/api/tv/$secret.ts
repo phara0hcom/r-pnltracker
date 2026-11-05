@@ -135,7 +135,7 @@ const reportSecretRefused = once((method: 'GET' | 'POST') => {
 function authorise(secret: string, method: 'GET' | 'POST'): Response | null {
   const expected = process.env.TRADINGVIEW_WEBHOOK_SECRET
 
-  // The same predicate the Exit Rules screen reports with, so a too-short secret
+  // The same predicate the Playbook and Settings report with, so a too-short secret
   // cannot 503 every payload while the screen shows the feed as configured.
   if (!webhookSecretUsable(expected)) {
     console.error(

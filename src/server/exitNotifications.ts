@@ -119,12 +119,12 @@ async function notifyForRule(
 
   if (subscriptions.length === 0) {
     // Nothing to notify — advance anyway, there is no one to retry for, and
-    // the Exits screen already shows the current recommendation regardless.
+    // the Playbook already shows the current recommendation regardless.
     await recordExitActionState(rule.id, userId, result.action.kind)
     return
   }
 
-  const payload = exitActionPushPayload(rule.id, rule.symbol, result.action)
+  const payload = exitActionPushPayload(rule.id, rule.symbol, result.action, rule.journalId)
   let delivered = false
   for (const subscription of subscriptions) {
     try {

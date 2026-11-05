@@ -1,9 +1,11 @@
 # Exit Rules
 
 Stops, targets and trailing levels for open swing positions, driven by a daily
-TradingView feed. The screen answers one question each morning — *is there
-anything I have to do today?* — and ranks positions by urgency rather than by
-symbol or size.
+TradingView feed. There is no screen of its own: a plan belongs to a position in
+the Playbook (`docs/playbook.md`), and the Playbook's *Needs action* strip answers
+the one question that matters each morning — *is there anything I have to do
+today?* — ranking plans by urgency rather than by symbol or size. The framework's
+settings are on Settings, and the old `/exits` address redirects to `/playbook`.
 
 The framework is fixed: it is the rule set used for TSE swing trades, extended
 to US equities where the arithmetic is identical and only the lot size differs.
@@ -34,18 +36,20 @@ CDN logs in a way a header would not. It is mitigated by the token being long,
 single-purpose, and rotatable by changing one environment variable.
 
 **Know what the token can reach**, because §4.1 widened it. It appends a bar for
-an instrument that already exists — and publishes that bar's close as the
-instrument's current price. `price_cache` has no `userId`: a quote is market data
-and one row serves everyone, which is what lets an unauthenticated route write it
-at all. So a leaked secret no longer only distorts the Exit Rules screen; it
-moves the market value and unrealized P&L shown on Positions, the Dashboard and
-Stats. It still cannot read anything or touch a hand-entered override, which wins over the cache everywhere. Rotate it
+any instrument that has a row — and publishes that bar's close as the instrument's
+current price. A row no longer means the owner traded it: a position opened from
+scratch or on paper creates one, so the token reaches those too, including a
+ticker that was only ever paper-traded. `price_cache` has no `userId`: a quote is
+market data and one row serves everyone, which is what lets an unauthenticated
+route write it at all. So a leaked secret no longer only distorts the exit plans
+on the Playbook; it moves the market value and unrealized P&L shown on Positions,
+the Dashboard and Stats. It still cannot read anything or touch a hand-entered override, which wins over the cache everywhere. Rotate it
 if it is ever exposed, and re-run *Refresh prices* afterwards to overwrite
 anything a bogus bar published.
 
 **Under 24 characters, the endpoint refuses to serve at all.** Unset *or too
-short*, the Exit Rules screen says so at the top rather than letting every plan
-quietly read as stale — the screen and the endpoint share one predicate
+short*, the Playbook and Settings say so at the top rather than letting every plan
+quietly read as stale — both screens and the endpoint share one predicate
 (`webhookSecretUsable`), so a secret the route rejects can never be reported as
 configured.
 
@@ -115,21 +119,27 @@ The script needs no modification — the endpoint tolerates the two ways Pine's
 
 A lapsed alert is the single most likely failure of this feature, which is why
 staleness is surfaced per plan *and* the suggested action says so explicitly.
-Note that a stale plan is still rated `neutral`, so it appears in the screen's
-*On track* table carrying a warn-tone `Stale Nd` flag rather than in the action
-group — the flag is the only thing distinguishing it there.
+Note that a stale plan is still rated `neutral`, so it stays out of *Needs action*
+and carries a warn-tone `Stale Nd` flag in its row of the Playbook's table — the
+flag is the only thing distinguishing it there.
 
 ---
 
 ## 2. Opening a plan
 
 **Playbook → Open position.** A live plan is opened with its position, in one
-transaction, from a holding or from scratch; the Exit Rules screen is read-only.
-From a holding, entry date, entry price and size prefill from the current holding
+transaction, from a holding or from scratch, and read and changed on that
+position's page (`/playbook/<id>`). From a holding, entry date, entry price and size prefill from the current holding
 streak. The stop and Target 1 multiples default from settings and can be changed
 for this plan, and Target 1 can be typed by hand. Opening a position on a pool
 whose old plan's position is over archives that plan in the same transaction; a
 plan still describing an open position refuses the new one.
+
+A plan from before the Playbook has no position. It goes on evaluating and pushing
+regardless, and the Playbook offers **File N existing exit plans**, which gives
+each one a position anchored to its streak; one with no streak to file under is
+listed there to archive. An archived plan's streak appears under *From a past
+trade* with the stop prefilled.
 
 "Holding streak" means the run since the position was last flat — see
 `src/lib/exit/entry.ts`. It is not the engine's moving-average cost basis, which
@@ -170,7 +180,7 @@ executed.
 | Current effective stop | initial stop before Target 1; `MAX(breakeven, trail)` after |
 
 Every multiplier, the partial fraction, the time-stop day count and the
-staleness threshold are settings on the screen, not constants.
+staleness threshold are on Settings, not constants.
 
 **Two of them are frozen into each plan when it is created**: the initial-stop
 ATR multiple and the Target 1 multiple. They are stored on the row alongside the
@@ -229,7 +239,7 @@ A daily close arrives at the moment it is the freshest reading anyone has: the
 alert fires *at* the close, while Finnhub and the JP scrape are polled only when
 someone opens Settings and asks. So the webhook publishes the close into
 `price_cache` as well as `exit_feed_bars`, under the source `FEED`, and Positions
-stops showing a staler figure than the Exit Rules card beside it.
+stops showing a staler figure than the position's exit plan.
 
 Three conditions, each closing a way the price could go backwards or sideways:
 
@@ -360,12 +370,18 @@ partial`, any transition, of any severity — even when the app is closed. This
 is Web Push, not the plain in-page `Notification` API: the framework's most
 likely failure mode is a lapsed alert (§1.3), and the moment a bar actually
 lands and changes something is almost always market close, when nobody has
-the screen open.
+the app open.
+
+**A notification lands on the plan's position**, `/playbook/<journal_id>`, or on
+`/playbook` for a plan not yet filed. A window already there is brought forward;
+otherwise an open window is sent there, so a second position's notification does
+not open a second window. A notification sent before this names `/exits`, which
+redirects.
 
 **There is no separate recalculation.** The webhook's own `processDelivery`
 (§4.2) already resolves the instrument a bar belongs to; once the bar is
 stored, `notifyExitActionChanges` re-runs `assess()` for every live plan
-against that instrument, exactly as the screen would, and diffs the result
+against that instrument, exactly as the Playbook would, and diffs the result
 against `exit_action_state` — a small table holding only the last action kind
 a plan was evaluated at. That table is deliberately *not* a column on
 `exit_rules`: everything on that table is a locked entry fact, and this value
@@ -437,8 +453,8 @@ archiving the old plan would make it read as open — against entry facts that
 belong to the previous swing, with Target 1 still latched by the old winner and a
 trail carrying highs from months back. When the pool went flat *after* the
 plan's entry date and has been bought since, the plan says so and asks to be
-archived, and it moves to *Plans to archive* rather than sitting among live
-positions. Archiving frees the position to be planned again.
+archived, and *Needs action* and the position's page offer **Archive exit plan**.
+Archiving frees the position to be planned again.
 
 The test is the close, not the streak's start date. Rakuten re-dates a US fill
 a day later once it settles (the restatement in `lib/import/plan.ts`), while a
@@ -484,17 +500,22 @@ a zero-share sale.
 | `src/db/exit.service.ts` | Plans, settings, bar storage |
 | `src/db/prices.service.ts` | Publishing a bar close into the shared price cache |
 | `src/lib/prices/feed.ts` | Which asset classes a feed close may be published for |
-| `src/server/exit.ts` | Server functions backing the screen |
-| `src/routes/_authed/exits.tsx` | The screen — splits plans by urgency, cards above a table |
-| `src/components/exits/ExitCard.tsx` | The slim card, for plans rated `urgent` or `attention` |
-| `src/components/exits/ExitPlanRow.tsx` | The table row, for plans rated `neutral` |
-| `src/components/exits/ExitPlanDialog.tsx` | One plan in full, read-only — opened from either |
+| `src/server/exit.ts` | Server functions for the framework's settings |
+| `src/server/exitPosition.ts` | A plan's holding facts and `evaluateExitRule`, shared by the Playbook and the notifier |
+| `src/routes/_authed/exits.tsx` | Redirects the old address to `/playbook` |
+| `src/routes/_authed/playbook.index.tsx` | *Needs action*, the table, and filing plans from before the Playbook |
+| `src/routes/_authed/playbook.$journalId.tsx` | One position, with its plan's recommendation and archive |
+| `src/routes/_authed/settings.tsx` | Where the framework's settings and the webhook warning live |
+| `src/components/exits/ExitLadder.tsx`, `ExitFlags.tsx` | The stop → Target 1 axis and the state badges |
+| `src/components/exits/ExitSettingsForm.tsx`, `WebhookWarning.tsx` | The settings form, and the warning on an unusable secret |
+| `src/components/playbook/LivePlanFigures.tsx` | One plan's levels and facts in full, read-only |
 | `src/components/playbook/OpenPositionDialog.tsx`, `PositionDialogs.tsx` | Opening a plan with its position, and correcting one |
 | `src/lib/notifications/exitActionNotice.ts` | Change detection and push payload shaping — pure |
 | `src/lib/notifications/webpush.ts` | The only module that imports `web-push` |
 | `src/db/notifications.service.ts` | Push subscriptions and `exit_action_state` storage |
 | `src/server/exitNotifications.ts` | Re-evaluates and pushes on a webhook delivery |
 | `src/components/notifications/PushNotificationSettings.tsx` | The Settings toggle |
+| `src/sw/sw.ts` | Shows a push, and sends a click to the plan's position |
 
 `src/lib/exit/` is pure and DB-free like the rest of `lib/`, so the whole rule
 set is tested against handmade bar sequences with no database and no network —

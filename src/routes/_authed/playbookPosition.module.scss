@@ -34,6 +34,13 @@
   border-radius: var(--radius-md);
 }
 
+.chartLink {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  white-space: nowrap;
+}
+
 .button {
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-sm);
@@ -49,32 +56,7 @@
   }
 }
 
-.figures {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: var(--space-3);
-  margin-block: var(--space-3);
-}
-
-.figure {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
 .figureLabel {
-  font-size: var(--text-xs);
-  color: var(--color-text-subtle);
-}
-
-.figureValue {
-  font-size: var(--text-sm);
-
-  @include m.tabular-nums;
-}
-
-.figureHint {
   font-size: var(--text-xs);
   color: var(--color-text-subtle);
 }

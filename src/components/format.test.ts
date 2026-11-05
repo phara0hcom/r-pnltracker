@@ -10,7 +10,7 @@ import { dollarsCompact, money, moneySigned, pctSigned, rSigned, tone, yen, yenC
 
 describe('money', () => {
   it('groups dollars, exactly as lib/exit/rules.ts does', () => {
-    // The Exit Rules card renders the recommendation formatted by that module
+    // The position page renders the recommendation formatted by that module
     // directly above figures formatted by this one, so a US position showed the
     // same number written both ways an inch apart. Both must produce
     // `$1,500.00`; if `money` in rules.ts changes, this has to change with it.

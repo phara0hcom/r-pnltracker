@@ -1,9 +1,8 @@
 /**
  * The stop → Target 1 axis, with the effective stop and the last close marked.
  *
- * One implementation for the four places a plan is drawn — the action card, the
- * on-track row, the read dialog, and both of their phone forms — because the
- * marks are positioned by arithmetic, and a second copy of that arithmetic is a
+ * One implementation for the places a plan is drawn — Needs action, the
+ * Playbook's table and its phone cards, the position page — because the marks are positioned by arithmetic, and a second copy of that arithmetic is a
  * second chance for the two to disagree about where "now" sits.
  *
  * `aria-hidden` throughout: every value it encodes is written out beside it, so
@@ -12,7 +11,7 @@
 import styles from './ExitLadder.module.scss'
 import { money } from '~/components/format'
 import { cx } from '~/lib/cx'
-import type { ExitRuleRow } from '~/server/exit'
+import type { ExitRuleRow } from '~/server/exitPosition'
 
 /**
  * Where a price sits between the initial stop and Target 1, as a 0–1 fraction.

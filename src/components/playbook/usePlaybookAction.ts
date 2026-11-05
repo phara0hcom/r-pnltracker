@@ -2,7 +2,7 @@
  * One Playbook write: run it, show what the server refused, refresh on success.
  *
  * Everything is invalidated rather than a named list, as the Trades screen does:
- * a position's note, plan or link shows on the Calendar, Trades and Exit Rules too.
+ * a position's note, plan or link shows on the Calendar and Trades too.
  *
  * It stays pending until that refetch lands, and `pendingInput` carries what was
  * sent meanwhile: a rating or a tick shows at once from it, then from the server,

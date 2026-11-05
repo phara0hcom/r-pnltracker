@@ -5,7 +5,7 @@
  * those bounds can be crossed — that is what a stop and a target are — and the
  * moment either is, the fraction leaves 0–1 while the plan still has to render.
  * Un-clamped, a stopped-out position draws its marker outside the track, which
- * is precisely the position whose card you most need to read.
+ * is precisely the position you most need to read.
  */
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'

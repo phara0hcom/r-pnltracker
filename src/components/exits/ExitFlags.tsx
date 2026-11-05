@@ -1,12 +1,12 @@
 /**
  * The four state badges a plan can carry.
  *
- * Shared by the action card, the on-track row and the dialog so that "Target 1
- * hit" cannot come to mean one colour in the list and another in the detail.
+ * Shared by the Playbook's table and the position page so that "Target 1 hit"
+ * cannot come to mean one colour in the list and another in the detail.
  */
 import styles from './ExitFlags.module.scss'
 import { cx } from '~/lib/cx'
-import type { ExitRuleRow } from '~/server/exit'
+import type { ExitRuleRow } from '~/server/exitPosition'
 
 export function ExitFlags({
   row,

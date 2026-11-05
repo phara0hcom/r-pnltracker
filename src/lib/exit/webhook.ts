@@ -38,7 +38,7 @@ export const MIN_SECRET_LENGTH = 24
 /**
  * Whether the configured secret is long enough for the endpoint to serve.
  *
- * Shared with the Exit Rules screen on purpose. The route 503s a secret that is
+ * Shared with the Playbook and Settings warnings on purpose. The route 503s a secret that is
  * merely too short, so a screen that only checked "is it set" would suppress the
  * "not configured" warning while every payload was being silently rejected.
  */

@@ -31,17 +31,29 @@ export interface ExitPushPayload {
   data: { ruleId: string; actionKind: ExitActionKind; url: string }
 }
 
+/** Where a notification lands when it has no position to name. */
+export const NOTIFICATION_FALLBACK_URL = '/playbook'
+
+/**
+ * The position a plan belongs to, or the Playbook for a plan from before there
+ * were positions: it has none until the owner files it, and it still pushes.
+ */
+export function exitNotificationUrl(journalId: string | null): string {
+  return journalId === null ? NOTIFICATION_FALLBACK_URL : `/playbook/${encodeURIComponent(journalId)}`
+}
+
 /** The exact recommendation sentence the engine already computed, unmodified. */
 export function exitActionPushPayload(
   ruleId: string,
   symbol: string,
   action: ExitAction,
+  journalId: string | null,
 ): ExitPushPayload {
   return {
     title: symbol,
     body: action.message,
     tag: `exit:${ruleId}`,
-    data: { ruleId, actionKind: action.kind, url: '/exits' },
+    data: { ruleId, actionKind: action.kind, url: exitNotificationUrl(journalId) },
   }
 }
 
@@ -58,4 +70,22 @@ export function parseExitPushPayload(raw: unknown): ExitPushPayload | null {
   }
 
   return { title, body, tag, data: { ruleId, actionKind: actionKind as ExitActionKind, url } }
+}
+
+/**
+ * Which open window a notification click should use, if any.
+ *
+ * A window already on that screen is only brought forward. Otherwise one is sent
+ * there, because the app is one screen per window: a notification for a second
+ * position used to open a second window beside the first. The window in front is
+ * the one the owner is looking at, so it goes before any other.
+ */
+export function windowForNotification<Client extends { url: string; focused: boolean }>(
+  clients: readonly Client[],
+  url: string,
+): { client: Client; navigate: boolean } | null {
+  const already = clients.find((client) => new URL(client.url).pathname === url)
+  if (already) return { client: already, navigate: false }
+  const other = clients.find((client) => client.focused) ?? clients[0]
+  return other ? { client: other, navigate: true } : null
 }

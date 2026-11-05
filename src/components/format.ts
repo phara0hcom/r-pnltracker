@@ -49,7 +49,7 @@ export const yenSigned = (value: string | number | null | undefined): string => 
  *
  * Dollars are grouped for the same reason `money` in `lib/exit/rules.ts` groups
  * them — a bare `$10000.00` beside a `¥10,000` reads as a typo. The two have to
- * agree: an Exit Rules card prints the recommendation formatted by that one and
+ * agree: the position page prints the recommendation formatted by that one and
  * the figures under it by this one, so a US position showed the same number
  * written both ways an inch apart.
  */

@@ -1,12 +1,12 @@
 /**
  * A plan fixture for component tests.
  *
- * The default is the case the Exit Rules screen exists for — a stopped-out
+ * The default is the case the exit framework exists for — a stopped-out
  * position, urgent, with a lapsed feed — so a test that cares about none of
  * that still renders something representative. Override only the fields under
  * test, and the reason a test exists stays visible in its own call.
  */
-import type { ExitRuleRow } from '~/server/exit'
+import type { ExitRuleRow } from '~/server/exitPosition'
 
 export function makePlan(overrides: Partial<ExitRuleRow> = {}): ExitRuleRow {
   return {

@@ -539,7 +539,7 @@ export async function scratchProblem(
 /**
  * The pool's live plan, when the position it describes is over.
  *
- * Decided here rather than on a read — `toArchive` only ever lists such plans,
+ * Decided here rather than on a read — the Playbook's Needs action only ever lists such plans,
  * because archiving during a load would put a write on a read path. A plan still
  * describing an open position stays, and `createExitRule` refuses the new one.
  */

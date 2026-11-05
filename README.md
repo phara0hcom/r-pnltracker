@@ -83,14 +83,18 @@ figure. Rows whose account had to be inferred are tagged as such.
 </details>
 
 <details>
-<summary><b>Exit Rules</b> — a swing-trade exit framework fed by TradingView</summary>
+<summary><b>Playbook</b> — a trade journal with a swing-trade exit framework fed by TradingView</summary>
 
-Plans the framework rates urgent or needing attention keep a full card; plans that are on
-track collapse into one row each. Stops, R and Target 1 are locked at entry and never
-recomputed. Everything path-dependent — the highest close, the Target 1 latch, the ratcheting
-trail — is replayed from stored daily bars rather than mutated.
+Each position is one swing trade from open to close, filed under a setup with chart
+screenshots, 1–10 ratings and an exit plan, so setups can be compared by their best and worst
+trades. Plans the framework rates urgent or needing attention lead the page; the rest carry a
+badge and a ladder in their row. Stops, R and Target 1 are locked at entry and never recomputed.
+Everything path-dependent — the highest close, the Target 1 latch, the ratcheting trail — is
+replayed from stored daily bars rather than mutated.
 
-![Exit Rules](docs/screenshots/exits.webp)
+*This image is the Exit Rules screen the Playbook replaced, and is waiting to be redrawn.*
+
+![The former Exit Rules screen](docs/screenshots/exits.webp)
 
 </details>
 
@@ -111,7 +115,7 @@ horizontal bars measured off a zero line.
 <td align="center"><img src="docs/screenshots/nisa-sp.webp" alt="NISA on mobile" width="200"><br><sub>NISA</sub></td>
 <td align="center"><img src="docs/screenshots/tax-sp.webp" alt="Tax on mobile" width="200"><br><sub>Tax</sub></td>
 <td align="center"><img src="docs/screenshots/dividends-sp.webp" alt="Dividends on mobile" width="200"><br><sub>Dividends</sub></td>
-<td align="center"><img src="docs/screenshots/exits-sp.webp" alt="Exit Rules on mobile" width="200"><br><sub>Exit Rules</sub></td>
+<td align="center"><img src="docs/screenshots/exits-sp.webp" alt="The former Exit Rules screen on mobile" width="200"><br><sub>Former Exit Rules</sub></td>
 </tr>
 </table>
 
@@ -143,8 +147,11 @@ horizontal bars measured off a zero line.
   with 3-year 繰越控除 carryforward.
 - **Journals** each trading day with a 1–5 mood and motivation score, correlated against that
   day's realized P&L.
-- **Manages exits** with a swing-trade framework — ATR-based initial stop, an R-multiple
-  Target 1, a partial exit, then a ratcheting Chandelier trail — fed by a TradingView webhook.
+- **Keeps a Playbook** of every swing trade — its setup, chart screenshots, ratings and score —
+  to compare what each setup's best and worst trades had in common.
+- **Manages exits** in the Playbook with a swing-trade framework — ATR-based initial stop, an
+  R-multiple Target 1, a partial exit, then a ratcheting Chandelier trail — fed by a TradingView
+  webhook.
 
 ## Domain rules that are easy to get wrong
 

@@ -10,7 +10,11 @@
  * is emitted into. Not registered under `npm run dev`; try it with
  * `npm run build && npm start`.
  */
-import { parseExitPushPayload } from '~/lib/notifications/exitActionNotice'
+import {
+  NOTIFICATION_FALLBACK_URL,
+  parseExitPushPayload,
+  windowForNotification,
+} from '~/lib/notifications/exitActionNotice'
 import type { SavedCopyMessage } from '~/lib/offline/messages'
 import { offlinePageHtml } from '~/lib/offline/offlinePage'
 import {
@@ -107,21 +111,28 @@ self.addEventListener('push', (event) => {
   )
 })
 
-/** Focuses an already-open tab on the notification's screen, or opens one. */
+/** Brings an open window to the notification's screen, or opens one if there is none. */
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const data = event.notification.data as { url?: string } | undefined
-  const url = data?.url ?? '/exits'
+  const url = data?.url ?? NOTIFICATION_FALLBACK_URL
 
   event.waitUntil(
     (async () => {
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-      const existing = clients.find((client) => new URL(client.url).pathname === url)
-      if (existing) {
-        await existing.focus()
+      const target = windowForNotification(clients, url)
+      if (!target) {
+        await self.clients.openWindow(url)
         return
       }
-      await self.clients.openWindow(url)
+      try {
+        const focused = await target.client.focus()
+        if (target.navigate) await focused.navigate(url)
+      } catch {
+        // `navigate` refuses a window this worker does not control, such as one
+        // that was hard-reloaded. The click must still land somewhere.
+        await self.clients.openWindow(url)
+      }
     })(),
   )
 })

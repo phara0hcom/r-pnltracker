@@ -108,6 +108,13 @@ SENTRY_DSN="https://...@o000000.ingest.sentry.io/000000"
 VITE_SENTRY_DSN="<the same DSN>"
 ```
 
+Optional — the daily feed behind exit plans. Leave it out and the feed is off; the
+Playbook and Settings say so. See `docs/exit-rules.md` §1.
+
+```bash
+TRADINGVIEW_WEBHOOK_SECRET="<from: openssl rand -hex 32; 24 characters or more>"
+```
+
 Optional — browser push notifications when an exit-rule recommendation
 changes. Leave these out and the feature is off; the Settings screen says so.
 See `docs/exit-rules.md`.

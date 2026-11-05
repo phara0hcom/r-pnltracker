@@ -10,6 +10,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { useCallback, useMemo, useState } from 'react'
 import styles from './playbook.module.scss'
 import { ExitLadder } from '~/components/exits/ExitLadder'
+import { WebhookWarning } from '~/components/exits/WebhookWarning'
 import { ACCOUNT_LABEL, priceText } from '~/components/format'
 import { OpenPositionDialog } from '~/components/playbook/OpenPositionDialog'
 import { LinkLoader } from '~/components/playbook/PositionDialogs'
@@ -161,13 +162,7 @@ function Playbook() {
         </button>
       </PageHeader>
 
-      {data.webhookConfigured ? null : (
-        <p className={styles.warning}>
-          <strong>Webhook not configured.</strong> Set <code>TRADINGVIEW_WEBHOOK_SECRET</code> to at least 24 characters
-          and point each TradingView alert at <code>/api/tv/&lt;secret&gt;</code>. Until then every live plan reads as
-          stale. See <code>docs/exit-rules.md</code>.
-        </p>
-      )}
+      {data.webhookConfigured ? null : <WebhookWarning />}
 
       {data.plansToFile > 0 ? (
         <div className={styles.banner}>

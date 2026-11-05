@@ -12,7 +12,10 @@ import styles from './playbookPosition.module.scss'
 import { ExitFlags } from '~/components/exits/ExitFlags'
 import { ExitLadder } from '~/components/exits/ExitLadder'
 import { ACCOUNT_LABEL, pct, priceText, qty, rSigned, tone } from '~/components/format'
-import { FrameworkNote, METHOD_LABEL } from '~/components/playbook/PlanFields'
+import { ExternalIcon } from '~/components/icons/ExternalIcon'
+import { Figure, figureStyles } from '~/components/playbook/Figure'
+import { LivePlanFigures } from '~/components/playbook/LivePlanFigures'
+import { FrameworkNote } from '~/components/playbook/PlanFields'
 import { PositionCharts } from '~/components/playbook/PositionCharts'
 import { EditPlanDialog, EditPositionDialog, LinkDialog } from '~/components/playbook/PositionDialogs'
 import { ResultText, ScoreText, StatusBadge } from '~/components/playbook/PositionTable'
@@ -24,6 +27,7 @@ import { ConfirmButton } from '~/components/ui/ConfirmButton'
 import { TagInput, withDraft } from '~/components/ui/TagInput'
 import { cx } from '~/lib/cx'
 import { formatJst, resolveExecutedAt, timedMarket, toTimeInput } from '~/lib/import/executionTime'
+import { tradingViewUrl } from '~/lib/tradingview'
 import {
   archivePlan,
   archivePosition,
@@ -42,16 +46,6 @@ export const Route = createFileRoute('/_authed/playbook/$journalId')({
   component: Position,
   loader: ({ params }) => getPosition({ data: { id: params.journalId } }),
 })
-
-function Figure({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
-  return (
-    <div className={styles.figure}>
-      <span className={styles.figureLabel}>{label}</span>
-      <span className={styles.figureValue}>{value}</span>
-      {hint ? <span className={styles.figureHint}>{hint}</span> : null}
-    </div>
-  )
-}
 
 function ExtraTargets({ position }: { position: PositionDetail }) {
   if (position.extraTargets.length === 0) return null
@@ -79,7 +73,7 @@ function PlanPanel({ position, onEdit }: { position: PositionDetail; onEdit: () 
   if (view.kind === 'ARCHIVED') {
     return (
       <Section title="Exit plan" description="Archived. Its stop still gives this position its R.">
-        <div className={styles.figures}>
+        <div className={figureStyles.figures}>
           <Figure label="Entry" value={priceText(view.entryPrice, position.currency)} />
           <Figure label="Support" value={priceText(view.supportLevel, position.currency)} />
           <Figure label="Initial stop" value={priceText(view.stop, position.currency)} />
@@ -100,7 +94,7 @@ function PlanPanel({ position, onEdit }: { position: PositionDetail; onEdit: () 
         {view.stop === null && view.target1 === null && position.extraTargets.length === 0 ? (
           <Empty>No plan recorded, so this position has no R.</Empty>
         ) : (
-          <div className={styles.figures}>
+          <div className={figureStyles.figures}>
             <Figure label="Stop" value={priceText(view.stop, position.currency)} />
             <Figure label="Target 1" value={priceText(view.target1, position.currency)} />
             <ExtraTargets position={position} />
@@ -117,30 +111,14 @@ function PlanPanel({ position, onEdit }: { position: PositionDetail; onEdit: () 
       <p className={cx(styles.message, styles[row.actionSeverity])}>{row.actionMessage}</p>
       <ExitFlags row={row} />
       <ExitLadder row={row} ends size="lg" />
-      <div className={styles.figures}>
-        <Figure label="Entry" value={priceText(row.entryPrice, row.currency)} hint={row.entryDate} />
-        <Figure label="Support" value={priceText(row.supportLevel, row.currency)} />
-        <Figure
-          label="Initial stop"
-          value={priceText(row.initialStop, row.currency)}
-          hint={row.stopFromSupportOnly ? 'support only — no entry ATR' : `locked · ${view.stopMultiple} × ATR`}
-        />
-        <Figure label="R" value={priceText(row.riskPerShare, row.currency)} hint="per share" />
-        <Figure
-          label="Target 1"
-          value={priceText(row.target1, row.currency)}
-          hint={view.target1Manual ? 'manual' : `auto · ${view.targetMultiple} × R`}
-        />
-        <Figure label="Effective stop" value={priceText(row.currentStop, row.currency)} />
-        <Figure label="Trail" value={METHOD_LABEL[row.trailingMethod]} hint={row.trailingActive ? 'active' : 'after Target 1'} />
-        <Figure
-          label="Last close"
-          value={priceText(row.currentPrice, row.currency)}
-          hint={row.lastBarDate ?? 'no feed yet'}
-        />
-        <Figure label="Held" value={`${String(row.tradingDaysHeld)} sessions`} />
+      <LivePlanFigures
+        row={row}
+        stopMultiple={view.stopMultiple}
+        targetMultiple={view.targetMultiple}
+        target1Manual={view.target1Manual}
+      >
         <ExtraTargets position={position} />
-      </div>
+      </LivePlanFigures>
       <FrameworkNote {...position.framework} />
       {finished ? (
         <div className={styles.rowEnd}>
@@ -168,7 +146,7 @@ function ScorePanel({ position }: { position: PositionDetail }) {
   const { currency } = position
   return (
     <Section title="Score" description="Entry, exit, risk and result at a quarter each, so process outweighs outcome three to one.">
-      <div className={styles.figures}>
+      <div className={figureStyles.figures}>
         <Figure label="Overall" value={<ScoreText value={position.overall} provisional={position.provisional} />} />
         <Figure label="Entry" value={position.entryScore ?? '—'} />
         <Figure label="Exit" value={position.exitScore ?? '—'} />
@@ -497,6 +475,8 @@ function Position() {
   ]
     .filter((part) => part)
     .join(' · ')
+  /** Null for funds, which carry no ticker in any export. */
+  const chart = tradingViewUrl(position.symbol, position.assetClass)
 
   return (
     <>
@@ -505,6 +485,17 @@ function Position() {
       </Link>
       <PageHeader title={`${position.symbol} ${position.name}`} meta={meta}>
         <StatusBadge status={position.status} />
+        {chart ? (
+          <a
+            className={cx(styles.button, styles.chartLink)}
+            href={chart}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${position.symbol} on TradingView in a new tab`}
+          >
+            Chart <ExternalIcon />
+          </a>
+        ) : null}
         {position.archived ? null : (
           <>
             <button
