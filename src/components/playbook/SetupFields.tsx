@@ -38,6 +38,18 @@ export function toSetupDraft(
   }
 }
 
+/**
+ * The list's order is the order the checklist shows on every position. Ticks are
+ * stored by id, so moving a criterion keeps what was recorded against it.
+ */
+function moveCriterion(criteria: CriterionDraft[], from: number, to: number): CriterionDraft[] {
+  const moved = criteria[from]
+  if (!moved || to < 0 || to >= criteria.length) return criteria
+  const next = criteria.filter((_, index) => index !== from)
+  next.splice(to, 0, moved)
+  return next
+}
+
 export function toSetupInput(draft: SetupDraft) {
   return {
     name: draft.name,
@@ -89,6 +101,28 @@ export function SetupFields({ draft, onChange }: { draft: SetupDraft; onChange: 
                 )
               }}
             />
+            <button
+              type="button"
+              className={cx(styles.secondary, styles.small)}
+              disabled={index === 0}
+              onClick={() => {
+                setCriteria(moveCriterion(draft.criteria, index, index - 1))
+              }}
+            >
+              <span aria-hidden="true">↑</span>
+              <span className="visually-hidden">Move criterion {index + 1} up</span>
+            </button>
+            <button
+              type="button"
+              className={cx(styles.secondary, styles.small)}
+              disabled={index === draft.criteria.length - 1}
+              onClick={() => {
+                setCriteria(moveCriterion(draft.criteria, index, index + 1))
+              }}
+            >
+              <span aria-hidden="true">↓</span>
+              <span className="visually-hidden">Move criterion {index + 1} down</span>
+            </button>
             <button
               type="button"
               className={cx(styles.secondary, styles.small)}

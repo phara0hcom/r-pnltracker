@@ -64,6 +64,33 @@ describe('SetupDialog', () => {
     })
   })
 
+  it('reorders criteria and keeps their ids, so ticks follow them', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    open(SETUP, { onClose })
+
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: /Move criterion 1 up/ }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: /Move criterion 2 down/ }).disabled).toBe(true)
+    await user.click(screen.getByRole('button', { name: /Move criterion 2 up/ }))
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Criterion 1' }).value).toBe('Volume')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalled()
+    })
+    expect(server.updateSetup).toHaveBeenCalledWith({
+      data: {
+        id: 'setup-1',
+        name: 'Pullback',
+        description: 'To the 20d',
+        criteria: [
+          { id: 'c2', text: 'Volume' },
+          { id: 'c1', text: 'Uptrend' },
+        ],
+      },
+    })
+  })
+
   it('shows the server’s message on a duplicate name and stays open with what was typed', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
