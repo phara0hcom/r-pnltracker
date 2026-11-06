@@ -61,6 +61,14 @@ const Playbook = ({ className }: IconProps) => (
   </svg>
 )
 
+/** A checklist: a setup is the criteria a trade has to meet. */
+const Setups = ({ className }: IconProps) => (
+  <svg {...BASE} className={className}>
+    <path d="M2.5 4.2 3.7 5.4 5.8 3.2M2.5 10.2l1.2 1.2 2.1-2.2" />
+    <path d="M8 4.3h5.5M8 10.3h5.5" />
+  </svg>
+)
+
 /**
  * A coin taking income in.
  *
@@ -124,6 +132,7 @@ export const NAV_ICONS = {
   '/trades': Trades,
   '/positions': Positions,
   '/playbook': Playbook,
+  '/playbook/setups': Setups,
   '/dividends': Dividends,
   '/calendar': Calendar,
   '/stats': Stats,

@@ -101,12 +101,14 @@ export function SetupFields({ draft, onChange }: { draft: SetupDraft; onChange: 
                 )
               }}
             />
+            {/* aria-disabled, not disabled: the pressed button travels with its row,
+                and a real disabled would drop keyboard focus once the row reaches the end. */}
             <button
               type="button"
               className={cx(styles.secondary, styles.small)}
-              disabled={index === 0}
+              aria-disabled={index === 0}
               onClick={() => {
-                setCriteria(moveCriterion(draft.criteria, index, index - 1))
+                if (index > 0) setCriteria(moveCriterion(draft.criteria, index, index - 1))
               }}
             >
               <span aria-hidden="true">↑</span>
@@ -115,9 +117,9 @@ export function SetupFields({ draft, onChange }: { draft: SetupDraft; onChange: 
             <button
               type="button"
               className={cx(styles.secondary, styles.small)}
-              disabled={index === draft.criteria.length - 1}
+              aria-disabled={index === draft.criteria.length - 1}
               onClick={() => {
-                setCriteria(moveCriterion(draft.criteria, index, index + 1))
+                if (index < draft.criteria.length - 1) setCriteria(moveCriterion(draft.criteria, index, index + 1))
               }}
             >
               <span aria-hidden="true">↓</span>

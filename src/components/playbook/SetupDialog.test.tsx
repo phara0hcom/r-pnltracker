@@ -69,9 +69,14 @@ describe('SetupDialog', () => {
     const onClose = vi.fn()
     open(SETUP, { onClose })
 
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: /Move criterion 1 up/ }).disabled).toBe(true)
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: /Move criterion 2 down/ }).disabled).toBe(true)
-    await user.click(screen.getByRole('button', { name: /Move criterion 2 up/ }))
+    expect(screen.getByRole('button', { name: /Move criterion 1 up/ }).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('button', { name: /Move criterion 2 down/ }).getAttribute('aria-disabled')).toBe('true')
+    const moveUp = screen.getByRole('button', { name: /Move criterion 2 up/ })
+    await user.click(moveUp)
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Criterion 1' }).value).toBe('Volume')
+    // The button went to the top with its row and is now at the end: it keeps focus, and does nothing.
+    expect(document.activeElement).toBe(moveUp)
+    await user.click(moveUp)
     expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Criterion 1' }).value).toBe('Volume')
     await user.click(screen.getByRole('button', { name: 'Save' }))
 

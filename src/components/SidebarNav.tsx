@@ -10,7 +10,7 @@
  * over the whole screen, where there is no width to save.
  */
 import * as Tooltip from '@radix-ui/react-tooltip'
-import { Link } from '@tanstack/react-router'
+import { Link, useRouterState } from '@tanstack/react-router'
 import { NAV_ICONS, type NavRoute } from './icons/NavIcons'
 import styles from './SidebarNav.module.scss'
 import { clearSavedCopies } from '~/components/offline/offlineStore'
@@ -30,6 +30,7 @@ const NAV: { to: NavRoute; label: string; remembersMarket?: true }[] = [
   { to: '/trades', label: 'Trades' },
   { to: '/positions', label: 'Positions', remembersMarket: true },
   { to: '/playbook', label: 'Playbook' },
+  { to: '/playbook/setups', label: 'Setups' },
   { to: '/dividends', label: 'Dividends' },
   { to: '/calendar', label: 'Calendar' },
   { to: '/stats', label: 'Stats' },
@@ -38,6 +39,18 @@ const NAV: { to: NavRoute; label: string; remembersMarket?: true }[] = [
   { to: '/import', label: 'Import' },
   { to: '/settings', label: 'Settings' },
 ]
+
+const isUnder = (pathname: string, to: string) => pathname === to || pathname.startsWith(`${to}/`)
+
+/**
+ * Whether a deeper entry of the nav owns `pathname`, so `to` must not light up
+ * as well. Playbook matches `/playbook/setups` by prefix, and two current links
+ * — two `aria-current="page"` — say nothing about where you are. Only then is
+ * the match made exact: a position page, under Playbook and under nothing
+ * deeper, still marks Playbook.
+ */
+const shadowed = (pathname: string, to: NavRoute) =>
+  NAV.some((other) => other.to !== to && other.to.startsWith(`${to}/`) && isUnder(pathname, other.to))
 
 /**
  * Wraps a control in a tooltip only while the rail is collapsed.
@@ -78,6 +91,7 @@ export function SidebarNav({
 }) {
   const [account] = useAccountFilter()
   const market = useRememberedMarketParam()
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
 
   return (
     /*
@@ -112,7 +126,7 @@ export function SidebarNav({
                   // would take you back to, not what the screen must show for
                   // the link to be the current one — Positions on JP is still
                   // Positions when the remembered market is US.
-                  activeOptions={{ includeSearch: false }}
+                  activeOptions={{ includeSearch: false, exact: shadowed(pathname, item.to) }}
                   className={cx(styles.navLink, collapsed && styles.navLinkRail)}
                   activeProps={{
                     className: cx(

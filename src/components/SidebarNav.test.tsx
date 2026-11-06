@@ -25,6 +25,8 @@ const ROUTES = [
   '/trades',
   '/positions',
   '/playbook',
+  '/playbook/setups',
+  '/playbook/$journalId',
   '/dividends',
   '/calendar',
   '/stats',
@@ -39,7 +41,7 @@ const ROUTES = [
  * route. The router resolves asynchronously — nothing is in the DOM on the
  * first tick — so every query below is a `find*`.
  */
-function renderNav(collapsed: boolean) {
+function renderNav(collapsed: boolean, at = '/dashboard') {
   const rootRoute = createRootRoute({
     component: () => <SidebarNav user={user} collapsed={collapsed} />,
   })
@@ -48,7 +50,7 @@ function renderNav(collapsed: boolean) {
   )
   const router = createRouter({
     routeTree: rootRoute,
-    history: createMemoryHistory({ initialEntries: ['/dashboard'] }),
+    history: createMemoryHistory({ initialEntries: [at] }),
   })
   return render(<RouterProvider router={router} />)
 }
@@ -95,5 +97,19 @@ describe('SidebarNav', () => {
     renderNav(true)
     await screen.findByRole('link', { name: 'Positions' })
     expect(screen.queryByText('tamer@example.com')).toBeNull()
+  })
+
+  it('marks Setups alone as current on the Setups page, not Playbook too', async () => {
+    renderNav(false, '/playbook/setups')
+    const setups = await screen.findByRole('link', { name: 'Setups' })
+    expect(setups.getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('link', { name: 'Playbook' }).getAttribute('aria-current')).toBeNull()
+  })
+
+  it('still marks Playbook on a position page beneath it', async () => {
+    renderNav(false, '/playbook/abc')
+    const playbook = await screen.findByRole('link', { name: 'Playbook' })
+    expect(playbook.getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('link', { name: 'Setups' }).getAttribute('aria-current')).toBeNull()
   })
 })
